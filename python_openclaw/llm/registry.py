@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from python_openclaw.llm.providers import ModelProvider, provider_from_ref
@@ -11,6 +11,7 @@ from python_openclaw.llm.providers import ModelProvider, provider_from_ref
 class AgentModelDefaults:
     primary: str
     fallbacks: list[str]
+    aliases: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -21,10 +22,16 @@ class OpenClawConfig:
     def load(cls, path: Path) -> "OpenClawConfig":
         raw = json.loads(path.read_text(encoding="utf-8"))
         defaults = raw.get("agents", {}).get("defaults", {}).get("model", {})
+        aliases = defaults.get("aliases", {})
+        if "best" not in aliases:
+            aliases["best"] = defaults.get("primary", "openai/best")
+        if "flash" not in aliases:
+            aliases["flash"] = "openai/flash"
         return cls(
             agent_defaults=AgentModelDefaults(
                 primary=defaults.get("primary", "openai/best"),
                 fallbacks=list(defaults.get("fallbacks", [])),
+                aliases={str(k).lower(): str(v) for k, v in aliases.items()},
             )
         )
 
@@ -34,11 +41,17 @@ class ModelResolver:
         self.config = config
         self.api_keys = api_keys or {}
 
+    def _expand_alias(self, model_ref: str | None) -> str:
+        if not model_ref:
+            return self.config.agent_defaults.primary
+        key = model_ref.lower()
+        return self.config.agent_defaults.aliases.get(key, model_ref)
+
     def resolve(self, model_ref: str | None = None) -> ModelProvider:
-        chosen = model_ref or self.config.agent_defaults.primary
+        chosen = self._expand_alias(model_ref)
         return provider_from_ref(chosen, api_keys=self.api_keys)
 
     def resolve_chain(self, model_ref: str | None = None) -> list[ModelProvider]:
-        primary_ref = model_ref or self.config.agent_defaults.primary
+        primary_ref = self._expand_alias(model_ref)
         refs = [primary_ref, *self.config.agent_defaults.fallbacks]
-        return [provider_from_ref(ref, api_keys=self.api_keys) for ref in refs]
+        return [provider_from_ref(self._expand_alias(ref), api_keys=self.api_keys) for ref in refs]

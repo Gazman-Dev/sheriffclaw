@@ -77,3 +77,58 @@ class TelegramSecureBotAdapter:
             await self.bot_client.send_message(chat_id, f"Approved {approval_id}. token={token}")
         else:
             await self.bot_client.send_message(chat_id, f"Denied {approval_id}")
+
+
+class TelegramSecureBotRunner:
+    def __init__(self, adapter: TelegramSecureBotAdapter, token: str):
+        self.adapter = adapter
+        self.token = token
+
+    async def run_polling(self) -> None:
+        try:
+            from aiogram import Bot, Dispatcher, F
+            from aiogram.enums import ParseMode
+            from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError("aiogram is required for Telegram polling") from exc
+
+        bot = Bot(self.token, parse_mode=ParseMode.HTML)
+        dp = Dispatcher()
+
+        async def send_approval(chat_id: int, approval_id: str, summary: dict) -> None:
+            text = (
+                f"Agent wants to access {summary.get('host')}\n"
+                f"{summary.get('method')} {summary.get('path')}\n"
+                f"Principal: {summary.get('principal')}"
+            )
+            kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="Approve Once", callback_data=f"approval:{approval_id}:approve_once"),
+                        InlineKeyboardButton(text="Always Allow", callback_data=f"approval:{approval_id}:always_allow"),
+                        InlineKeyboardButton(text="Deny", callback_data=f"approval:{approval_id}:deny"),
+                    ]
+                ]
+            )
+            await bot.send_message(chat_id, text, reply_markup=kb)
+
+        self.adapter.bot_client.send_approval = send_approval
+
+        @dp.message()
+        async def secure_message_handler(message: Message) -> None:
+            if message.text:
+                await self.adapter.on_message(message.from_user.id, message.chat.id, message.text)
+
+        @dp.callback_query(F.data.startswith("approval:"))
+        async def approval_callback(callback: CallbackQuery) -> None:
+            _, approval_id, action = callback.data.split(":", 2)
+            await self.adapter.on_approval_callback(
+                approval_id,
+                approved=action in {"approve_once", "always_allow"},
+                chat_id=callback.message.chat.id,
+                user_id=callback.from_user.id,
+                action=action,
+            )
+            await callback.answer("Recorded")
+
+        await dp.start_polling(bot)

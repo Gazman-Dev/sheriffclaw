@@ -24,14 +24,21 @@ class WorkspaceContext:
 class WorkspaceLoader:
     def __init__(self, workspace_dir: Path):
         self.workspace_dir = workspace_dir
+        self._cache: dict[str, tuple[float | None, str]] = {}
 
     def load(self) -> WorkspaceContext:
         return WorkspaceContext(
-            agents=_read_optional(self.workspace_dir / "AGENTS.md"),
-            soul=_read_optional(self.workspace_dir / "SOUL.md"),
-            user=_read_optional(self.workspace_dir / "USER.md"),
+            agents=self._read_cached("AGENTS.md"),
+            soul=self._read_cached("SOUL.md"),
+            user=self._read_cached("USER.md"),
         )
 
-
-def _read_optional(path: Path) -> str:
-    return path.read_text(encoding="utf-8") if path.exists() else ""
+    def _read_cached(self, name: str) -> str:
+        path = self.workspace_dir / name
+        mtime = (path.stat().st_mtime_ns, path.stat().st_size) if path.exists() else None
+        cached = self._cache.get(name)
+        if cached and cached[0] == mtime:
+            return cached[1]
+        content = path.read_text(encoding="utf-8") if path.exists() else ""
+        self._cache[name] = (mtime, content)
+        return content

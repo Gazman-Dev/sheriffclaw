@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import inspect
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from python_openclaw.common.ndjson import append_jsonl, iter_jsonl
 
@@ -27,14 +29,23 @@ class SessionManager:
             return []
         return list(iter_jsonl(path))
 
-    def maybe_compact(self, session_key: str, summary_model: callable) -> bool:
+    async def maybe_compact(self, session_key: str, summary_model: Any) -> bool:
         events = self.read(session_key)
         token_estimate = sum(_estimate_tokens(e) for e in events)
         if token_estimate <= self.config.token_limit:
             return False
+
         summary = summary_model(events)
-        keep = [e for e in events if e.get("role") == "system"]
-        compacted = keep + [{"role": "system", "content": f"Conversation summary: {summary}"}] + events[-8:]
+        if inspect.isawaitable(summary):
+            summary = await summary
+
+        system_events = [e for e in events if e.get("role") == "system"]
+        tail_events = events[-8:]
+        compacted = [
+            *system_events,
+            {"role": "system", "content": f"Summary of previous conversation: {summary}"},
+            *tail_events,
+        ]
         path = self._session_path(session_key)
         path.write_text("\n".join(json.dumps(e) for e in compacted) + "\n", encoding="utf-8")
         return True

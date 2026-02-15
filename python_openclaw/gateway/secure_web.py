@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from python_openclaw.gateway.policy import GatewayPolicy, PolicyViolation
 from python_openclaw.gateway.secrets.store import SecretStore
+from python_openclaw.security.permissions import PermissionEnforcer
 
 
 class SecureWebError(Exception):
@@ -25,17 +26,20 @@ class SecureWebConfig:
 
 
 class SecureWebRequester:
-    def __init__(self, policy: GatewayPolicy, secrets: SecretStore, config: SecureWebConfig) -> None:
+    def __init__(self, policy: GatewayPolicy, secrets: SecretStore, config: SecureWebConfig, permission_enforcer: PermissionEnforcer | None = None) -> None:
         self.policy = policy
         self.secrets = secrets
         self.config = config
+        self.permission_enforcer = permission_enforcer
 
-    def request(self, payload: dict) -> dict:
+    def request(self, payload: dict, *, principal_id: str | None = None) -> dict:
         method = payload["method"].upper()
         scheme = payload.get("scheme", "https")
         if scheme != "https":
             raise SecureWebError("https only")
         host = payload["host"]
+        if principal_id and self.permission_enforcer:
+            self.permission_enforcer.ensure_allowed(principal_id, "domain", host, {"path": payload.get("path")})
         path = payload["path"]
         query = payload.get("query") or {}
         headers = payload.get("headers") or {}

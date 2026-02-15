@@ -24,6 +24,12 @@ class FakeBotClient:
     async def send_approval(self, chat_id, approval_id, summary):
         self.approvals.append((chat_id, approval_id, summary))
 
+    async def send_photo(self, session_key, payload):
+        self.messages.append((session_key, payload))
+
+    async def send_document(self, session_key, payload):
+        self.messages.append((session_key, payload))
+
 
 class FakeGateway:
     def __init__(self):

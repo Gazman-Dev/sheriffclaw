@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from python_openclaw.gateway.approvals import ApprovalManager
 from python_openclaw.gateway.secrets.store import SecretStore
 from python_openclaw.gateway.sessions import IdentityManager
+from python_openclaw.security.gate import ApprovalGate
 
 
 @dataclass
@@ -13,6 +14,7 @@ class TelegramSecureBotAdapter:
     approvals: ApprovalManager
     secrets: SecretStore
     bot_client: object
+    approval_gate: ApprovalGate | None = None
     pending_setsecret: dict[int, str] = field(default_factory=dict)
 
     async def on_message(self, user_id: int, chat_id: int, text: str) -> None:
@@ -55,10 +57,21 @@ class TelegramSecureBotAdapter:
                 "host": p.get("host"),
                 "path": p.get("path"),
                 "auth_handle": p.get("auth_handle"),
+                "buttons": ["approve_once", "always_allow", "deny"],
             },
         )
 
-    async def on_approval_callback(self, approval_id: str, approved: bool, chat_id: int) -> None:
+    async def on_approval_callback(self, approval_id: str, approved: bool, chat_id: int, *, user_id: int | None = None, action: str | None = None) -> None:
+        if user_id is not None and not self.identities.is_operator_allowed(user_id):
+            await self.bot_client.send_message(chat_id, "Unauthorized callback")
+            return
+
+        if self.approval_gate and action:
+            prompt = self.approval_gate.apply_callback(approval_id, action)
+            if prompt:
+                await self.bot_client.send_message(chat_id, f"Recorded {action} for {prompt.resource_type}:{prompt.resource_value}")
+                return
+
         token = self.approvals.decide(approval_id, approved)
         if approved:
             await self.bot_client.send_message(chat_id, f"Approved {approval_id}. token={token}")

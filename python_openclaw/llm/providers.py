@@ -40,6 +40,18 @@ class ModelProvider(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def convert_messages(self, messages: list[dict]) -> dict:
+        raise NotImplementedError
+
+    @abstractmethod
+    def convert_tools(self, tools: list[dict] | None) -> dict:
+        raise NotImplementedError
+
+    @abstractmethod
+    def parse_tool_calls(self, payload: dict) -> list[ToolCall]:
+        raise NotImplementedError
+
+    @abstractmethod
     def models_list(self) -> list[str]:
         raise NotImplementedError
 
@@ -64,7 +76,7 @@ class OpenAIProvider(ModelProvider):
     def __init__(self, api_key: str, *, base_url: str = "https://api.openai.com/v1"):
         super().__init__(
             api_key,
-            model_map={"openai/best": "gpt-5.2", "openai/flash": "gpt-5.2-instant"},
+            model_map={"openai/best": "gpt-4o", "openai/flash": "gpt-4o-mini"},
             base_url=base_url,
         )
 
@@ -72,9 +84,7 @@ class OpenAIProvider(ModelProvider):
         return sorted(set(self.model_map.values()))
 
     async def chat_completion(self, model: str, messages: list[dict], tools: list[dict] | None = None) -> AsyncIterator[NormalizedChunk]:
-        payload = {"model": self._resolve_model(model), "messages": _normalize_openai_messages(messages)}
-        if tools:
-            payload["tools"] = tools
+        payload = {"model": self._resolve_model(model), **self.convert_messages(messages), **self.convert_tools(tools)}
         response = await self._request_json(
             f"{self.base_url}/chat/completions",
             payload,
@@ -83,22 +93,35 @@ class OpenAIProvider(ModelProvider):
         choice = (response.get("choices") or [{}])[0]
         message = choice.get("message") or {}
         content = message.get("content") or ""
-        calls = []
-        for tc in message.get("tool_calls") or []:
-            fn = tc.get("function") or {}
-            try:
-                args = json.loads(fn.get("arguments") or "{}")
-            except json.JSONDecodeError:
-                args = {}
-            calls.append(ToolCall(id=tc.get("id", ""), name=fn.get("name", ""), arguments=args))
+        calls = self.parse_tool_calls(message)
         yield NormalizedChunk(content=content, tool_calls=calls or None, done=True)
+
+    def convert_messages(self, messages: list[dict]) -> dict:
+        return {"messages": _normalize_openai_messages(messages)}
+
+    def convert_tools(self, tools: list[dict] | None) -> dict:
+        return {"tools": tools} if tools else {}
+
+    def parse_tool_calls(self, payload: dict) -> list[ToolCall]:
+        calls = []
+        for tc in payload.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            raw_args = fn.get("arguments")
+            if not isinstance(raw_args, str):
+                raise LLMProviderError("OpenAI tool arguments must be JSON string")
+            try:
+                args = json.loads(raw_args)
+            except json.JSONDecodeError as exc:
+                raise LLMProviderError("OpenAI tool arguments are invalid JSON") from exc
+            calls.append(ToolCall(id=tc.get("id", ""), name=fn.get("name", ""), arguments=args))
+        return calls
 
 
 class AnthropicProvider(ModelProvider):
     def __init__(self, api_key: str):
         super().__init__(
             api_key,
-            model_map={"anthropic/claude-best": "claude-4.6-sonnet", "anthropic/claude-opus": "claude-4.6-opus", "anthropic/flash": "claude-3-haiku"},
+            model_map={"anthropic/claude-best": "claude-3-5-sonnet", "anthropic/flash": "claude-3-haiku"},
             base_url="https://api.anthropic.com/v1",
         )
 
@@ -106,12 +129,7 @@ class AnthropicProvider(ModelProvider):
         return sorted(set(self.model_map.values()))
 
     async def chat_completion(self, model: str, messages: list[dict], tools: list[dict] | None = None) -> AsyncIterator[NormalizedChunk]:
-        system, anthropic_messages = _normalize_anthropic_messages(messages)
-        payload = {"model": self._resolve_model(model), "messages": anthropic_messages, "max_tokens": 2048}
-        if system:
-            payload["system"] = system
-        if tools:
-            payload["tools"] = tools
+        payload = {"model": self._resolve_model(model), "max_tokens": 2048, **self.convert_messages(messages), **self.convert_tools(tools)}
         response = await self._request_json(
             f"{self.base_url}/messages",
             payload,
@@ -123,26 +141,35 @@ class AnthropicProvider(ModelProvider):
         )
         content_items = response.get("content") or []
         text_bits: list[str] = []
-        calls: list[ToolCall] = []
+        calls = self.parse_tool_calls({"content": content_items})
         for item in content_items:
             if item.get("type") == "text":
                 text_bits.append(item.get("text", ""))
-            if item.get("type") == "tool_use":
-                calls.append(
-                    ToolCall(
-                        id=item.get("id", ""),
-                        name=item.get("name", ""),
-                        arguments=item.get("input") or {},
-                    )
-                )
         yield NormalizedChunk(content="".join(text_bits), tool_calls=calls or None, done=True)
+
+    def convert_messages(self, messages: list[dict]) -> dict:
+        system, anthropic_messages = _normalize_anthropic_messages(messages)
+        payload = {"messages": anthropic_messages}
+        if system:
+            payload["system"] = system
+        return payload
+
+    def convert_tools(self, tools: list[dict] | None) -> dict:
+        return {"tools": [t.get("function", t) for t in tools]} if tools else {}
+
+    def parse_tool_calls(self, payload: dict) -> list[ToolCall]:
+        calls: list[ToolCall] = []
+        for item in payload.get("content") or []:
+            if item.get("type") == "tool_use":
+                calls.append(ToolCall(id=item.get("id", ""), name=item.get("name", ""), arguments=item.get("input") or {}))
+        return calls
 
 
 class GoogleProvider(ModelProvider):
     def __init__(self, api_key: str):
         super().__init__(
             api_key,
-            model_map={"google/best": "gemini-3.0-pro", "google/flash": "gemini-3.0-flash"},
+            model_map={"google/best": "gemini-1.5-pro", "google/flash": "gemini-1.5-flash"},
             base_url="https://generativelanguage.googleapis.com/v1beta",
         )
 
@@ -150,9 +177,7 @@ class GoogleProvider(ModelProvider):
         return sorted(set(self.model_map.values()))
 
     async def chat_completion(self, model: str, messages: list[dict], tools: list[dict] | None = None) -> AsyncIterator[NormalizedChunk]:
-        payload = {"contents": _normalize_gemini_contents(messages)}
-        if tools:
-            payload["tools"] = [{"functionDeclarations": [t["function"] for t in tools if "function" in t]}]
+        payload = {**self.convert_messages(messages), **self.convert_tools(tools)}
         response = await self._request_json(
             f"{self.base_url}/models/{self._resolve_model(model)}:generateContent?key={self.api_key}",
             payload,
@@ -161,20 +186,34 @@ class GoogleProvider(ModelProvider):
         candidates = response.get("candidates") or []
         parts = (((candidates[0] if candidates else {}).get("content") or {}).get("parts") or [])
         content_bits: list[str] = []
-        calls: list[ToolCall] = []
+        calls = self.parse_tool_calls({"parts": parts})
         for part in parts:
             if "text" in part:
                 content_bits.append(part["text"])
+        yield NormalizedChunk(content="".join(content_bits), tool_calls=calls or None, done=True)
+
+    def convert_messages(self, messages: list[dict]) -> dict:
+        return {"contents": _normalize_gemini_contents(messages)}
+
+    def convert_tools(self, tools: list[dict] | None) -> dict:
+        if not tools:
+            return {}
+        declarations = [t["function"] for t in tools if "function" in t]
+        return {"tools": [{"functionDeclarations": declarations}]}
+
+    def parse_tool_calls(self, payload: dict) -> list[ToolCall]:
+        calls: list[ToolCall] = []
+        for part in payload.get("parts") or []:
             if "functionCall" in part:
                 fn = part["functionCall"]
                 calls.append(ToolCall(id=fn.get("name", ""), name=fn.get("name", ""), arguments=fn.get("args") or {}))
-        yield NormalizedChunk(content="".join(content_bits), tool_calls=calls or None, done=True)
+        return calls
 
 
 class MoonshotProvider(OpenAIProvider):
     def __init__(self, api_key: str):
         super().__init__(api_key, base_url="https://api.moonshot.cn/v1")
-        self.model_map.update({"moonshot/kimi-best": "kimi-k2.5", "moonshot/flash": "kimi-k2.5"})
+        self.model_map.update({"moonshot/kimi-best": "moonshot-v1-128k", "moonshot/flash": "moonshot-v1-8k"})
 
 
 def _normalize_openai_messages(messages: list[dict]) -> list[dict]:

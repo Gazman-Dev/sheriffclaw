@@ -7,6 +7,10 @@ from python_openclaw.gateway.core import GatewayCore
 from python_openclaw.gateway.sessions import IdentityManager
 
 
+def markdown_to_telegram_html(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 @dataclass
 class TelegramLLMBotAdapter:
     gateway: GatewayCore
@@ -41,14 +45,24 @@ class TelegramLLMBotAdapter:
         if content.file_url:
             await self.bot_client.send_document(session_key, content.file_url)
             return
-        await self.bot_client.send_message_stream(session_key, content.text or "")
+        await self.bot_client.send_message_stream(session_key, markdown_to_telegram_html(content.text or ""))
 
     async def send_stream(self, session_key: str, event: dict) -> None:
         payload = event["payload"]
         if event["stream"] == "assistant.delta":
             await self.send_message(session_key, ChannelContent(text=payload["delta"]))
         elif event["stream"] == "assistant.final":
-            await self.send_message(session_key, ChannelContent(text=payload["content"]))
+            if payload.get("image_url") or payload.get("image_base64"):
+                await self.send_message(
+                    session_key,
+                    ChannelContent(
+                        text=payload.get("content"),
+                        image_url=payload.get("image_url"),
+                        image_base64=payload.get("image_base64"),
+                    ),
+                )
+            else:
+                await self.send_message(session_key, ChannelContent(text=payload.get("content", "")))
         elif event["stream"] == "tool.result" and payload.get("status") == "approval_required":
             summary = payload["summary"]
             await self.send_message(
@@ -89,3 +103,34 @@ class TelegramLLMBotAdapter:
             text=msg.get("text"),
             raw_payload=raw_payload,
         )
+
+
+class TelegramLLMBotRunner:
+    def __init__(self, adapter: TelegramLLMBotAdapter, token: str):
+        self.adapter = adapter
+        self.token = token
+
+    async def run_polling(self) -> None:
+        try:
+            from aiogram import Bot, Dispatcher
+            from aiogram.enums import ParseMode
+            from aiogram.filters import CommandStart
+            from aiogram.types import Message
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError("aiogram is required for Telegram polling") from exc
+
+        bot = Bot(self.token, parse_mode=ParseMode.HTML)
+        dp = Dispatcher()
+
+        @dp.message(CommandStart())
+        async def start_handler(message: Message) -> None:
+            await bot.send_message(message.chat.id, "OpenClaw agent online")
+
+        @dp.message()
+        async def message_handler(message: Message) -> None:
+            if not message.text:
+                return
+            thread_id = message.message_thread_id if getattr(message, "is_topic_message", False) else None
+            await self.adapter.on_message(message.from_user.id, message.chat.id, message.text, thread_id)
+
+        await dp.start_polling(bot)

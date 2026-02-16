@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol
@@ -54,6 +55,9 @@ class GatewayCore:
         approval_gate: ApprovalGate,
         tools: ToolsService,
         requests: RequestService,
+        *,
+        locked_predicate: Callable[[], bool] | None = None,
+        identity_persist_callback: Callable[[dict], None] | None = None,
     ) -> None:
         self.identities = identities
         self.transcripts = transcripts
@@ -67,6 +71,13 @@ class GatewayCore:
         self.pending_secret_inputs = {}
         self.tool_output_store = {}
         self._tool_output_order: deque[str] = deque(maxlen=100)
+        self._locked_predicate = locked_predicate or (lambda: False)
+        self._identity_persist_callback = identity_persist_callback
+        self.identities.set_on_change(self._persist_identity_state)
+
+    def _persist_identity_state(self) -> None:
+        if self._identity_persist_callback:
+            self._identity_persist_callback(self.identities.to_dict())
 
     def set_secure_gate_adapter(self, adapter: SecureGateAdapter) -> None:
         self.secure_gate_adapter = adapter
@@ -96,8 +107,13 @@ class GatewayCore:
     ) -> None:
         skey = session_key(channel, context)
         self.transcripts.append(skey, {"type": "user", "content": text})
-        messages = [{"role": "user", "content": text}]
 
+        if self._locked_predicate():
+            self.transcripts.append(skey, {"type": "locked_attempt", "content": text})
+            await adapter.send_stream(skey, {"stream": "assistant.final", "payload": {"content": "System locked; unlock required."}})
+            return
+
+        messages = [{"role": "user", "content": text}]
         async for event in self.ipc_client.run_agent(skey, messages):
             stream = event["stream"]
             self.transcripts.append(skey, {"type": stream, **event["payload"]})
@@ -110,13 +126,7 @@ class GatewayCore:
     def _handle_tool_call(self, principal: Principal, event_payload: dict) -> dict:
         return asyncio.run(self._handle_tool_call_async(principal, event_payload, None, ""))
 
-    async def _handle_tool_call_async(
-        self,
-        principal: Principal,
-        event_payload: dict,
-        adapter: ChannelAdapter | None,
-        source_session_key: str,
-    ) -> dict:
+    async def _handle_tool_call_async(self, principal: Principal, event_payload: dict, adapter: ChannelAdapter | None, source_session_key: str) -> dict:
         tool_name = event_payload["tool_name"]
         payload = event_payload.get("payload", {})
         reason = event_payload.get("reason")
@@ -217,12 +227,7 @@ class GatewayCore:
                     principal_id=principal.principal_id,
                     resource_type=payload.get("resource_type", payload.get("type", "domain")),
                     resource_value=payload.get("resource_value", payload.get("target", payload.get("host", "unknown"))),
-                    metadata={
-                        "reason": reason,
-                        "method": payload.get("method"),
-                        "path": payload.get("path"),
-                        "body": body_summary(payload.get("body")),
-                    },
+                    metadata={"reason": reason, "method": payload.get("method"), "path": payload.get("path"), "body": body_summary(payload.get("body"))},
                 )
             )
             await self._send_approval_request(prompt.approval_id, prompt, adapter, source_session_key)
@@ -245,6 +250,7 @@ class GatewayCore:
                 resource_type=exc.resource_type,
                 resource_value=exc.resource_value,
                 metadata={
+                    **exc.metadata,
                     "reason": reason,
                     "method": payload.get("method"),
                     "path": payload.get("path"),
@@ -271,7 +277,6 @@ class GatewayCore:
                 await adapter.send_stream(source_session_key, {"stream": "tool.result", "payload": {"status": "approval_requested"}})
         elif adapter is not None:
             await adapter.send_approval_request(approval_id, context)
-
 
     def _dispatch_disclosure_decision(self, approved: bool, metadata: dict) -> None:
         try:

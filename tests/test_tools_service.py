@@ -23,7 +23,14 @@ def test_tools_service_requires_tool_permission(tmp_path: Path):
     tools = ToolsService(store, secrets)
 
     with pytest.raises(PermissionDeniedException):
-        tools.execute({"command": "echo hello"}, principal_id="u1")
+        tools.execute({"argv": ["echo", "hello"]}, principal_id="u1")
+
+
+def test_tools_service_rejects_command_field(tmp_path: Path):
+    tools = _tools(tmp_path)
+    result = tools.execute({"command": "echo hello"}, principal_id="u1")
+    assert result["status"] == "error"
+    assert "not supported" in result["error"]
 
 
 def test_tools_service_no_secret_substitution(tmp_path: Path):
@@ -39,9 +46,15 @@ def test_tools_service_no_secret_substitution(tmp_path: Path):
     assert "placeholders" in result["error"]
 
 
-def test_tools_service_rejects_placeholder_in_command(tmp_path: Path):
+def test_tools_service_rejects_placeholder_in_argv(tmp_path: Path):
     tools = _tools(tmp_path)
-    result = tools.execute({"command": "python3 -c 'print(1)' {missing}"}, principal_id="u1")
+    result = tools.execute({"argv": ["python3", "-c", "print(1)", "{missing}"]}, principal_id="u1")
+    assert result["status"] == "error"
+
+
+def test_tools_service_rejects_suspicious_shell_tokens(tmp_path: Path):
+    tools = _tools(tmp_path)
+    result = tools.execute({"argv": ["python3", "-c", "print('x')", "&&"]}, principal_id="u1")
     assert result["status"] == "error"
 
 

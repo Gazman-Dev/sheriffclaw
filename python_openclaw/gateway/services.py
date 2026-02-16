@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shlex
 import subprocess
 import uuid
 from dataclasses import dataclass
@@ -9,6 +8,7 @@ from python_openclaw.gateway.secrets.store import SecretStore
 from python_openclaw.security.permissions import PermissionDeniedException, PermissionStore
 
 TAINTED_TOOLS = {"gh"}
+SUSPICIOUS_ARG_TOKENS = {"|", "&&", ";", ">", "<", "`"}
 
 
 @dataclass
@@ -25,32 +25,27 @@ class ToolsService:
         self.secrets = secrets
 
     def execute(self, payload: dict, *, principal_id: str) -> dict:
-        command = payload.get("command")
+        if payload.get("command") is not None:
+            return {"status": "error", "error": "command field is not supported; use argv"}
+
         argv = payload.get("argv")
         stdin = payload.get("stdin")
 
-        if not command and not argv:
-            return {"status": "error", "error": "command or argv is required"}
+        if not isinstance(argv, list) or not argv:
+            return {"status": "error", "error": "argv is required"}
 
-        parts = shlex.split(command) if command else [str(p) for p in argv]
-        if not parts:
-            return {"status": "error", "error": "empty command"}
-
+        parts = [str(p) for p in argv]
         if any(_contains_secret_placeholder(part) for part in parts):
             return {"status": "error", "error": "secret placeholders are not supported in tool calls"}
         if isinstance(stdin, str) and _contains_secret_placeholder(stdin):
             return {"status": "error", "error": "secret placeholders are not supported in tool stdin"}
+        if _contains_suspicious_token(parts):
+            return {"status": "error", "error": "argv contains disallowed shell control token"}
 
         binary = parts[0]
         self._ensure_tool_allowed(principal_id, binary)
 
-        proc = subprocess.run(
-            parts,
-            input=stdin,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        proc = subprocess.run(parts, input=stdin, capture_output=True, text=True, check=False)
         tainted = bool(payload.get("taint")) or binary in TAINTED_TOOLS
         run_id = payload.get("run_id") or uuid.uuid4().hex
         if tainted:
@@ -100,3 +95,12 @@ class RequestService:
 
 def _contains_secret_placeholder(value: str) -> bool:
     return "{" in value and "}" in value
+
+
+def _contains_suspicious_token(argv: list[str]) -> bool:
+    for arg in argv:
+        if arg in SUSPICIOUS_ARG_TOKENS:
+            return True
+        if "$(" in arg:
+            return True
+    return False

@@ -5,9 +5,10 @@ import asyncio
 from python_openclaw.channels.telegram_llm_bot import TelegramLLMBotAdapter
 from python_openclaw.channels.telegram_secure_bot import TelegramSecureBotAdapter
 from python_openclaw.common.models import Binding, Principal
-from python_openclaw.gateway.approvals import ApprovalManager
 from python_openclaw.gateway.sessions import IdentityManager
 from python_openclaw.gateway.secrets.store import SecretStore
+from python_openclaw.security.gate import ApprovalGate
+from python_openclaw.security.permissions import PermissionDeniedException, PermissionStore
 
 
 class FakeBotClient:
@@ -59,18 +60,19 @@ def test_secure_bot_commands_and_approval_format(tmp_path: Path):
     identities = IdentityManager()
     identities.allow_operator(42)
     bot = FakeBotClient()
-    approvals = ApprovalManager()
     secrets = SecretStore(tmp_path / "secrets.enc")
-    adapter = TelegramSecureBotAdapter(identities=identities, approvals=approvals, secrets=secrets, bot_client=bot)
+    approval_gate = ApprovalGate(PermissionStore(tmp_path / "permissions.db"))
+    adapter = TelegramSecureBotAdapter(identities=identities, secrets=secrets, bot_client=bot, approval_gate=approval_gate)
 
     asyncio.run(adapter.on_message(42, 10, "/unlock pw"))
     asyncio.run(adapter.on_message(42, 10, "/setsecret github"))
     asyncio.run(adapter.on_message(42, 10, "Bearer abc"))
     asyncio.run(adapter.on_message(42, 10, "/allow 100"))
 
-    req = approvals.request("u1", "secure.web.request", {"method": "GET", "host": "api.github.com", "path": "/user", "auth_handle": "github"})
-    asyncio.run(adapter.send_approval_request(10, req))
-    assert bot.approvals[0][2]["auth_handle"] == "github"
+    assert any("Secret github stored." in text for _, text in bot.messages)
 
-    asyncio.run(adapter.on_approval_callback(req.approval_id, True, 10))
-    assert "token=" in bot.messages[-1][1]
+    prompt = approval_gate.request(PermissionDeniedException("u1", "domain", "api.github.com"))
+    asyncio.run(adapter.on_approval_callback(prompt.approval_id, 10, user_id=42, action="always_allow"))
+    decision = approval_gate.store.get_decision("u1", "domain", "api.github.com")
+    assert decision and decision.decision == "ALLOW"
+

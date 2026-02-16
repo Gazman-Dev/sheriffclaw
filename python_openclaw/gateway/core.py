@@ -6,9 +6,8 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 from python_openclaw.common.models import Principal
-from python_openclaw.gateway.approvals import ApprovalManager
 from python_openclaw.gateway.ipc_server import IPCClient
-from python_openclaw.gateway.secure_web import SecureWebRequester, body_summary
+from python_openclaw.gateway.secure_web import SecureWebError, SecureWebRequester, body_summary
 from python_openclaw.gateway.sessions import IdentityManager, session_key
 from python_openclaw.gateway.transcript import TranscriptStore
 from python_openclaw.security.gate import ApprovalGate
@@ -27,9 +26,8 @@ class GatewayCore:
     transcripts: TranscriptStore
     ipc_client: IPCClient
     secure_web: SecureWebRequester
-    approvals: ApprovalManager
+    approval_gate: ApprovalGate
     audit_log: list[dict]
-    approval_gate: ApprovalGate | None
 
     def __init__(
         self,
@@ -37,14 +35,12 @@ class GatewayCore:
         transcripts: TranscriptStore,
         ipc_client: IPCClient,
         secure_web: SecureWebRequester,
-        approvals: ApprovalManager,
-        approval_gate: ApprovalGate | None = None,
+        approval_gate: ApprovalGate,
     ) -> None:
         self.identities = identities
         self.transcripts = transcripts
         self.ipc_client = ipc_client
         self.secure_web = secure_web
-        self.approvals = approvals
         self.approval_gate = approval_gate
         self.audit_log = []
 
@@ -73,9 +69,15 @@ class GatewayCore:
     def _handle_tool_call(self, principal: Principal, event_payload: dict) -> dict:
         return asyncio.run(self._handle_tool_call_async(principal, event_payload, None, ""))
 
-    async def _handle_tool_call_async(self, principal: Principal, event_payload: dict, adapter: ChannelAdapter | None, source_session_key: str) -> dict:
+    async def _handle_tool_call_async(
+        self,
+        principal: Principal,
+        event_payload: dict,
+        adapter: ChannelAdapter | None,
+        source_session_key: str,
+    ) -> dict:
         tool_name = event_payload["tool_name"]
-        payload = event_payload["payload"]
+        payload = event_payload.get("payload", {})
         reason = event_payload.get("reason")
 
         if tool_name == "secure.secret.ensure":
@@ -85,54 +87,49 @@ class GatewayCore:
 
         if tool_name == "secure.web.request":
             try:
-                if payload.get("auth_handle"):
-                    req = self.approvals.request(principal.principal_id, tool_name, payload, reason)
-                    return {
-                        "tool_name": tool_name,
-                        "status": "approval_required",
-                        "approval_id": req.approval_id,
-                        "summary": {
-                            "principal": principal.principal_id,
-                            "method": payload["method"],
-                            "host": payload["host"],
-                            "path": payload["path"],
-                            "auth_handle": payload.get("auth_handle"),
-                            "body": body_summary(payload.get("body")),
-                            "reason": reason,
-                        },
-                    }
-
                 response = self.secure_web.request(payload, principal_id=principal.principal_id)
                 self._append_audit(principal.principal_id, tool_name, payload, "executed", response)
                 return {"tool_name": tool_name, "status": "executed", "response": response}
             except PermissionDeniedException as exc:
-                if not self.approval_gate:
-                    raise
-                prompt = self.approval_gate.request(exc)
-                gate_session = self.identities.gate_for(principal.principal_id, source_session_key)
-                if adapter is not None:
-                    await adapter.send_approval_request(
-                        prompt.approval_id,
-                        {
-                            "session_key": gate_session,
-                            "principal": principal.principal_id,
-                            "resource_type": prompt.resource_type,
-                            "resource_value": prompt.resource_value,
-                            "metadata": prompt.metadata,
-                        },
-                    )
-                return {"tool_name": tool_name, "status": "permission_required", "approval_id": prompt.approval_id}
+                return {
+                    "tool_name": tool_name,
+                    "status": "permission_denied",
+                    "code": 403,
+                    "error": str(exc),
+                    "resource": {"type": exc.resource_type, "value": exc.resource_value},
+                }
+            except SecureWebError as exc:
+                return {"tool_name": tool_name, "status": "error", "error": str(exc)}
+
+        if tool_name == "request":
+            prompt = self.approval_gate.request(
+                PermissionDeniedException(
+                    principal_id=principal.principal_id,
+                    resource_type=payload.get("resource_type", "domain"),
+                    resource_value=payload.get("resource_value", payload.get("host", "unknown")),
+                    metadata={
+                        "reason": reason,
+                        "method": payload.get("method"),
+                        "path": payload.get("path"),
+                        "body": body_summary(payload.get("body")),
+                    },
+                )
+            )
+            gate_session = self.identities.gate_for(principal.principal_id, source_session_key)
+            if adapter is not None:
+                await adapter.send_approval_request(
+                    prompt.approval_id,
+                    {
+                        "session_key": gate_session,
+                        "principal": prompt.principal_id,
+                        "resource_type": prompt.resource_type,
+                        "resource_value": prompt.resource_value,
+                        "metadata": prompt.metadata,
+                    },
+                )
+            return {"tool_name": tool_name, "status": "approval_requested", "approval_id": prompt.approval_id}
 
         return {"tool_name": tool_name, "error": "unsupported tool"}
-
-    def execute_approved_web_request(self, principal_id: str, payload: dict, token: str) -> dict:
-        if not self.approvals.verify_and_consume(token):
-            raise PermissionError("invalid approval token")
-        payload = dict(payload)
-        payload["approval_token"] = token
-        response = self.secure_web.request(payload, principal_id=principal_id)
-        self._append_audit(principal_id, "secure.web.request", payload, "approved_executed", response)
-        return response
 
     def _append_audit(self, principal_id: str, tool_name: str, payload: dict, decision: str, response: dict) -> None:
         self.audit_log.append(

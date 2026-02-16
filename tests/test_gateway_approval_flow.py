@@ -3,7 +3,6 @@ from pathlib import Path
 import pytest
 
 from python_openclaw.common.models import Principal
-from python_openclaw.gateway.approvals import ApprovalManager
 from python_openclaw.gateway.core import GatewayCore
 from python_openclaw.gateway.ipc_server import IPCClient
 from python_openclaw.gateway.policy import GatewayPolicy
@@ -11,6 +10,8 @@ from python_openclaw.gateway.secure_web import SecureWebConfig, SecureWebRequest
 from python_openclaw.gateway.secrets.store import SecretStore
 from python_openclaw.gateway.sessions import IdentityManager
 from python_openclaw.gateway.transcript import TranscriptStore
+from python_openclaw.security.gate import ApprovalGate
+from python_openclaw.security.permissions import PermissionStore
 
 
 @pytest.fixture
@@ -22,10 +23,18 @@ def core(tmp_path, monkeypatch):
 
     class Resp:
         headers = {}
-        def read(self): return b"ok"
-        def getcode(self): return 200
-        def __enter__(self): return self
-        def __exit__(self, *_): return False
+
+        def read(self):
+            return b"ok"
+
+        def getcode(self):
+            return 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
 
     class Opener:
         def open(self, req, timeout=0):
@@ -34,42 +43,41 @@ def core(tmp_path, monkeypatch):
     monkeypatch.setattr(urllib.request, "build_opener", lambda *_: Opener())
 
     identities = IdentityManager()
-    store = SecretStore(tmp_path / "secrets.enc")
-    store.unlock("pw")
-    store.set_secret("github", "Bearer tok")
+    permission_store = PermissionStore(tmp_path / "permissions.db")
+    secure_store = SecretStore(tmp_path / "secrets.enc")
+    secure_store.unlock("pw")
+    secure_store.set_secret("github", "Bearer tok")
     secure_web = SecureWebRequester(
         GatewayPolicy({"api.github.com"}),
-        store,
+        secure_store,
         SecureWebConfig(header_allowlist={"accept"}, auth_host_permissions={"github": {"api.github.com"}}),
     )
-    return GatewayCore(identities, TranscriptStore(tmp_path / "t"), IPCClient(), secure_web, ApprovalManager(ttl_seconds=1))
+    return GatewayCore(
+        identities=identities,
+        transcripts=TranscriptStore(tmp_path / "t"),
+        ipc_client=IPCClient(),
+        secure_web=secure_web,
+        approval_gate=ApprovalGate(permission_store),
+    )
 
 
-def test_approval_required_and_deny_blocks(core: GatewayCore):
-    principal = Principal("u1", "user")
-    payload = {
-        "tool_name": "secure.web.request",
-        "payload": {"method": "GET", "host": "api.github.com", "path": "/user", "auth_handle": "github"},
-        "reason": "because",
-    }
-    result = core._handle_tool_call(principal, payload)
-    assert result["status"] == "approval_required"
-    aid = result["approval_id"]
-    token = core.approvals.decide(aid, False)
-    assert token is None
-    with pytest.raises(PermissionError):
-        core.execute_approved_web_request(principal.principal_id, payload["payload"], "bad-token")
-
-
-def test_approved_token_executes_once(core: GatewayCore):
+def test_permission_denied_without_allow_rule(core: GatewayCore):
     principal = Principal("u1", "user")
     payload = {
         "tool_name": "secure.web.request",
         "payload": {"method": "GET", "host": "api.github.com", "path": "/user", "auth_handle": "github"},
     }
     result = core._handle_tool_call(principal, payload)
-    token = core.approvals.decide(result["approval_id"], True)
-    response = core.execute_approved_web_request(principal.principal_id, payload["payload"], token)
-    assert response["status"] == 200
-    with pytest.raises(PermissionError):
-        core.execute_approved_web_request(principal.principal_id, payload["payload"], token)
+    assert result["status"] in {"permission_denied", "error"}
+
+
+def test_request_tool_creates_gate_approval(core: GatewayCore):
+    principal = Principal("u1", "user")
+    payload = {
+        "tool_name": "request",
+        "payload": {"resource_type": "domain", "resource_value": "api.github.com", "method": "GET", "path": "/user"},
+        "reason": "Need GitHub profile",
+    }
+    result = core._handle_tool_call(principal, payload)
+    assert result["status"] == "approval_requested"
+    assert result["approval_id"] in core.approval_gate.pending

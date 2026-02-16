@@ -3,7 +3,6 @@ from pathlib import Path
 import asyncio
 
 from python_openclaw.common.models import Binding, Principal
-from python_openclaw.gateway.approvals import ApprovalManager
 from python_openclaw.gateway.core import GatewayCore
 from python_openclaw.gateway.ipc_server import IPCClient
 from python_openclaw.gateway.policy import GatewayPolicy
@@ -11,6 +10,8 @@ from python_openclaw.gateway.secure_web import SecureWebConfig, SecureWebRequest
 from python_openclaw.gateway.secrets.store import SecretStore
 from python_openclaw.gateway.sessions import IdentityManager
 from python_openclaw.gateway.transcript import TranscriptStore
+from python_openclaw.security.gate import ApprovalGate
+from python_openclaw.security.permissions import PermissionStore
 
 
 class MockChannel:
@@ -20,9 +21,13 @@ class MockChannel:
     async def send_stream(self, session_key: str, event: dict):
         self.events.append((session_key, event))
 
+    async def send_approval_request(self, approval_id: str, context: dict):
+        self.events.append((context.get("session_key", ""), {"stream": "approval.request", "payload": {"approval_id": approval_id}}))
+
 
 def test_gateway_forwards_worker_stream(tmp_path: Path, monkeypatch):
     import socket
+
     monkeypatch.setattr(socket, "getaddrinfo", lambda *_args, **_kwargs: [(None, None, None, None, ("93.184.216.34", 0))])
 
     identities = IdentityManager()
@@ -43,17 +48,19 @@ def test_gateway_forwards_worker_stream(tmp_path: Path, monkeypatch):
         transcripts=TranscriptStore(tmp_path / "transcripts"),
         ipc_client=IPCClient(),
         secure_web=secure_web,
-        approvals=ApprovalManager(),
+        approval_gate=ApprovalGate(PermissionStore(tmp_path / "permissions.db")),
     )
 
     channel = MockChannel()
-    asyncio.run(core.handle_user_message(
-        channel="telegram_dm",
-        context={"user_id": 123},
-        principal=Principal("u1", "user"),
-        text="hello world",
-        adapter=channel,
-    ))
+    asyncio.run(
+        core.handle_user_message(
+            channel="telegram_dm",
+            context={"user_id": 123},
+            principal=Principal("u1", "user"),
+            text="hello world",
+            adapter=channel,
+        )
+    )
 
     streams = [e[1]["stream"] for e in channel.events]
     assert "assistant.delta" in streams

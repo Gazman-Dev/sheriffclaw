@@ -21,10 +21,12 @@ class PermissionDecision:
     resource_type: str
     resource_value: str
     decision: str
-    timestamp: str
+    created_at: str
 
 
 class PermissionStore:
+    """Simple SQLite allow/deny store for gate decisions."""
+
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -41,31 +43,34 @@ class PermissionStore:
                     principal_id TEXT NOT NULL,
                     resource_type TEXT NOT NULL,
                     resource_value TEXT NOT NULL,
-                    decision TEXT NOT NULL,
-                    timestamp TEXT NOT NULL,
+                    decision TEXT NOT NULL CHECK(decision IN ('ALLOW', 'DENY')),
+                    created_at TEXT NOT NULL,
                     PRIMARY KEY (principal_id, resource_type, resource_value)
                 )
                 """
             )
 
     def set_decision(self, principal_id: str, resource_type: str, resource_value: str, decision: str) -> None:
+        normalized = decision.upper()
+        if normalized not in {"ALLOW", "DENY"}:
+            raise ValueError("decision must be ALLOW or DENY")
         now = datetime.now(timezone.utc).isoformat()
         with self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO permissions(principal_id, resource_type, resource_value, decision, timestamp)
+                INSERT INTO permissions(principal_id, resource_type, resource_value, decision, created_at)
                 VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(principal_id, resource_type, resource_value)
-                DO UPDATE SET decision=excluded.decision, timestamp=excluded.timestamp
+                DO UPDATE SET decision=excluded.decision, created_at=excluded.created_at
                 """,
-                (principal_id, resource_type, resource_value, decision, now),
+                (principal_id, resource_type, resource_value, normalized, now),
             )
 
     def get_decision(self, principal_id: str, resource_type: str, resource_value: str) -> PermissionDecision | None:
         with self._conn() as conn:
             row = conn.execute(
                 """
-                SELECT principal_id, resource_type, resource_value, decision, timestamp
+                SELECT principal_id, resource_type, resource_value, decision, created_at
                 FROM permissions WHERE principal_id=? AND resource_type=? AND resource_value=?
                 """,
                 (principal_id, resource_type, resource_value),
@@ -73,6 +78,10 @@ class PermissionStore:
         if not row:
             return None
         return PermissionDecision(*row)
+
+    def is_allowed(self, principal_id: str, resource_type: str, resource_value: str) -> bool:
+        decision = self.get_decision(principal_id, resource_type, resource_value)
+        return bool(decision and decision.decision == "ALLOW")
 
 
 class PermissionEnforcer:
@@ -88,6 +97,4 @@ class PermissionEnforcer:
             decision = self.store.get_decision(principal_id, resource_type, resource_value)
             if decision and decision.decision == "ALLOW":
                 return
-            if decision and decision.decision == "DENY":
-                raise PermissionDeniedException(principal_id, resource_type, resource_value, metadata)
         raise PermissionDeniedException(principal_id, resource_type, resource_value, metadata)

@@ -63,7 +63,11 @@ def _build_core(base: Path) -> tuple[GatewayCore, IdentityManager]:
         GatewayPolicy(allowed_hosts=set(config.get("allowed_hosts", []))),
         secrets,
         SecureWebConfig(
-            header_allowlist={"accept", "content-type", "user-agent", "authorization"},
+            header_allowlist={"accept", "content-type", "user-agent"},
+            secret_header_allowlist={"authorization", "x-api-key"},
+            secret_handle_allowed_hosts={
+                handle: set(hosts) for handle, hosts in config.get("secret_handle_allowed_hosts", {"github": ["api.github.com"]}).items()
+            },
         ),
         permission_enforcer=PermissionEnforcer(store=permission_store),
     )

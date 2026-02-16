@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from python_openclaw.common.models import Principal
 from python_openclaw.gateway.core import GatewayCore
 from python_openclaw.gateway.sessions import IdentityManager
 
@@ -26,19 +25,35 @@ class TelegramGateBotAdapter:
 
         session_key = context.get("session_key", "")
         chat_id = int(session_key.split(":")[-1]) if str(session_key).startswith("tg:dm:") else session_key
-        text = (
-            f"Permission request: {context.get('resource_type')}={context.get('resource_value')}\n"
-            f"Principal: {context.get('principal')}"
-        )
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="Approve Once", callback_data=f"approval:{approval_id}:allow_once"),
-                    InlineKeyboardButton(text="Always Allow", callback_data=f"approval:{approval_id}:always_allow"),
-                    InlineKeyboardButton(text="Deny", callback_data=f"approval:{approval_id}:deny"),
-                ]
+        metadata = context.get("metadata", {})
+        is_disclosure = context.get("action_type") == "disclose_output" or metadata.get("action_type") == "disclose_output"
+
+        if is_disclosure:
+            text = (
+                "Disclosure approval request\n"
+                f"Principal: {context.get('principal')}\n"
+                f"Tool: {context.get('tool') or metadata.get('tool')}\n"
+                f"Run ID: {context.get('run_id') or metadata.get('run_id')}\n"
+                f"Stdout bytes: {context.get('bytes_stdout') or metadata.get('bytes_stdout', 0)}\n"
+                f"Stderr bytes: {context.get('bytes_stderr') or metadata.get('bytes_stderr', 0)}\n"
+                f"Tainted: {context.get('tainted') if 'tainted' in context else metadata.get('tainted')}\n"
+                "Warning: May contain secrets"
+            )
+            buttons = [
+                InlineKeyboardButton(text="Approve This Request", callback_data=f"approval:{approval_id}:approve_this_request"),
+                InlineKeyboardButton(text="Deny", callback_data=f"approval:{approval_id}:deny"),
             ]
-        )
+        else:
+            text = (
+                f"Permission request: {context.get('resource_type')}={context.get('resource_value')}\n"
+                f"Principal: {context.get('principal')}"
+            )
+            buttons = [
+                InlineKeyboardButton(text="Always Allow", callback_data=f"approval:{approval_id}:always_allow"),
+                InlineKeyboardButton(text="Deny", callback_data=f"approval:{approval_id}:deny"),
+            ]
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[buttons])
         await self.bot_client.send_message(chat_id, text, reply_markup=kb)
 
     async def send_secret_request(self, session_key: str, principal_id: str, handle: str) -> None:
@@ -95,7 +110,10 @@ class TelegramGateBotAdapter:
         if not prompt:
             await self.bot_client.send_message(chat_id, "Approval request not found")
             return
-        await self.bot_client.send_message(chat_id, f"Recorded {action} for {prompt.resource_type}:{prompt.resource_value}")
+        if hasattr(prompt, "resource_type"):
+            await self.bot_client.send_message(chat_id, f"Recorded {action} for {prompt.resource_type}:{prompt.resource_value}")
+        else:
+            await self.bot_client.send_message(chat_id, f"Recorded {action} for {prompt.action_type}")
 
 
 class TelegramGateBotRunner:

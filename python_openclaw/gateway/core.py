@@ -22,6 +22,14 @@ class ChannelAdapter(Protocol):
     async def send_approval_request(self, approval_id: str, context: dict) -> None: ...
 
 
+class SecureGateAdapter(Protocol):
+    async def send_approval_request(self, approval_id: str, context: dict) -> None: ...
+
+    async def send_secret_request(self, session_key: str, principal_id: str, handle: str) -> None: ...
+
+    async def send_gate_message(self, session_key: str, text: str) -> None: ...
+
+
 @dataclass
 class GatewayCore:
     identities: IdentityManager
@@ -32,6 +40,8 @@ class GatewayCore:
     requests: RequestService
     approval_gate: ApprovalGate
     audit_log: list[dict]
+    secure_gate_adapter: SecureGateAdapter | None
+    pending_secret_inputs: dict[str, list[str]]
 
     def __init__(
         self,
@@ -51,6 +61,25 @@ class GatewayCore:
         self.tools = tools
         self.requests = requests
         self.audit_log = []
+        self.secure_gate_adapter = None
+        self.pending_secret_inputs = {}
+
+    def set_secure_gate_adapter(self, adapter: SecureGateAdapter) -> None:
+        self.secure_gate_adapter = adapter
+
+    def pending_secret_handle_for(self, principal_id: str) -> str | None:
+        queue = self.pending_secret_inputs.get(principal_id, [])
+        return queue[0] if queue else None
+
+    async def handle_secret_reply(self, principal: Principal, value: str) -> str | None:
+        queue = self.pending_secret_inputs.get(principal.principal_id, [])
+        if not queue:
+            return None
+        handle = queue.pop(0)
+        if not queue:
+            self.pending_secret_inputs.pop(principal.principal_id, None)
+        self.requests.store_secret(handle, value)
+        return handle
 
     async def handle_user_message(
         self,
@@ -91,7 +120,15 @@ class GatewayCore:
         if tool_name == "secure.secret.ensure":
             handle = payload["handle"]
             ok = self.secure_web.secrets.ensure_handle(handle)
-            return {"tool_name": tool_name, "ok": ok}
+            if ok:
+                return {"tool_name": tool_name, "ok": ok, "status": "available", "key": handle}
+            gate_session = self.identities.gate_for(principal.principal_id)
+            if gate_session and self.secure_gate_adapter:
+                queue = self.pending_secret_inputs.setdefault(principal.principal_id, [])
+                if handle not in queue:
+                    queue.append(handle)
+                await self.secure_gate_adapter.send_secret_request(gate_session, principal.principal_id, handle)
+            return {"tool_name": tool_name, "ok": False, "status": "secret_requested", "key": handle}
 
         if tool_name in {"secure.web.request", "web.request"}:
             try:
@@ -141,11 +178,22 @@ class GatewayCore:
                 )
             )
             gate_session = self.identities.gate_for(principal.principal_id, source_session_key)
-            if adapter is not None:
-                await adapter.send_approval_request(
+            if self.secure_gate_adapter is not None and gate_session:
+                await self.secure_gate_adapter.send_approval_request(
                     prompt.approval_id,
                     {
                         "session_key": gate_session,
+                        "principal": prompt.principal_id,
+                        "resource_type": prompt.resource_type,
+                        "resource_value": prompt.resource_value,
+                        "metadata": prompt.metadata,
+                    },
+                )
+            elif adapter is not None:
+                await adapter.send_approval_request(
+                    prompt.approval_id,
+                    {
+                        "session_key": source_session_key,
                         "principal": prompt.principal_id,
                         "resource_type": prompt.resource_type,
                         "resource_value": prompt.resource_value,

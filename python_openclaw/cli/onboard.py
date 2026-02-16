@@ -43,6 +43,7 @@ def run_onboard(base_dir: Path) -> None:
         "agents": {"defaults": {"model": {"primary": f"{selected}/best", "fallbacks": []}}},
         "provider": selected,
         "users": [],
+        "gate_users": [],
     }
     (base_dir / "openclaw.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 

@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+RESOURCE_DOMAIN = "domain"
+RESOURCE_DOMAIN_HEADER = "domain_header"
+RESOURCE_TOOL = "tool"
+RESOURCE_ACTION = "action"
+
 
 class PermissionDeniedException(PermissionError):
     def __init__(self, principal_id: str, resource_type: str, resource_value: str, metadata: dict | None = None):

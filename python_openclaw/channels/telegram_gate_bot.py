@@ -82,8 +82,9 @@ class TelegramGateBotAdapter:
 
         command, _, arg = text.partition(" ")
         if command == "/unlock":
-            self.gateway.secure_web.secrets.unlock(arg.strip())
-            await self.bot_client.send_message(chat_id, "Secret store unlocked")
+            password = arg.strip()
+            self.gateway.secure_web.secrets.unlock(password)
+            await self.bot_client.send_message(chat_id, "Unlock attempt completed")
             return
         if command == "/bind":
             target = arg.strip() or principal.principal_id

@@ -106,3 +106,30 @@ def test_missing_secret_requests_value_over_secure_gate(tmp_path: Path):
     stored = asyncio.run(core.handle_secret_reply(principal, "Bearer abc"))
     assert stored == "github_token"
     assert secrets.get_secret("github_token") == "Bearer abc"
+
+
+def test_gateway_rejects_agent_messages_while_locked(tmp_path: Path):
+    core, _ = _build_core(tmp_path)
+    locked_core = GatewayCore(
+        identities=core.identities,
+        transcripts=core.transcripts,
+        ipc_client=IPCClient(),
+        secure_web=core.secure_web,
+        approval_gate=core.approval_gate,
+        tools=core.tools,
+        requests=core.requests,
+        locked_predicate=lambda: True,
+    )
+
+    adapter = FakeAdapter()
+    principal = Principal("u1", "user")
+    asyncio.run(
+        locked_core.handle_user_message(
+            channel="telegram_dm",
+            context={"user_id": "1"},
+            principal=principal,
+            text="hello",
+            adapter=adapter,
+        )
+    )
+    assert any("System locked" in event[1]["payload"].get("content", "") for event in adapter.events)

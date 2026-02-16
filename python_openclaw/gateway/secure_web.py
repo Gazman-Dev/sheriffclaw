@@ -7,10 +7,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from typing import Any
 
 from python_openclaw.gateway.policy import GatewayPolicy, PolicyViolation
 from python_openclaw.gateway.secrets.store import SecretLockedError, SecretNotFoundError, SecretStore
-from python_openclaw.security.permissions import PermissionEnforcer
+from python_openclaw.security.permissions import PermissionEnforcer, PermissionDeniedException, RESOURCE_DOMAIN, RESOURCE_DOMAIN_HEADER
 
 
 class SecureWebError(Exception):
@@ -54,9 +55,10 @@ class SecureWebRequester:
         for k, v in query.items():
             if _contains_secret_placeholder(str(k)) or _contains_secret_placeholder(str(v)):
                 raise SecureWebError("secret placeholder forbidden in query")
-
         if isinstance(payload.get("url"), str) and _contains_secret_placeholder(payload["url"]):
             raise SecureWebError("secret placeholder forbidden in url")
+        if _contains_secret_placeholder_in_body(body):
+            raise SecureWebError("secret placeholder forbidden in body")
 
         clean_headers: dict[str, str] = {}
         for hk, hv in headers.items():
@@ -69,18 +71,16 @@ class SecureWebRequester:
 
         if auth_handle:
             secret_headers = {**secret_headers, "Authorization": auth_handle}
-
         secret_headers_normalized = {str(header).lower(): str(handle) for header, handle in secret_headers.items()}
-        requires_domain_approval = bool(secret_headers_normalized)
-        if any(header not in self.config.secret_header_allowlist for header in secret_headers_normalized):
-            requires_domain_approval = requires_domain_approval or self.config.require_approval_for_secret_headers_outside_allowlist
 
         if principal_id and self.permission_enforcer:
-            metadata = {"path": path, "method": method, "uses_secret_headers": bool(secret_headers_normalized)}
-            if requires_domain_approval:
-                self.permission_enforcer.ensure_allowed(principal_id, "domain", host, metadata)
-            else:
-                self.permission_enforcer.ensure_allowed(principal_id, "domain", host, {"path": path})
+            self.permission_enforcer.ensure_allowed(principal_id, RESOURCE_DOMAIN, host, {"path": path, "method": method})
+            for header, handle in secret_headers_normalized.items():
+                if header in self.config.secret_header_allowlist:
+                    continue
+                resource_value = f"{host}|{header}"
+                raise_metadata = {"host": host, "path": path, "method": method, "header": header, "secret_handle": handle}
+                self.permission_enforcer.ensure_allowed(principal_id, RESOURCE_DOMAIN_HEADER, resource_value, raise_metadata)
 
         for header, handle in secret_headers_normalized.items():
             self._validate_secret_handle_for_host(handle, host)
@@ -128,41 +128,36 @@ class SecureWebRequester:
                 self._validate_redirect(location)
                 raise SecureWebError(f"redirect blocked: {location or 'unknown'}")
             error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
-            return {
-                "status": exc.code,
-                "headers": dict(exc.headers.items()) if exc.headers else {},
-                "body": error_body,
-                "bytes": len(error_body.encode("utf-8")),
-            }
+            return {"status": exc.code, "headers": dict(exc.headers.items()) if exc.headers else {}, "body": error_body, "bytes": len(error_body.encode("utf-8"))}
+        except PolicyViolation as exc:
+            raise SecureWebError(str(exc)) from exc
         except urllib.error.URLError as exc:
             raise SecureWebError(f"network error: {exc.reason}") from exc
+
+    def _validate_secret_handle_for_host(self, handle: str, host: str) -> None:
+        allowed_hosts = self.config.secret_handle_allowed_hosts.get(handle)
+        if allowed_hosts and host not in allowed_hosts:
+            raise SecureWebError(f"secret handle '{handle}' not allowed for host '{host}'")
 
     def _resolve_secret(self, handle: str) -> str:
         try:
             return self.secrets.get_secret(handle)
+        except SecretLockedError as exc:
+            raise SecureWebError("secret store locked") from exc
         except SecretNotFoundError:
             raise
-        except SecretLockedError as exc:
-            raise SecureWebError(str(exc)) from exc
-
-    def _validate_secret_handle_for_host(self, handle: str, host: str) -> None:
-        allowed_hosts = self.config.secret_handle_allowed_hosts.get(handle)
-        if not allowed_hosts:
-            raise SecureWebError(f"secret handle '{handle}' is not configured for web usage")
-        if host not in allowed_hosts:
-            raise SecureWebError(f"secret handle '{handle}' is not allowed for host {host}")
 
     def _validate_redirect(self, location: str) -> None:
-        parsed = urllib.parse.urlparse(location)
-        if parsed.scheme and parsed.scheme != "https":
-            raise PolicyViolation("redirect requires https")
-        if not parsed.netloc:
+        if not location:
             return
-        host = parsed.hostname or ""
-        self.policy.validate_redirect_target(host)
+        parsed = urllib.parse.urlparse(location)
+        if parsed.scheme and parsed.scheme.lower() != "https":
+            raise SecureWebError("redirect to non-https blocked")
+        if parsed.hostname:
+            self.policy.validate_https_request(parsed.hostname, parsed.path or "/")
 
 
-def body_summary(body: object) -> str:
+def body_summary(body: Any) -> str:
     if body is None:
         return "none"
     raw = json.dumps(body, sort_keys=True).encode("utf-8") if not isinstance(body, (bytes, bytearray)) else bytes(body)
@@ -177,3 +172,17 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def _contains_secret_placeholder(value: str) -> bool:
     return bool(re.search(r"\{[a-zA-Z0-9_\-]+\}", value))
+
+
+def _contains_secret_placeholder_in_body(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return _contains_secret_placeholder(value)
+    if isinstance(value, bytes):
+        return _contains_secret_placeholder(value.decode("utf-8", errors="ignore"))
+    if isinstance(value, dict):
+        return any(_contains_secret_placeholder_in_body(k) or _contains_secret_placeholder_in_body(v) for k, v in value.items())
+    if isinstance(value, list):
+        return any(_contains_secret_placeholder_in_body(v) for v in value)
+    return _contains_secret_placeholder(str(value))

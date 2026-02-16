@@ -26,7 +26,7 @@ def _xor_stream(data: bytes, key: bytes, nonce: bytes) -> bytes:
     return bytes(a ^ b for a, b in zip(data, out[: len(data)]))
 
 
-def encrypt_blob(data: dict[str, str], passphrase: str) -> bytes:
+def encrypt_blob(data: dict[str, object], passphrase: str) -> bytes:
     plaintext = json.dumps(data, separators=(",", ":")).encode("utf-8")
     salt = os.urandom(16)
     nonce = os.urandom(16)
@@ -44,7 +44,7 @@ def encrypt_blob(data: dict[str, str], passphrase: str) -> bytes:
     return json.dumps(envelope, separators=(",", ":")).encode("utf-8")
 
 
-def decrypt_blob(blob: bytes, passphrase: str) -> dict[str, str]:
+def decrypt_blob(blob: bytes, passphrase: str) -> dict[str, object]:
     try:
         envelope = json.loads(blob.decode("utf-8"))
         salt = bytes.fromhex(envelope["salt"])

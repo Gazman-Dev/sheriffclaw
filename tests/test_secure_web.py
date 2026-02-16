@@ -6,7 +6,13 @@ import pytest
 from python_openclaw.gateway.policy import GatewayPolicy
 from python_openclaw.gateway.secure_web import SecureWebConfig, SecureWebError, SecureWebRequester
 from python_openclaw.gateway.secrets.store import SecretStore
-from python_openclaw.security.permissions import PermissionDeniedException, PermissionEnforcer, PermissionStore
+from python_openclaw.security.permissions import (
+    PermissionDeniedException,
+    PermissionEnforcer,
+    PermissionStore,
+    RESOURCE_DOMAIN,
+    RESOURCE_DOMAIN_HEADER,
+)
 
 
 class DummyResponse:
@@ -65,9 +71,19 @@ def test_rejects_secret_placeholder_in_path_or_query(tmp_path, monkeypatch):
         requester.request({"method": "GET", "host": "api.github.com", "path": "/users", "query": {"q": "{github}"}})
 
 
+def test_rejects_secret_placeholder_in_body(tmp_path, monkeypatch):
+    requester, permission_store = _make_requester(tmp_path, monkeypatch)
+    permission_store.set_decision("u1", RESOURCE_DOMAIN, "api.github.com", "ALLOW")
+    with pytest.raises(SecureWebError):
+        requester.request(
+            {"method": "POST", "host": "api.github.com", "path": "/user", "body": {"raw": "{github}"}},
+            principal_id="u1",
+        )
+
+
 def test_rejects_direct_authorization_header(tmp_path, monkeypatch):
     requester, permission_store = _make_requester(tmp_path, monkeypatch)
-    permission_store.set_decision("u1", "domain", "api.github.com", "ALLOW")
+    permission_store.set_decision("u1", RESOURCE_DOMAIN, "api.github.com", "ALLOW")
     with pytest.raises(SecureWebError):
         requester.request(
             {
@@ -82,7 +98,7 @@ def test_rejects_direct_authorization_header(tmp_path, monkeypatch):
 
 def test_injects_secret_only_from_secret_headers_mapping(tmp_path, monkeypatch):
     requester, permission_store = _make_requester(tmp_path, monkeypatch)
-    permission_store.set_decision("u1", "domain", "api.github.com", "ALLOW")
+    permission_store.set_decision("u1", RESOURCE_DOMAIN, "api.github.com", "ALLOW")
     opener = DummyOpener()
     monkeypatch.setattr(urllib.request, "build_opener", lambda *_: opener)
 
@@ -93,7 +109,7 @@ def test_injects_secret_only_from_secret_headers_mapping(tmp_path, monkeypatch):
             "path": "/user",
             "headers": {"accept": "application/json", "x-other": "{github}"},
             "secret_headers": {"Authorization": "github"},
-            "body": {"raw": "{github}"},
+            "body": {"ok": "body"},
         },
         principal_id="u1",
     )
@@ -104,7 +120,7 @@ def test_injects_secret_only_from_secret_headers_mapping(tmp_path, monkeypatch):
 
 def test_enforces_secret_handle_host_scoping(tmp_path, monkeypatch):
     requester, permission_store = _make_requester(tmp_path, monkeypatch)
-    permission_store.set_decision("u1", "domain", "example.com", "ALLOW")
+    permission_store.set_decision("u1", RESOURCE_DOMAIN, "example.com", "ALLOW")
     with pytest.raises(SecureWebError):
         requester.request(
             {
@@ -117,9 +133,10 @@ def test_enforces_secret_handle_host_scoping(tmp_path, monkeypatch):
         )
 
 
-def test_secret_headers_require_domain_approval_when_not_preapproved(tmp_path, monkeypatch):
-    requester, _ = _make_requester(tmp_path, monkeypatch)
-    with pytest.raises(PermissionDeniedException):
+def test_secret_headers_require_domain_header_approval(tmp_path, monkeypatch):
+    requester, permission_store = _make_requester(tmp_path, monkeypatch)
+    permission_store.set_decision("u1", RESOURCE_DOMAIN, "api.github.com", "ALLOW")
+    with pytest.raises(PermissionDeniedException) as exc:
         requester.request(
             {
                 "method": "GET",
@@ -129,3 +146,5 @@ def test_secret_headers_require_domain_approval_when_not_preapproved(tmp_path, m
             },
             principal_id="u1",
         )
+    assert exc.value.resource_type == RESOURCE_DOMAIN_HEADER
+    assert exc.value.resource_value == "api.github.com|x-custom"

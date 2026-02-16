@@ -12,6 +12,29 @@ def markdown_to_telegram_html(text: str) -> str:
 
 
 @dataclass
+class TelegramLLMBotClient:
+    bot: object
+
+    async def send_message(self, chat_id: int, text: str) -> None:
+        await self.bot.send_message(chat_id, text)
+
+    async def send_message_stream(self, session_key: str, text: str) -> None:
+        chat_id = int(session_key.split(":")[-1]) if session_key.startswith("tg:dm:") else session_key
+        await self.bot.send_message(chat_id, text)
+
+    async def send_photo(self, session_key: str, payload: str) -> None:
+        chat_id = int(session_key.split(":")[-1]) if session_key.startswith("tg:dm:") else session_key
+        await self.bot.send_photo(chat_id, payload)
+
+    async def send_document(self, session_key: str, payload: str) -> None:
+        chat_id = int(session_key.split(":")[-1]) if session_key.startswith("tg:dm:") else session_key
+        await self.bot.send_document(chat_id, payload)
+
+    async def send_approval(self, *_args, **_kwargs) -> None:
+        return None
+
+
+@dataclass
 class TelegramLLMBotAdapter:
     gateway: GatewayCore
     identities: IdentityManager
@@ -63,11 +86,13 @@ class TelegramLLMBotAdapter:
                 )
             else:
                 await self.send_message(session_key, ChannelContent(text=payload.get("content", "")))
-        elif event["stream"] == "tool.result" and payload.get("status") == "approval_required":
-            summary = payload["summary"]
+        elif event["stream"] == "tool.result" and payload.get("status") in {"approval_required", "approval_requested"}:
+            await self.send_message(session_key, ChannelContent(text="Approval workflow triggered in Gate bot."))
+        elif event["stream"] == "tool.result" and payload.get("status") == "permission_denied":
+            resource = payload.get("resource", {})
             await self.send_message(
                 session_key,
-                ChannelContent(text=f"Approval required for {summary['method']} {summary['host']}{summary['path']}"),
+                ChannelContent(text=f"Gate denied access to {resource.get('type')}={resource.get('value')} (403)."),
             )
 
     async def send_approval_request(self, approval_id: str, context: dict) -> None:
@@ -106,25 +131,23 @@ class TelegramLLMBotAdapter:
 
 
 class TelegramLLMBotRunner:
-    def __init__(self, adapter: TelegramLLMBotAdapter, token: str):
+    def __init__(self, adapter: TelegramLLMBotAdapter, bot: object):
         self.adapter = adapter
-        self.token = token
+        self.bot = bot
 
     async def run_polling(self) -> None:
         try:
-            from aiogram import Bot, Dispatcher
-            from aiogram.enums import ParseMode
+            from aiogram import Dispatcher
             from aiogram.filters import CommandStart
             from aiogram.types import Message
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError("aiogram is required for Telegram polling") from exc
 
-        bot = Bot(self.token, parse_mode=ParseMode.HTML)
         dp = Dispatcher()
 
         @dp.message(CommandStart())
         async def start_handler(message: Message) -> None:
-            await bot.send_message(message.chat.id, "OpenClaw agent online")
+            await self.bot.send_message(message.chat.id, "OpenClaw agent online")
 
         @dp.message()
         async def message_handler(message: Message) -> None:
@@ -133,4 +156,4 @@ class TelegramLLMBotRunner:
             thread_id = message.message_thread_id if getattr(message, "is_topic_message", False) else None
             await self.adapter.on_message(message.from_user.id, message.chat.id, message.text, thread_id)
 
-        await dp.start_polling(bot)
+        await dp.start_polling(self.bot)

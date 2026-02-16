@@ -33,12 +33,13 @@ Instantiate:
 2. `GatewayPolicy` with explicit `allowed_hosts`
 3. `SecureWebConfig` with `header_allowlist` and `auth_host_permissions`
 4. `GatewayCore` with `IPCClient(Worker())`
-5. Channel adapters (`TelegramLLMBotAdapter`, `TelegramSecureBotAdapter`, `CLIChannel`)
+5. Channel adapters (`TelegramLLMBotAdapter`, `TelegramGateBotAdapter`, `CLIChannel`)
 
 Then:
-- Use Secure Bot `/unlock <passphrase>` and `/setsecret github`
-- Allow users via `/allow <telegram_user_id>`
-- LLM user asks “call github” and request enters approval workflow.
+- Use Secure Gate Bot `/unlock <passphrase>` to unlock encrypted secret storage.
+- Bind the gate route using `/bind <principal_id>` (or `/bind` for your gate principal).
+- Allow users via `/allow <telegram_user_id>`.
+- When a secret is missing, the gate bot asks for the next message as the secret value and stores it encrypted.
 
 ## Config notes
 - To add allowed destinations, add exact hostnames to `GatewayPolicy.allowed_hosts`.
@@ -51,3 +52,9 @@ Then:
 3. Secure operator approves/denies in secure bot.
 4. Approval mints one-time capability token with TTL.
 5. Gateway verifies token and executes request.
+
+
+## Dual-channel runtime
+- Set `OPENCLAW_AGENT_TOKEN` for the conversational agent channel and `OPENCLAW_GATE_TOKEN` for the private secure gate channel.
+- Run both listeners together with `python -m python_openclaw.main` (or `run_openclaw`), or individually with `python run_agent.py` and `python run_gate.py`.
+- Approval prompts and secret collection are routed through the gate channel; agent transcripts stay free of secret values and approval chat.

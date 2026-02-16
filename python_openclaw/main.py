@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from python_openclaw.channels.telegram_llm_bot import TelegramLLMBotAdapter, TelegramLLMBotClient, TelegramLLMBotRunner
+from python_openclaw.channels.telegram_gate_bot import TelegramGateBotAdapter, TelegramGateBotClient, TelegramGateBotRunner
+from python_openclaw.common.models import Binding, Principal
 from python_openclaw.cli.onboard import run_onboard
 from python_openclaw.gateway.core import GatewayCore
 from python_openclaw.gateway.ipc_server import IPCClient
@@ -24,6 +26,7 @@ from python_openclaw.worker.worker_main import Worker
 @dataclass
 class OpenClawRuntime:
     llm_runner: TelegramLLMBotRunner
+    gate_runner: TelegramGateBotRunner
 
 
 def _load_config(base_dir: Path) -> dict:
@@ -40,8 +43,21 @@ def _build_core(base: Path) -> tuple[GatewayCore, IdentityManager]:
     approval_gate = ApprovalGate(permission_store)
     identities = IdentityManager()
 
-    for uid in set(config.get("users", config.get("llm_users", []))):
+    llm_users = set(config.get("users", config.get("llm_users", [])))
+    gate_users = set(config.get("gate_users", []))
+
+    for uid in llm_users:
+        principal_id = f"tg:{int(uid)}"
+        identities.add_principal(Principal(principal_id=principal_id, role="user"))
+        identities.bind(Binding(channel="telegram", external_id=str(int(uid)), principal_id=principal_id))
         identities.allow_llm_user(int(uid))
+
+    for uid in gate_users:
+        principal_id = f"tg:{int(uid)}"
+        if principal_id not in identities.principals:
+            identities.add_principal(Principal(principal_id=principal_id, role="user"))
+        identities.bind(Binding(channel="telegram_gate", external_id=str(int(uid)), principal_id=principal_id))
+        identities.bind_gate_channel(principal_id, f"tg:dm:{int(uid)}")
 
     secure_web = SecureWebRequester(
         GatewayPolicy(allowed_hosts=set(config.get("allowed_hosts", []))),
@@ -83,11 +99,15 @@ def build_runtime(base_dir: Path | None = None) -> OpenClawRuntime:
     core, identities = _build_core(base)
 
     llm_bot = _build_bot("OPENCLAW_AGENT_TOKEN")
+    gate_bot = _build_bot("OPENCLAW_GATE_TOKEN")
 
     llm_adapter = TelegramLLMBotAdapter(gateway=core, identities=identities, bot_client=TelegramLLMBotClient(llm_bot))
+    gate_adapter = TelegramGateBotAdapter(gateway=core, identities=identities, bot_client=TelegramGateBotClient(gate_bot))
+    core.set_secure_gate_adapter(gate_adapter)
 
     return OpenClawRuntime(
         llm_runner=TelegramLLMBotRunner(llm_adapter, llm_bot),
+        gate_runner=TelegramGateBotRunner(gate_adapter, gate_bot),
     )
 
 
@@ -99,6 +119,15 @@ def build_agent_runtime(base_dir: Path | None = None) -> TelegramLLMBotRunner:
     return TelegramLLMBotRunner(llm_adapter, llm_bot)
 
 
+def build_gate_runtime(base_dir: Path | None = None) -> TelegramGateBotRunner:
+    base = base_dir or Path.cwd()
+    core, identities = _build_core(base)
+    gate_bot = _build_bot("OPENCLAW_GATE_TOKEN")
+    gate_adapter = TelegramGateBotAdapter(gateway=core, identities=identities, bot_client=TelegramGateBotClient(gate_bot))
+    core.set_secure_gate_adapter(gate_adapter)
+    return TelegramGateBotRunner(gate_adapter, gate_bot)
+
+
 async def run_openclaw(base_dir: Path | None = None) -> None:
     runtime = build_runtime(base_dir)
-    await runtime.llm_runner.run_polling()
+    await asyncio.gather(runtime.llm_runner.run_polling(), runtime.gate_runner.run_polling())

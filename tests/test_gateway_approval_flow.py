@@ -10,8 +10,9 @@ from python_openclaw.gateway.secure_web import SecureWebConfig, SecureWebRequest
 from python_openclaw.gateway.secrets.store import SecretStore
 from python_openclaw.gateway.sessions import IdentityManager
 from python_openclaw.gateway.transcript import TranscriptStore
+from python_openclaw.gateway.services import RequestService, ToolsService
 from python_openclaw.security.gate import ApprovalGate
-from python_openclaw.security.permissions import PermissionStore
+from python_openclaw.security.permissions import PermissionEnforcer, PermissionStore
 
 
 @pytest.fixture
@@ -46,11 +47,12 @@ def core(tmp_path, monkeypatch):
     permission_store = PermissionStore(tmp_path / "permissions.db")
     secure_store = SecretStore(tmp_path / "secrets.enc")
     secure_store.unlock("pw")
-    secure_store.set_secret("github", "Bearer tok")
+    secure_store.set_secret("github_token", "Bearer tok")
     secure_web = SecureWebRequester(
         GatewayPolicy({"api.github.com"}),
         secure_store,
-        SecureWebConfig(header_allowlist={"accept"}, auth_host_permissions={"github": {"api.github.com"}}),
+        SecureWebConfig(header_allowlist={"accept", "authorization"}),
+        permission_enforcer=PermissionEnforcer(store=permission_store),
     )
     return GatewayCore(
         identities=identities,
@@ -58,6 +60,8 @@ def core(tmp_path, monkeypatch):
         ipc_client=IPCClient(),
         secure_web=secure_web,
         approval_gate=ApprovalGate(permission_store),
+        tools=ToolsService(permission_store, secure_store),
+        requests=RequestService(permission_store, secure_store),
     )
 
 
@@ -65,7 +69,7 @@ def test_permission_denied_without_allow_rule(core: GatewayCore):
     principal = Principal("u1", "user")
     payload = {
         "tool_name": "secure.web.request",
-        "payload": {"method": "GET", "host": "api.github.com", "path": "/user", "auth_handle": "github"},
+        "payload": {"method": "GET", "host": "api.github.com", "path": "/user", "headers": {"Authorization": "{github_token}"}},
     }
     result = core._handle_tool_call(principal, payload)
     assert result["status"] in {"permission_denied", "error"}

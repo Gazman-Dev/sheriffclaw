@@ -1,12 +1,9 @@
 from pathlib import Path
-
 import asyncio
 
 from python_openclaw.channels.telegram_llm_bot import TelegramLLMBotAdapter
-from python_openclaw.channels.telegram_secure_bot import TelegramSecureBotAdapter
 from python_openclaw.common.models import Binding, Principal
 from python_openclaw.gateway.sessions import IdentityManager
-from python_openclaw.gateway.secrets.store import SecretStore
 from python_openclaw.security.gate import ApprovalGate
 from python_openclaw.security.permissions import PermissionDeniedException, PermissionStore
 
@@ -35,6 +32,8 @@ class FakeBotClient:
 class FakeGateway:
     def __init__(self):
         self.calls = []
+        from tempfile import gettempdir
+        self.approval_gate = ApprovalGate(PermissionStore(Path(gettempdir()) / 'test_perm.db'))
 
     async def handle_user_message(self, **kwargs):
         self.calls.append(kwargs)
@@ -56,23 +55,25 @@ def test_llm_allowlist_enforced():
     assert len(gateway.calls) == 1
 
 
-def test_secure_bot_commands_and_approval_format(tmp_path: Path):
+def test_adapter_approval_callback(tmp_path):
     identities = IdentityManager()
-    identities.allow_operator(42)
+    identities.allow_llm_user(100)
+    identities.add_principal(Principal("u1", "user"))
+    identities.bind(Binding("telegram", "100", "u1"))
+
     bot = FakeBotClient()
-    secrets = SecretStore(tmp_path / "secrets.enc")
-    approval_gate = ApprovalGate(PermissionStore(tmp_path / "permissions.db"))
-    adapter = TelegramSecureBotAdapter(identities=identities, secrets=secrets, bot_client=bot, approval_gate=approval_gate)
 
-    asyncio.run(adapter.on_message(42, 10, "/unlock pw"))
-    asyncio.run(adapter.on_message(42, 10, "/setsecret github"))
-    asyncio.run(adapter.on_message(42, 10, "Bearer abc"))
-    asyncio.run(adapter.on_message(42, 10, "/allow 100"))
+    class GW:
+        def __init__(self):
+            self.approval_gate = ApprovalGate(PermissionStore(tmp_path / "permissions.db"))
 
-    assert any("Secret github stored." in text for _, text in bot.messages)
+        async def handle_user_message(self, **kwargs):
+            return None
 
-    prompt = approval_gate.request(PermissionDeniedException("u1", "domain", "api.github.com"))
-    asyncio.run(adapter.on_approval_callback(prompt.approval_id, 10, user_id=42, action="always_allow"))
-    decision = approval_gate.store.get_decision("u1", "domain", "api.github.com")
+    gateway = GW()
+    adapter = TelegramLLMBotAdapter(gateway=gateway, identities=identities, bot_client=bot)
+
+    prompt = gateway.approval_gate.request(PermissionDeniedException("u1", "domain", "api.github.com"))
+    asyncio.run(adapter.on_approval_callback(prompt.approval_id, 10, "always_allow"))
+    decision = gateway.approval_gate.store.get_decision("u1", "domain", "api.github.com")
     assert decision and decision.decision == "ALLOW"
-

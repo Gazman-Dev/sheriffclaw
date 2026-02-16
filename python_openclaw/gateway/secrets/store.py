@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 
 from python_openclaw.gateway.secrets.crypto import SecretCryptoError, decrypt_blob, encrypt_blob
@@ -9,12 +11,22 @@ class SecretLockedError(Exception):
     pass
 
 
+class SecretNotFoundError(KeyError):
+    def __init__(self, handle: str):
+        super().__init__(f"Secret '{handle}' not found")
+        self.handle = handle
+
+
 class SecretStore:
-    def __init__(self, file_path: Path) -> None:
+    def __init__(self, file_path: Path, passphrase: str | None = None) -> None:
         self.file_path = file_path
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
         self._secrets: dict[str, str] | None = None
         self._passphrase: str | None = None
+        if passphrase is not None:
+            self.unlock(passphrase)
+        elif env_passphrase := os.getenv("OPENCLAW_SECRETS_PASSPHRASE"):
+            self.unlock(env_passphrase)
 
     @property
     def unlocked(self) -> bool:
@@ -46,8 +58,18 @@ class SecretStore:
         if self._secrets is None:
             raise SecretLockedError("secret store locked")
         if handle not in self._secrets:
-            raise KeyError(handle)
+            raise SecretNotFoundError(handle)
         return self._secrets[handle]
+
+    def inject_references(self, text: str) -> str:
+        if self._secrets is None:
+            raise SecretLockedError("secret store locked")
+
+        def _replace(match: re.Match[str]) -> str:
+            handle = match.group(1)
+            return self.get_secret(handle)
+
+        return re.sub(r"\{([a-zA-Z0-9_\-]+)\}", _replace, text)
 
     def _persist(self) -> None:
         assert self._secrets is not None and self._passphrase is not None

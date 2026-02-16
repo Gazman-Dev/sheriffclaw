@@ -5,7 +5,7 @@ import pytest
 
 from python_openclaw.gateway.policy import GatewayPolicy
 from python_openclaw.gateway.secure_web import SecureWebConfig, SecureWebError, SecureWebRequester
-from python_openclaw.gateway.secrets.store import SecretStore
+from python_openclaw.gateway.secrets.store import SecretNotFoundError, SecretStore
 
 
 class DummyResponse:
@@ -40,9 +40,9 @@ def _make_requester(tmp_path, monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *_args, **_kwargs: [(None, None, None, None, ("93.184.216.34", 0))])
     store = SecretStore(tmp_path / "secrets.enc")
     store.unlock("pw")
-    store.set_secret("github", "Bearer token-123")
+    store.set_secret("github_token", "Bearer token-123")
     policy = GatewayPolicy(allowed_hosts={"api.github.com"})
-    config = SecureWebConfig(header_allowlist={"accept", "content-type"}, auth_host_permissions={"github": {"api.github.com"}})
+    config = SecureWebConfig(header_allowlist={"accept", "content-type", "authorization"})
     return SecureWebRequester(policy, store, config)
 
 
@@ -52,35 +52,33 @@ def test_no_secret_in_url(tmp_path, monkeypatch):
         requester.request({"method": "GET", "host": "api.github.com", "path": "/users/{github}"})
 
 
-def test_auth_injection_and_authorization_override_blocked(tmp_path, monkeypatch):
+def test_header_secret_reference_injection(tmp_path, monkeypatch):
     requester = _make_requester(tmp_path, monkeypatch)
     opener = DummyOpener()
     monkeypatch.setattr(urllib.request, "build_opener", lambda *_: opener)
 
     requester.request(
         {
-            "method": "GET",
+            "method": "POST",
             "host": "api.github.com",
             "path": "/user",
-            "headers": {"Authorization": "bad", "accept": "application/json", "x-other": "ignored"},
-            "auth_handle": "github",
-            "approval_token": "tok",
+            "headers": {"Authorization": "{github_token}", "accept": "application/json", "x-other": "ignored"},
         }
     )
     assert opener.last_request.headers["Authorization"] == "Bearer token-123"
     assert "x-other" not in {k.lower() for k in opener.last_request.headers.keys()}
 
 
-def test_auth_handle_host_restriction(tmp_path, monkeypatch):
+def test_missing_secret_header_reference(tmp_path, monkeypatch):
     requester = _make_requester(tmp_path, monkeypatch)
-    with pytest.raises(SecureWebError):
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *_: DummyOpener())
+    with pytest.raises(SecretNotFoundError):
         requester.request(
             {
                 "method": "GET",
                 "host": "api.github.com",
                 "path": "/user",
-                "auth_handle": "other",
-                "approval_token": "tok",
+                "headers": {"Authorization": "{missing_token}"},
             }
         )
 

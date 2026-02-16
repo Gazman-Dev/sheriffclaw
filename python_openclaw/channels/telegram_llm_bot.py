@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 
 from python_openclaw.channels.protocol import ChannelContent, InboundEvent
 from python_openclaw.gateway.core import GatewayCore
@@ -41,7 +42,6 @@ class TelegramLLMBotClient:
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="Approve Once", callback_data=f"approval:{approval_id}:allow_once"),
                     InlineKeyboardButton(text="Always Allow", callback_data=f"approval:{approval_id}:always_allow"),
                     InlineKeyboardButton(text="Deny", callback_data=f"approval:{approval_id}:deny"),
                 ]
@@ -55,6 +55,10 @@ class TelegramLLMBotAdapter:
     gateway: GatewayCore
     identities: IdentityManager
     bot_client: object
+    _delta_buffers: dict[str, str] = field(default_factory=dict)
+    _last_flush_at: dict[str, float] = field(default_factory=dict)
+    _flush_interval_seconds: float = 0.75
+    _flush_chars: int = 240
 
     async def on_message(self, user_id: int, chat_id: int, text: str, message_thread_id: int | None = None) -> None:
         if not self.identities.is_llm_user_allowed(user_id):
@@ -86,11 +90,25 @@ class TelegramLLMBotAdapter:
             return
         await self.bot_client.send_message_stream(session_key, markdown_to_telegram_html(content.text or ""))
 
+    async def _flush_delta_buffer(self, session_key: str, *, force: bool = False) -> None:
+        chunk = self._delta_buffers.get(session_key, "")
+        if not chunk:
+            return
+        now = time.monotonic()
+        last = self._last_flush_at.get(session_key, 0.0)
+        if not force and (len(chunk) < self._flush_chars and (now - last) < self._flush_interval_seconds):
+            return
+        await self.send_message(session_key, ChannelContent(text=chunk))
+        self._delta_buffers[session_key] = ""
+        self._last_flush_at[session_key] = now
+
     async def send_stream(self, session_key: str, event: dict) -> None:
         payload = event["payload"]
         if event["stream"] == "assistant.delta":
-            await self.send_message(session_key, ChannelContent(text=payload["delta"]))
+            self._delta_buffers[session_key] = self._delta_buffers.get(session_key, "") + payload["delta"]
+            await self._flush_delta_buffer(session_key)
         elif event["stream"] == "assistant.final":
+            await self._flush_delta_buffer(session_key, force=True)
             if payload.get("image_url") or payload.get("image_base64"):
                 await self.send_message(
                     session_key,
@@ -100,10 +118,10 @@ class TelegramLLMBotAdapter:
                         image_base64=payload.get("image_base64"),
                     ),
                 )
-            else:
+            elif payload.get("content"):
                 await self.send_message(session_key, ChannelContent(text=payload.get("content", "")))
         elif event["stream"] == "tool.result" and payload.get("status") in {"approval_required", "approval_requested"}:
-            await self.send_message(session_key, ChannelContent(text="Approval workflow triggered in Gate bot."))
+            await self.send_message(session_key, ChannelContent(text="Approval required; check Secure channel."))
         elif event["stream"] == "tool.result" and payload.get("status") == "permission_denied":
             resource = payload.get("resource", {})
             await self.send_message(
@@ -115,7 +133,6 @@ class TelegramLLMBotAdapter:
         session_key = context.get("session_key", "")
         await self.bot_client.send_approval(session_key, approval_id, context)
 
-
     async def on_approval_callback(self, approval_id: str, chat_id: int, action: str | None = None) -> None:
         if not action:
             await self.bot_client.send_message(chat_id, "Missing action")
@@ -124,7 +141,7 @@ class TelegramLLMBotAdapter:
         if not prompt:
             await self.bot_client.send_message(chat_id, "Approval request not found")
             return
-        await self.bot_client.send_message(chat_id, f"Recorded {action} for {prompt.resource_type}:{prompt.resource_value}")
+        await self.bot_client.send_message(chat_id, "Approval recorded")
 
     def parse_inbound(self, raw_payload: dict) -> InboundEvent:
         if "callback_query" in raw_payload:
@@ -175,7 +192,6 @@ class TelegramLLMBotRunner:
         @dp.message(CommandStart())
         async def start_handler(message: Message) -> None:
             await self.bot.send_message(message.chat.id, "OpenClaw agent online")
-
 
         @dp.callback_query(F.data.startswith("approval:"))
         async def approval_callback(callback: CallbackQuery) -> None:

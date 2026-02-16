@@ -30,8 +30,24 @@ class TelegramLLMBotClient:
         chat_id = int(session_key.split(":")[-1]) if session_key.startswith("tg:dm:") else session_key
         await self.bot.send_document(chat_id, payload)
 
-    async def send_approval(self, *_args, **_kwargs) -> None:
-        return None
+    async def send_approval(self, session_key: str, approval_id: str, summary: dict) -> None:
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+        chat_id = int(session_key.split(":")[-1]) if str(session_key).startswith("tg:dm:") else session_key
+        text = (
+            f"Permission request: {summary.get('resource_type')}={summary.get('resource_value')}\n"
+            f"Principal: {summary.get('principal')}"
+        )
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="Approve Once", callback_data=f"approval:{approval_id}:allow_once"),
+                    InlineKeyboardButton(text="Always Allow", callback_data=f"approval:{approval_id}:always_allow"),
+                    InlineKeyboardButton(text="Deny", callback_data=f"approval:{approval_id}:deny"),
+                ]
+            ]
+        )
+        await self.bot.send_message(chat_id, text, reply_markup=kb)
 
 
 @dataclass
@@ -99,6 +115,17 @@ class TelegramLLMBotAdapter:
         session_key = context.get("session_key", "")
         await self.bot_client.send_approval(session_key, approval_id, context)
 
+
+    async def on_approval_callback(self, approval_id: str, chat_id: int, action: str | None = None) -> None:
+        if not action:
+            await self.bot_client.send_message(chat_id, "Missing action")
+            return
+        prompt = self.gateway.approval_gate.apply_callback(approval_id, action)
+        if not prompt:
+            await self.bot_client.send_message(chat_id, "Approval request not found")
+            return
+        await self.bot_client.send_message(chat_id, f"Recorded {action} for {prompt.resource_type}:{prompt.resource_value}")
+
     def parse_inbound(self, raw_payload: dict) -> InboundEvent:
         if "callback_query" in raw_payload:
             cb = raw_payload["callback_query"]
@@ -137,9 +164,9 @@ class TelegramLLMBotRunner:
 
     async def run_polling(self) -> None:
         try:
-            from aiogram import Dispatcher
+            from aiogram import Dispatcher, F
             from aiogram.filters import CommandStart
-            from aiogram.types import Message
+            from aiogram.types import CallbackQuery, Message
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError("aiogram is required for Telegram polling") from exc
 
@@ -148,6 +175,13 @@ class TelegramLLMBotRunner:
         @dp.message(CommandStart())
         async def start_handler(message: Message) -> None:
             await self.bot.send_message(message.chat.id, "OpenClaw agent online")
+
+
+        @dp.callback_query(F.data.startswith("approval:"))
+        async def approval_callback(callback: CallbackQuery) -> None:
+            _, approval_id, action = callback.data.split(":", 2)
+            await self.adapter.on_approval_callback(approval_id, callback.message.chat.id, action)
+            await callback.answer("Recorded")
 
         @dp.message()
         async def message_handler(message: Message) -> None:

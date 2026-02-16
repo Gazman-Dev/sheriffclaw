@@ -10,6 +10,7 @@ from python_openclaw.gateway.secure_web import SecureWebConfig, SecureWebRequest
 from python_openclaw.gateway.secrets.store import SecretStore
 from python_openclaw.gateway.sessions import IdentityManager
 from python_openclaw.gateway.transcript import TranscriptStore
+from python_openclaw.gateway.services import RequestService, ToolsService
 from python_openclaw.security.gate import ApprovalGate
 from python_openclaw.security.permissions import PermissionStore
 
@@ -36,11 +37,11 @@ def test_gateway_forwards_worker_stream(tmp_path: Path, monkeypatch):
 
     store = SecretStore(tmp_path / "secrets.enc")
     store.unlock("pw")
-    store.set_secret("github", "Bearer tok")
+    store.set_secret("github_token", "Bearer tok")
     secure_web = SecureWebRequester(
         GatewayPolicy({"api.github.com"}),
         store,
-        SecureWebConfig(header_allowlist={"accept"}, auth_host_permissions={"github": {"api.github.com"}}),
+        SecureWebConfig(header_allowlist={"accept"}),
     )
 
     core = GatewayCore(
@@ -49,6 +50,8 @@ def test_gateway_forwards_worker_stream(tmp_path: Path, monkeypatch):
         ipc_client=IPCClient(),
         secure_web=secure_web,
         approval_gate=ApprovalGate(PermissionStore(tmp_path / "permissions.db")),
+        tools=ToolsService(PermissionStore(tmp_path / "permissions.db"), store),
+        requests=RequestService(PermissionStore(tmp_path / "permissions.db"), store),
     )
 
     channel = MockChannel()

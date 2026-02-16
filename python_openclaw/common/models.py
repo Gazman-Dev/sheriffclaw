@@ -8,7 +8,7 @@ from typing import Any
 @dataclass(slots=True)
 class Principal:
     principal_id: str
-    role: str  # user | operator
+    role: str  # user | worker | gateway
 
 
 @dataclass(slots=True)

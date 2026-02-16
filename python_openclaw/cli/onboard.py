@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 from pathlib import Path
 
@@ -21,48 +20,29 @@ def _ensure_identity_templates(workspace: Path) -> None:
             path.write_text(content, encoding="utf-8")
 
 
-def run_onboard(base_dir: Path) -> None:
-    base_dir.mkdir(parents=True, exist_ok=True)
-    print("Sheriff Claw onboarding wizard")
-
+def _select_provider() -> str:
     print("Supported providers:")
     for idx, provider in enumerate(SUPPORTED_PROVIDERS, start=1):
         print(f"  {idx}. {provider}")
 
-    selected = ""
-    while selected not in SUPPORTED_PROVIDERS:
-        raw = input("Select provider by name: ").strip().lower()
-        if raw in SUPPORTED_PROVIDERS:
-            selected = raw
+    while True:
+        raw = input(f"Select provider [1-{len(SUPPORTED_PROVIDERS)}]: ").strip()
+        if raw.isdigit():
+            index = int(raw)
+            if 1 <= index <= len(SUPPORTED_PROVIDERS):
+                return SUPPORTED_PROVIDERS[index - 1]
 
-    api_key = ""
-    while not api_key:
-        api_key = input(f"{selected} API key (required): ").strip()
 
-    agent_token = ""
-    while not agent_token:
-        agent_token = input("OPENCLAW_AGENT_TOKEN: ").strip()
+def run_onboard(base_dir: Path) -> None:
+    base_dir.mkdir(parents=True, exist_ok=True)
+    print("Sheriff Claw onboarding wizard")
 
-    gate_token = ""
-    while not gate_token:
-        gate_token = input("OPENCLAW_GATE_TOKEN: ").strip()
-
-    secrets_blob = base64.b64encode(
-        json.dumps(
-            {
-                "api_keys": {selected: api_key},
-                "telegram": {
-                    "OPENCLAW_AGENT_TOKEN": agent_token,
-                    "OPENCLAW_GATE_TOKEN": gate_token,
-                },
-            }
-        ).encode("utf-8")
-    )
-    (base_dir / "secrets.enc").write_bytes(secrets_blob)
+    selected = _select_provider()
 
     cfg = {
         "agents": {"defaults": {"model": {"primary": f"{selected}/best", "fallbacks": []}}},
         "provider": selected,
+        "users": [],
     }
     (base_dir / "openclaw.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 

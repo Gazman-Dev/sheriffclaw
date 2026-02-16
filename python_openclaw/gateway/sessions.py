@@ -11,14 +11,12 @@ class IdentityManager:
     principals: dict[str, Principal]
     bindings: dict[tuple[str, str], Binding]
     llm_allowed_telegram_user_ids: set[int]
-    operator_telegram_user_ids: set[int]
     gate_bindings: dict[str, str]
 
     def __init__(self) -> None:
         self.principals = {}
         self.bindings = {}
         self.llm_allowed_telegram_user_ids = set()
-        self.operator_telegram_user_ids = set()
         self.gate_bindings = {}
 
     def add_principal(self, principal: Principal) -> None:
@@ -42,14 +40,8 @@ class IdentityManager:
     def allow_llm_user(self, user_id: int) -> None:
         self.llm_allowed_telegram_user_ids.add(user_id)
 
-    def allow_operator(self, user_id: int) -> None:
-        self.operator_telegram_user_ids.add(user_id)
-
     def is_llm_user_allowed(self, user_id: int) -> bool:
         return user_id in self.llm_allowed_telegram_user_ids
-
-    def is_operator_allowed(self, user_id: int) -> bool:
-        return user_id in self.operator_telegram_user_ids
 
 
 def session_key(channel: str, context: dict[str, Any]) -> str:

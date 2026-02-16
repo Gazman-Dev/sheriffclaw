@@ -8,6 +8,8 @@ from typing import Protocol
 from python_openclaw.common.models import Principal
 from python_openclaw.gateway.ipc_server import IPCClient
 from python_openclaw.gateway.secure_web import SecureWebError, SecureWebRequester, body_summary
+from python_openclaw.gateway.secrets.store import SecretNotFoundError
+from python_openclaw.gateway.services import RequestService, ToolsService
 from python_openclaw.gateway.sessions import IdentityManager, session_key
 from python_openclaw.gateway.transcript import TranscriptStore
 from python_openclaw.security.gate import ApprovalGate
@@ -26,6 +28,8 @@ class GatewayCore:
     transcripts: TranscriptStore
     ipc_client: IPCClient
     secure_web: SecureWebRequester
+    tools: ToolsService
+    requests: RequestService
     approval_gate: ApprovalGate
     audit_log: list[dict]
 
@@ -36,12 +40,16 @@ class GatewayCore:
         ipc_client: IPCClient,
         secure_web: SecureWebRequester,
         approval_gate: ApprovalGate,
+        tools: ToolsService,
+        requests: RequestService,
     ) -> None:
         self.identities = identities
         self.transcripts = transcripts
         self.ipc_client = ipc_client
         self.secure_web = secure_web
         self.approval_gate = approval_gate
+        self.tools = tools
+        self.requests = requests
         self.audit_log = []
 
     async def handle_user_message(
@@ -85,7 +93,7 @@ class GatewayCore:
             ok = self.secure_web.secrets.ensure_handle(handle)
             return {"tool_name": tool_name, "ok": ok}
 
-        if tool_name == "secure.web.request":
+        if tool_name in {"secure.web.request", "web.request"}:
             try:
                 response = self.secure_web.request(payload, principal_id=principal.principal_id)
                 self._append_audit(principal.principal_id, tool_name, payload, "executed", response)
@@ -98,15 +106,32 @@ class GatewayCore:
                     "error": str(exc),
                     "resource": {"type": exc.resource_type, "value": exc.resource_value},
                 }
+            except SecretNotFoundError as exc:
+                return {"tool_name": tool_name, "status": "error", "error": str(exc), "error_type": "SecretNotFoundError", "key": exc.handle}
             except SecureWebError as exc:
                 return {"tool_name": tool_name, "status": "error", "error": str(exc)}
+
+        if tool_name in {"tools.exec", "tools.run"}:
+            try:
+                result = self.tools.execute(payload, principal_id=principal.principal_id)
+                return {"tool_name": tool_name, **result}
+            except PermissionDeniedException as exc:
+                return {
+                    "tool_name": tool_name,
+                    "status": "permission_denied",
+                    "code": 403,
+                    "error": str(exc),
+                    "resource": {"type": exc.resource_type, "value": exc.resource_value},
+                }
+            except SecretNotFoundError as exc:
+                return {"tool_name": tool_name, "status": "error", "error": str(exc), "error_type": "SecretNotFoundError", "key": exc.handle}
 
         if tool_name == "request":
             prompt = self.approval_gate.request(
                 PermissionDeniedException(
                     principal_id=principal.principal_id,
-                    resource_type=payload.get("resource_type", "domain"),
-                    resource_value=payload.get("resource_value", payload.get("host", "unknown")),
+                    resource_type=payload.get("resource_type", payload.get("type", "domain")),
+                    resource_value=payload.get("resource_value", payload.get("target", payload.get("host", "unknown"))),
                     metadata={
                         "reason": reason,
                         "method": payload.get("method"),

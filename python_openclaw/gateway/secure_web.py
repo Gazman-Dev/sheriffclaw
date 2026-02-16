@@ -20,7 +20,6 @@ class SecureWebError(Exception):
 @dataclass
 class SecureWebConfig:
     header_allowlist: set[str]
-    auth_host_permissions: dict[str, set[str]]
     timeout_seconds: float = 10.0
     max_body_bytes: int = 64 * 1024
 
@@ -44,8 +43,6 @@ class SecureWebRequester:
         query = payload.get("query") or {}
         headers = payload.get("headers") or {}
         body = payload.get("body")
-        auth_handle = payload.get("auth_handle")
-        approval_token = payload.get("approval_token")
 
         self.policy.validate_https_request(host, path)
         if _contains_secret_placeholder(path):
@@ -53,25 +50,12 @@ class SecureWebRequester:
         for k, v in query.items():
             if _contains_secret_placeholder(str(k)) or _contains_secret_placeholder(str(v)):
                 raise SecureWebError("secret placeholder forbidden in query")
-        if auth_handle and not approval_token:
-            raise SecureWebError("approval_token required for auth requests")
-
         clean_headers = {}
         for hk, hv in headers.items():
             key = hk.lower()
-            if key == "authorization":
-                continue
             if key not in self.config.header_allowlist:
                 continue
-            if _contains_secret_placeholder(str(hv)):
-                raise SecureWebError("secret placeholder forbidden in header")
-            clean_headers[hk] = hv
-
-        if auth_handle:
-            allowed_hosts = self.config.auth_host_permissions.get(auth_handle, set())
-            if host not in allowed_hosts:
-                raise SecureWebError("auth handle not permitted for host")
-            clean_headers["Authorization"] = self.secrets.get_secret(auth_handle)
+            clean_headers[hk] = self.secrets.inject_references(str(hv))
 
         encoded_query = urllib.parse.urlencode(query, doseq=True)
         url = f"https://{host}{path}" + (f"?{encoded_query}" if encoded_query else "")

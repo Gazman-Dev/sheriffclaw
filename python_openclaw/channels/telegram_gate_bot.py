@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from python_openclaw.gateway.core import GatewayCore
+from python_openclaw.gateway.secrets.service import SecretsService
 from python_openclaw.gateway.sessions import IdentityManager
 
 
@@ -19,6 +21,8 @@ class TelegramGateBotAdapter:
     gateway: GatewayCore
     identities: IdentityManager
     bot_client: TelegramGateBotClient
+    secrets_service: SecretsService
+    on_unlock: Callable[[], None] | None = None
 
     async def send_approval_request(self, approval_id: str, context: dict) -> None:
         from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -68,10 +72,18 @@ class TelegramGateBotAdapter:
         await self.bot_client.send_message(chat_id, text)
 
     async def on_message(self, user_id: int, chat_id: int, text: str) -> None:
+        if user_id not in self.secrets_service.trusted_gate_users():
+            await self.bot_client.send_message(chat_id, "Secure gate user is not trusted")
+            return
+
         principal = self.identities.principal_for("telegram_gate", str(user_id))
         if principal is None:
-            await self.bot_client.send_message(chat_id, "Secure gate identity not bound")
-            return
+            principal_id = f"tg:{int(user_id)}"
+            from python_openclaw.common.models import Binding, Principal
+
+            principal = Principal(principal_id=principal_id, role="user")
+            self.identities.add_principal(principal)
+            self.identities.bind(Binding("telegram_gate", str(user_id), principal_id))
 
         pending = self.gateway.pending_secret_handle_for(principal.principal_id)
         if pending:
@@ -83,8 +95,16 @@ class TelegramGateBotAdapter:
         command, _, arg = text.partition(" ")
         if command == "/unlock":
             password = arg.strip()
-            self.gateway.secure_web.secrets.unlock(password)
-            await self.bot_client.send_message(chat_id, "Unlock attempt completed")
+            if not password:
+                await self.bot_client.send_message(chat_id, "Usage: /unlock <master_password>")
+                return
+            if not self.secrets_service.verify_master_password(password):
+                await self.bot_client.send_message(chat_id, "Unlock failed")
+                return
+            self.secrets_service.unlock(password)
+            if self.on_unlock:
+                self.on_unlock()
+            await self.bot_client.send_message(chat_id, "Unlocked")
             return
         if command == "/bind":
             target = arg.strip() or principal.principal_id

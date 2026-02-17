@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import sys
 import traceback
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from shared.ndjson import encode_frame
 from shared.protocol import error_response, ok_response
-
 
 Handler = Callable[[dict[str, Any], Callable[[str, dict[str, Any]], Awaitable[None]], str], Awaitable[dict[str, Any]]]
 
@@ -31,8 +32,8 @@ class NDJSONService:
     async def run_stdio(self) -> None:
         reader = asyncio.StreamReader()
         protocol = asyncio.StreamReaderProtocol(reader)
-        await asyncio.get_running_loop().connect_read_pipe(lambda: protocol, __import__("sys").stdin)
-        stdout = __import__("sys").stdout.buffer
+        await asyncio.get_running_loop().connect_read_pipe(lambda: protocol, sys.stdin)
+        stdout = sys.stdout.buffer
 
         async def emit(req_id: str, event_name: str, payload: dict) -> None:
             stdout.write(encode_frame({"id": req_id, "event": event_name, "payload": payload}))
@@ -44,9 +45,8 @@ class NDJSONService:
                 return
             if not line.strip():
                 continue
-            import json
-
-            req = json.loads(line)
+            text = line.decode("utf-8") if isinstance(line, (bytes, bytearray)) else line
+            req = json.loads(text)
             req_id = req.get("id", "")
             op = req.get("op")
             payload = req.get("payload") or {}
@@ -59,6 +59,6 @@ class NDJSONService:
                 result = await handler(payload, lambda e, p: emit(req_id, e, p), req_id)
                 stdout.write(encode_frame(ok_response(req_id, result or {})))
             except Exception as exc:  # noqa: BLE001
-                print(traceback.format_exc(), file=__import__("sys").stderr)
+                print(traceback.format_exc(), file=sys.stderr)
                 stdout.write(encode_frame(error_response(req_id, str(exc), exc.__class__.__name__)))
             stdout.flush()

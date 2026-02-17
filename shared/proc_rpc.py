@@ -17,6 +17,7 @@ class ProcClient:
         self.env = env
         self.proc: asyncio.subprocess.Process | None = None
         self._stderr_tail: deque[str] = deque(maxlen=80)
+        self._lock = asyncio.Lock()
 
     async def start(self):
         if self.proc and self.proc.returncode is None:
@@ -44,37 +45,43 @@ class ProcClient:
         line = await self.proc.stdout.readline()
         if not line:
             raise ServiceCrashedError("service exited; stderr tail:\n" + "\n".join(self._stderr_tail))
-        return json.loads(line)
+        return json.loads(line.decode("utf-8"))
 
     async def request(self, op: str, payload: dict, *, stream_events: bool = False):
         await self.start()
-        assert self.proc and self.proc.stdin
-        req_id = str(uuid.uuid4())
-        self.proc.stdin.write(encode_frame({"id": req_id, "op": op, "payload": payload}))
-        await self.proc.stdin.drain()
+        async with self._lock:
+            assert self.proc and self.proc.stdin
+            req_id = str(uuid.uuid4())
+            self.proc.stdin.write(encode_frame({"id": req_id, "op": op, "payload": payload}))
+            await self.proc.stdin.drain()
 
-        if not stream_events:
-            events = []
+            if not stream_events:
+                events = []
+                while True:
+                    frame = await self._read_frame()
+                    if frame.get("id") != req_id:
+                        raise ProtocolError(f"unexpected frame id {frame.get('id')} expected {req_id}")
+                    if "event" in frame:
+                        events.append(frame)
+                        continue
+                    return events, frame
+
+            frames: list[dict] = []
+            final = None
             while True:
                 frame = await self._read_frame()
                 if frame.get("id") != req_id:
                     raise ProtocolError(f"unexpected frame id {frame.get('id')} expected {req_id}")
                 if "event" in frame:
-                    events.append(frame)
+                    frames.append(frame)
                     continue
-                return events, frame
+                final = frame
+                break
 
-        final_future: asyncio.Future = asyncio.get_running_loop().create_future()
-
-        async def iterate() -> AsyncIterator[dict]:
-            while True:
-                frame = await self._read_frame()
-                if frame.get("id") != req_id:
-                    raise ProtocolError(f"unexpected frame id {frame.get('id')} expected {req_id}")
-                if "event" in frame:
+            async def _iterate() -> AsyncIterator[dict]:
+                for frame in frames:
                     yield frame
-                    continue
-                final_future.set_result(frame)
-                return
 
-        return iterate(), final_future
+            fut = asyncio.get_running_loop().create_future()
+            fut.set_result(final)
+            return _iterate(), fut

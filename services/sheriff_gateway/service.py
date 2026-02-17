@@ -1,66 +1,61 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
+from shared.identity import principal_id_for_channel
 from shared.paths import gw_root
 from shared.proc_rpc import ProcClient
+from shared.transcript import append_jsonl
 
 
 class SheriffGatewayService:
     def __init__(self) -> None:
-        root = gw_root()
-        self.transcripts = root / "transcripts"
-        self.transcripts.mkdir(parents=True, exist_ok=True)
         self.ai = ProcClient("ai-worker")
         self.web = ProcClient("sheriff-web")
         self.tools = ProcClient("sheriff-tools")
         self.secrets = ProcClient("sheriff-secrets")
-        self.policy = ProcClient("sheriff-policy")
-        self.session_by_principal: dict[str, str] = {}
+        self.tg_gate = ProcClient("sheriff-tg-gate")
+        self.sessions: dict[str, str] = {}
 
     async def handle_user_message(self, payload, emit_event, req_id):
-        principal = payload["principal_external_id"]
+        channel = payload.get("channel", "cli")
+        principal_id = principal_id_for_channel(channel, payload["principal_external_id"])
         text = payload.get("text", "")
-        session = self.session_by_principal.get(principal)
+        session = self.sessions.get(principal_id)
         if not session:
-            _, opened = await self.ai.request("agent.session.open", {"session_id": f"{payload.get('channel','cli')}:{principal}"})
+            _, opened = await self.ai.request("agent.session.open", {"session_id": principal_id})
             session = opened["result"]["session_handle"]
-            self.session_by_principal[principal] = session
+            self.sessions[principal_id] = session
 
-        self._append_transcript(session, {"role": "user", "content": text})
-        stream, final_fut = await self.ai.request("agent.session.user_message", {"session_handle": session, "text": text}, stream_events=True)
+        append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "user", "content": text})
+        stream, final = await self.ai.request("agent.session.user_message", {"session_handle": session, "text": text}, stream_events=True)
         async for frame in stream:
-            event = frame["event"]
-            event_payload = frame.get("payload", {})
-            if event == "tool.call":
-                tool_result = await self._route_tool(principal, event_payload)
-                await emit_event("tool.result", tool_result)
-                await self.ai.request("agent.session.tool_result", {"session_handle": session, "tool_name": event_payload.get("tool_name", "tool"), "result": tool_result})
+            if frame["event"] == "tool.call":
+                result = await self._route_tool(principal_id, frame.get("payload", {}))
+                await emit_event("tool.result", result)
+                if result.get("status") == "approval_requested":
+                    await self.tg_gate.request("gate.notify_approval_required", {"principal_id": principal_id, "approval_id": result.get("approval_id"), "context": result})
+                    return {"status": "approval_requested", "session_handle": session}
+                await self.ai.request("agent.session.tool_result", {"session_handle": session, "tool_name": frame["payload"].get("tool_name", "tool"), "result": result})
                 continue
-            await emit_event(event, event_payload)
-        await final_fut
+            await emit_event(frame["event"], frame.get("payload", {}))
+        await final
         return {"status": "done", "session_handle": session}
 
-    async def _route_tool(self, principal: str, call: dict) -> dict:
-        name = call.get("tool_name")
-        payload = call.get("payload", {})
-        if name == "secure.web.request":
-            _, resp = await self.web.request("web.request", payload)
-            return resp.get("result", resp)
-        if name == "tools.exec":
-            payload = {**payload, "principal_id": principal}
-            _, resp = await self.tools.request("tools.exec", payload)
-            return resp.get("result", resp)
-        if name == "secure.secret.ensure":
-            _, resp = await self.secrets.request("secrets.ensure_handle", payload)
-            return resp.get("result", resp)
-        return {"status": "error", "error": f"unsupported tool {name}"}
-
-    def _append_transcript(self, session: str, item: dict) -> None:
-        p = self.transcripts / f"{session.replace(':', '_')}.jsonl"
-        with p.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(item, ensure_ascii=False) + "\n")
+    async def _route_tool(self, principal_id: str, tool_call: dict) -> dict:
+        tool_name = tool_call.get("tool_name")
+        payload = tool_call.get("payload", {})
+        if tool_name == "secure.web.request":
+            _, res = await self.web.request("web.request", {**payload, "principal_id": principal_id})
+            return res["result"]
+        if tool_name == "tools.exec":
+            _, res = await self.tools.request("tools.exec", {**payload, "principal_id": principal_id})
+            return res["result"]
+        if tool_name == "secure.secret.ensure":
+            _, res = await self.secrets.request("secrets.ensure_handle", payload)
+            if res["result"].get("ok"):
+                return {"status": "available"}
+            await self.tg_gate.request("gate.request_secret", {"principal_id": principal_id, "handle": payload.get("handle")})
+            return {"status": "secret_requested", "key": payload.get("handle")}
+        return {"status": "error", "error": f"unsupported tool {tool_name}"}
 
     def ops(self):
         return {"gateway.handle_user_message": self.handle_user_message}

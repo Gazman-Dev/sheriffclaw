@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import asyncio
 
-from services.ai_tg_llm.runner import TelegramLLMRunner
+from services.ai_tg_llm.service import AITgLlmService
+from shared.protocol import VERSION
+from shared.service_base import NDJSONService
 
 
 def main() -> None:
-    asyncio.run(TelegramLLMRunner().run_forever())
+    svc = AITgLlmService()
+    app = NDJSONService(name="llm.tg_llm", island="llm", kind="service", version=VERSION, ops=svc.ops())
+    asyncio.run(app.run_stdio())
 
 
 if __name__ == "__main__":

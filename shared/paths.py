@@ -6,18 +6,19 @@ from pathlib import Path
 
 def base_root() -> Path:
     root = os.environ.get("SHERIFFCLAW_ROOT")
-    if root:
-        return Path(root).expanduser()
-    return Path.home() / ".sheriffclaw"
+    return Path(root).expanduser() if root else Path.home() / ".sheriffclaw"
+
+
+def _ensure_island(root: Path) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    for child in ("run", "logs", "state"):
+        (root / child).mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def gw_root() -> Path:
-    p = base_root() / "gw"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    return _ensure_island(base_root() / "gw")
 
 
 def llm_root() -> Path:
-    p = base_root() / "llm"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    return _ensure_island(base_root() / "llm")

@@ -12,6 +12,7 @@ class SheriffGatewayService:
         self.web = ProcClient("sheriff-web")
         self.tools = ProcClient("sheriff-tools")
         self.secrets = ProcClient("sheriff-secrets")
+        self.requests = ProcClient("sheriff-requests")
         self.tg_gate = ProcClient("sheriff-tg-gate")
         self.sessions: dict[str, str] = {}
 
@@ -31,10 +32,10 @@ class SheriffGatewayService:
             if frame["event"] == "tool.call":
                 result = await self._route_tool(principal_id, frame.get("payload", {}))
                 await emit_event("tool.result", result)
-                if result.get("status") == "approval_requested":
-                    await self.tg_gate.request("gate.notify_approval_required", {"principal_id": principal_id, "approval_id": result.get("approval_id"), "context": result})
-                    return {"status": "approval_requested", "session_handle": session}
-                await self.ai.request("agent.session.tool_result", {"session_handle": session, "tool_name": frame["payload"].get("tool_name", "tool"), "result": result})
+                await self.ai.request(
+                    "agent.session.tool_result",
+                    {"session_handle": session, "tool_name": frame["payload"].get("tool_name", "tool"), "result": result},
+                )
                 continue
             await emit_event(frame["event"], frame.get("payload", {}))
         await final
@@ -53,9 +54,29 @@ class SheriffGatewayService:
             _, res = await self.secrets.request("secrets.ensure_handle", payload)
             if res["result"].get("ok"):
                 return {"status": "available"}
-            await self.tg_gate.request("gate.request_secret", {"principal_id": principal_id, "handle": payload.get("handle")})
-            return {"status": "secret_requested", "key": payload.get("handle")}
+            return {"status": "needs_secret", "handle": payload.get("handle")}
+        if tool_name.startswith("requests."):
+            _, res = await self.requests.request(tool_name, payload)
+            return res["result"]
         return {"status": "error", "error": f"unsupported tool {tool_name}"}
 
+    async def notify_request_resolved(self, payload, emit_event, req_id):
+        if not self.sessions:
+            return {"status": "no_session"}
+        session_handle = next(reversed(self.sessions.values()))
+        result = {"type": payload.get("type"), "key": payload.get("key"), "status": payload.get("status")}
+        await self.ai.request(
+            "agent.session.tool_result",
+            {"session_handle": session_handle, "tool_name": "requests.resolved", "result": result},
+        )
+        append_jsonl(
+            gw_root() / "state" / "transcripts" / f"{session_handle.replace(':','_')}.jsonl",
+            {"role": "tool", "name": "requests.resolved", "content": result},
+        )
+        return {"status": "notified", "session_handle": session_handle}
+
     def ops(self):
-        return {"gateway.handle_user_message": self.handle_user_message}
+        return {
+            "gateway.handle_user_message": self.handle_user_message,
+            "gateway.notify_request_resolved": self.notify_request_resolved,
+        }

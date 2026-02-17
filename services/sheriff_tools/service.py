@@ -18,11 +18,7 @@ class SheriffToolsService:
         _, dec = await self.policy.request("policy.get_decision", {"principal_id": principal, "resource_type": "tool", "resource_value": argv[0]})
         decision = dec["result"].get("decision")
         if decision != "ALLOW":
-            _, apr = await self.policy.request(
-                "policy.request_permission",
-                {"principal_id": principal, "resource_type": "tool", "resource_value": argv[0], "metadata": {"op": "tools.exec"}},
-            )
-            return {"status": "approval_requested", "approval_id": apr["result"]["approval_id"], "resource": {"type": "tool", "value": argv[0]}}
+            return {"status": "needs_tool_approval", "tool": argv[0]}
         result = self.execer.exec(argv, payload.get("stdin", ""))
         if payload.get("taint"):
             run_id = payload.get("run_id") or str(uuid.uuid4())

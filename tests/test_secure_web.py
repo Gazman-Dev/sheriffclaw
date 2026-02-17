@@ -1,150 +1,63 @@
-import socket
 import urllib.request
-
 import pytest
+from unittest.mock import MagicMock
+from shared.secure_web import SecureWebRequester
+from shared.policy import GatewayPolicy
 
-from python_openclaw.gateway.policy import GatewayPolicy
-from python_openclaw.gateway.secure_web import SecureWebConfig, SecureWebError, SecureWebRequester
-from python_openclaw.gateway.secrets.store import SecretStore
-from python_openclaw.security.permissions import (
-    PermissionDeniedException,
-    PermissionEnforcer,
-    PermissionStore,
-    RESOURCE_DOMAIN,
-    RESOURCE_DOMAIN_HEADER,
-)
+def test_request_https_constructs_correct_request(monkeypatch):
+    policy = GatewayPolicy({"api.github.com"})
+    monkeypatch.setattr(policy, "validate_host", lambda h: None)
 
+    requester = SecureWebRequester(policy)
 
-class DummyResponse:
-    def __init__(self, status=200, body=b"ok", headers=None):
-        self._status = status
-        self._body = body
-        self.headers = headers or {}
+    # Mock urllib response
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.read.return_value = b'{"ok": true}'
+    mock_response.headers.items.return_value = [("Content-Type", "application/json")]
 
-    def read(self):
-        return self._body
+    mock_urlopen = MagicMock()
+    mock_urlopen.__enter__.return_value = mock_response
 
-    def getcode(self):
-        return self._status
+    # Capture request
+    captured_req = None
+    def capture(req, **kwargs):
+        nonlocal captured_req
+        captured_req = req
+        return mock_urlopen
+    monkeypatch.setattr(urllib.request, "urlopen", capture)
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_):
-        return False
-
-
-class DummyOpener:
-    def __init__(self):
-        self.last_request = None
-
-    def open(self, req, timeout=0):
-        self.last_request = req
-        return DummyResponse(headers={"content-type": "text/plain"})
-
-
-def _make_requester(tmp_path, monkeypatch):
-    monkeypatch.setattr(socket, "getaddrinfo", lambda *_args, **_kwargs: [(None, None, None, None, ("93.184.216.34", 0))])
-    secret_store = SecretStore(tmp_path / "secrets.enc")
-    secret_store.unlock("pw")
-    secret_store.set_secret("github", "token-123")
-    permission_store = PermissionStore(tmp_path / "permissions.db")
-    enforcer = PermissionEnforcer(store=permission_store)
-    requester = SecureWebRequester(
-        GatewayPolicy(allowed_hosts={"api.github.com", "example.com"}),
-        secret_store,
-        SecureWebConfig(
-            header_allowlist={"accept", "content-type"},
-            secret_header_allowlist={"authorization", "x-api-key"},
-            secret_handle_allowed_hosts={"github": {"api.github.com"}},
-        ),
-        permission_enforcer=enforcer,
-    )
-    return requester, permission_store
-
-
-def test_rejects_secret_placeholder_in_path_or_query(tmp_path, monkeypatch):
-    requester, _ = _make_requester(tmp_path, monkeypatch)
-    with pytest.raises(SecureWebError):
-        requester.request({"method": "GET", "host": "api.github.com", "path": "/users/{github}"})
-    with pytest.raises(SecureWebError):
-        requester.request({"method": "GET", "host": "api.github.com", "path": "/users", "query": {"q": "{github}"}})
-
-
-def test_rejects_secret_placeholder_in_body(tmp_path, monkeypatch):
-    requester, permission_store = _make_requester(tmp_path, monkeypatch)
-    permission_store.set_decision("u1", RESOURCE_DOMAIN, "api.github.com", "ALLOW")
-    with pytest.raises(SecureWebError):
-        requester.request(
-            {"method": "POST", "host": "api.github.com", "path": "/user", "body": {"raw": "{github}"}},
-            principal_id="u1",
-        )
-
-
-def test_rejects_direct_authorization_header(tmp_path, monkeypatch):
-    requester, permission_store = _make_requester(tmp_path, monkeypatch)
-    permission_store.set_decision("u1", RESOURCE_DOMAIN, "api.github.com", "ALLOW")
-    with pytest.raises(SecureWebError):
-        requester.request(
-            {
-                "method": "GET",
-                "host": "api.github.com",
-                "path": "/user",
-                "headers": {"Authorization": "Bearer abc"},
-            },
-            principal_id="u1",
-        )
-
-
-def test_injects_secret_only_from_secret_headers_mapping(tmp_path, monkeypatch):
-    requester, permission_store = _make_requester(tmp_path, monkeypatch)
-    permission_store.set_decision("u1", RESOURCE_DOMAIN, "api.github.com", "ALLOW")
-    opener = DummyOpener()
-    monkeypatch.setattr(urllib.request, "build_opener", lambda *_: opener)
-
-    requester.request(
-        {
-            "method": "POST",
-            "host": "api.github.com",
-            "path": "/user",
-            "headers": {"accept": "application/json", "x-other": "{github}"},
-            "secret_headers": {"Authorization": "github"},
-            "body": {"ok": "body"},
+    payload = {
+        "method": "POST",
+        "host": "api.github.com",
+        "path": "/graphql",
+        "headers": {
+            "Accept": "application/json",
+            "X-Not-Allowed": "bad"
         },
-        principal_id="u1",
-    )
+        "body": "{}"
+    }
+    # Secrets passed from SheriffGateway -> SheriffWeb -> Requester
+    resolved_secrets = {"Authorization": "Bearer token123"}
 
-    assert opener.last_request.headers["Authorization"] == "Bearer token-123"
-    assert "x-other" not in {k.lower() for k in opener.last_request.headers.keys()}
+    result = requester.request_https(payload, resolved_secrets)
 
+    assert result["status"] == 200
+    assert result["body"] == '{"ok": true}'
 
-def test_enforces_secret_handle_host_scoping(tmp_path, monkeypatch):
-    requester, permission_store = _make_requester(tmp_path, monkeypatch)
-    permission_store.set_decision("u1", RESOURCE_DOMAIN, "example.com", "ALLOW")
-    with pytest.raises(SecureWebError):
-        requester.request(
-            {
-                "method": "GET",
-                "host": "example.com",
-                "path": "/user",
-                "secret_headers": {"Authorization": "github"},
-            },
-            principal_id="u1",
-        )
+    # Verify Request object
+    assert captured_req.full_url == "https://api.github.com/graphql"
+    assert captured_req.method == "POST"
 
+    # Check headers filtering
+    headers = captured_req.headers
+    assert headers["Accept"] == "application/json"
+    assert headers["Authorization"] == "Bearer token123"
+    assert "X-Not-Allowed" not in headers  # Not in ALLOWED_HEADERS
 
-def test_secret_headers_require_domain_header_approval(tmp_path, monkeypatch):
-    requester, permission_store = _make_requester(tmp_path, monkeypatch)
-    permission_store.set_decision("u1", RESOURCE_DOMAIN, "api.github.com", "ALLOW")
-    with pytest.raises(PermissionDeniedException) as exc:
-        requester.request(
-            {
-                "method": "GET",
-                "host": "api.github.com",
-                "path": "/user",
-                "secret_headers": {"Authorization": "github", "X-Custom": "github"},
-            },
-            principal_id="u1",
-        )
-    assert exc.value.resource_type == RESOURCE_DOMAIN_HEADER
-    assert exc.value.resource_value == "api.github.com|x-custom"
+def test_request_https_enforces_policy():
+    policy = GatewayPolicy(set()) # Empty allowlist
+    requester = SecureWebRequester(policy)
+
+    with pytest.raises(ValueError, match="host not allowlisted"):
+        requester.request_https({"host": "evil.com"}, {})

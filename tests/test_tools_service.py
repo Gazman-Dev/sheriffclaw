@@ -1,68 +1,78 @@
-from pathlib import Path
-
 import pytest
+from unittest.mock import AsyncMock, MagicMock
+from services.sheriff_tools.service import SheriffToolsService
 
-from python_openclaw.gateway.secrets.store import SecretStore
-from python_openclaw.gateway.services import ToolsService
-from python_openclaw.security.permissions import PermissionDeniedException, PermissionStore
+@pytest.fixture
+def tools_svc(tmp_path, monkeypatch):
+    monkeypatch.setattr("services.sheriff_tools.service.gw_root", lambda: tmp_path)
+    svc = SheriffToolsService()
+    svc.policy = AsyncMock() # Mock ProcClient
+    return svc
 
+@pytest.mark.asyncio
+async def test_exec_tool_allowed(tools_svc):
+    # Mock Policy ALLOW
+    tools_svc.policy.request.return_value = (None, {"result": {"decision": "ALLOW"}})
 
-def _tools(tmp_path: Path) -> ToolsService:
-    store = PermissionStore(tmp_path / "permissions.db")
-    store.set_decision("u1", "tool", "python3", "ALLOW")
-    secrets = SecretStore(tmp_path / "secrets.enc")
-    secrets.unlock("pw")
-    secrets.set_secret("api_token", "abc123")
-    return ToolsService(store, secrets)
+    result = await tools_svc.exec_tool({
+        "principal_id": "u1",
+        "argv": ["python", "-c", "print('ok')"]
+    }, None, "r1")
 
-
-def test_tools_service_requires_tool_permission(tmp_path: Path):
-    store = PermissionStore(tmp_path / "permissions.db")
-    secrets = SecretStore(tmp_path / "secrets.enc")
-    secrets.unlock("pw")
-    tools = ToolsService(store, secrets)
-
-    with pytest.raises(PermissionDeniedException):
-        tools.execute({"argv": ["echo", "hello"]}, principal_id="u1")
-
-
-def test_tools_service_rejects_command_field(tmp_path: Path):
-    tools = _tools(tmp_path)
-    result = tools.execute({"command": "echo hello"}, principal_id="u1")
-    assert result["status"] == "error"
-    assert "not supported" in result["error"]
-
-
-def test_tools_service_no_secret_substitution(tmp_path: Path):
-    tools = _tools(tmp_path)
-    result = tools.execute(
-        {
-            "argv": ["python3", "-c", "import sys; print(sys.stdin.read())"],
-            "stdin": "{api_token}",
-        },
-        principal_id="u1",
-    )
-    assert result["status"] == "error"
-    assert "placeholders" in result["error"]
-
-
-def test_tools_service_rejects_placeholder_in_argv(tmp_path: Path):
-    tools = _tools(tmp_path)
-    result = tools.execute({"argv": ["python3", "-c", "print(1)", "{missing}"]}, principal_id="u1")
-    assert result["status"] == "error"
-
-
-def test_tools_service_rejects_suspicious_shell_tokens(tmp_path: Path):
-    tools = _tools(tmp_path)
-    result = tools.execute({"argv": ["python3", "-c", "print('x')", "&&"]}, principal_id="u1")
-    assert result["status"] == "error"
-
-
-def test_tainted_tool_output_is_suppressed(tmp_path: Path):
-    tools = _tools(tmp_path)
-    result = tools.execute({"argv": ["python3", "-c", "print(42)"], "taint": True}, principal_id="u1")
     assert result["status"] == "executed"
-    assert result["tainted"] is True
-    assert "stdout" not in result and "stderr" not in result
-    assert result["disclosure_available"] is True
-    assert "run_id" in result
+    assert "ok" in result["stdout"]
+
+@pytest.mark.asyncio
+async def test_exec_tool_denied_triggers_approval(tools_svc):
+    # Mock Policy DENY -> Request Permission
+    tools_svc.policy.request.side_effect = [
+        (None, {"result": {"decision": "DENY"}}),  # get_decision
+        (None, {"result": {"approval_id": "app-1"}}) # request_permission
+    ]
+
+    result = await tools_svc.exec_tool({
+        "principal_id": "u1",
+        "argv": ["rm", "-rf", "/"]
+    }, None, "r1")
+
+    assert result["status"] == "approval_requested"
+    assert result["approval_id"] == "app-1"
+
+@pytest.mark.asyncio
+async def test_disclose_output_check(tools_svc):
+    # 1. Run tainted tool
+    tools_svc.policy.request.return_value = (None, {"result": {"decision": "ALLOW"}})
+    run_res = await tools_svc.exec_tool({
+        "principal_id": "u1",
+        "argv": ["python", "-c", "print('secret')"],
+        "taint": True
+    }, None, "r1")
+
+    run_id = run_res["run_id"]
+
+    # 2. Try disclose (simulate policy requires approval first)
+    # The service calls consume_one_off first. 
+    # If not approved, it calls request_permission.
+    tools_svc.policy.request.side_effect = [
+        (None, {"result": {"approval_id": "app-2"}}) # request_permission for disclose
+    ]
+
+    disc_res = await tools_svc.disclose_output({
+        "principal_id": "u1",
+        "run_id": run_id
+    }, None, "r2")
+
+    assert disc_res["status"] == "approval_requested"
+
+    # 3. Simulate approved
+    tools_svc.policy.request.side_effect = None
+    tools_svc.policy.request.return_value = (None, {"result": {"approved": True}}) # consume_one_off
+
+    disc_res_2 = await tools_svc.disclose_output({
+        "principal_id": "u1",
+        "run_id": run_id,
+        "approval_id": "app-2"
+    }, None, "r3")
+
+    assert disc_res_2["status"] == "ok"
+    assert "secret" in disc_res_2["stdout"]

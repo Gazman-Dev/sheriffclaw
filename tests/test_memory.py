@@ -1,30 +1,50 @@
-from pathlib import Path
+import pytest
+from shared.worker.worker_runtime import WorkerRuntime
 
-import asyncio
+@pytest.mark.asyncio
+async def test_worker_session_open_close():
+    runtime = WorkerRuntime()
+    handle = await runtime.session_open("test-session")
+    assert handle == "test-session"
+    assert "test-session" in runtime.sessions
 
-from python_openclaw.memory.sessions import SessionManager
-from python_openclaw.memory.workspace import WorkspaceLoader
+    await runtime.session_close(handle)
+    assert "test-session" not in runtime.sessions
 
+@pytest.mark.asyncio
+async def test_worker_generates_uuid_for_empty_session():
+    runtime = WorkerRuntime()
+    handle = await runtime.session_open(None)
+    assert handle
+    assert isinstance(handle, str)
+    assert handle in runtime.sessions
 
-def test_workspace_loader_reads_files(tmp_path: Path):
-    (tmp_path / "SOUL.md").write_text("soul", encoding="utf-8")
-    (tmp_path / "USER.md").write_text("user", encoding="utf-8")
-    ctx = WorkspaceLoader(tmp_path).load()
-    assert "soul" in ctx.system_prompt()
+@pytest.mark.asyncio
+async def test_worker_history_accumulation():
+    runtime = WorkerRuntime()
+    handle = await runtime.session_open("history-test")
 
+    async def noop_emit(event, payload):
+        pass
 
-def test_workspace_loader_reload_on_mtime_change(tmp_path: Path):
-    soul_path = tmp_path / "SOUL.md"
-    soul_path.write_text("v1", encoding="utf-8")
-    loader = WorkspaceLoader(tmp_path)
-    assert "v1" in loader.load().system_prompt()
-    soul_path.write_text("v2 updated", encoding="utf-8")
-    assert "v2 updated" in loader.load().system_prompt()
+    # Sending a message adds user message + assistant reply to history
+    await runtime.user_message(handle, "hello", None, noop_emit)
 
+    history = runtime.sessions[handle]
+    assert len(history) == 2
+    assert history[0]["role"] == "user"
+    assert history[0]["content"] == "hello"
+    assert history[1]["role"] == "assistant"
 
-def test_session_compaction(tmp_path: Path):
-    mgr = SessionManager(tmp_path, config=None)
-    for i in range(200):
-        mgr.append("a:b", {"role": "user", "content": "x" * 1000, "i": i})
-    compacted = asyncio.run(mgr.maybe_compact("a:b", lambda events: f"summary:{len(events)}"))
-    assert compacted is True
+@pytest.mark.asyncio
+async def test_tool_result_appending():
+    runtime = WorkerRuntime()
+    handle = await runtime.session_open("tool-test")
+
+    await runtime.tool_result(handle, "my_tool", {"status": "ok"})
+
+    history = runtime.sessions[handle]
+    assert len(history) == 1
+    assert history[0]["role"] == "tool"
+    assert history[0]["name"] == "my_tool"
+    assert "ok" in history[0]["content"]

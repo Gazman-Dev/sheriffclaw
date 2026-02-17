@@ -1,134 +1,78 @@
-import asyncio
-
 import pytest
+from unittest.mock import AsyncMock
+from services.sheriff_gateway.service import SheriffGatewayService
 
-from python_openclaw.common.models import Principal
-from python_openclaw.gateway.core import GatewayCore
-from python_openclaw.gateway.ipc_server import IPCClient
-from python_openclaw.gateway.policy import GatewayPolicy
-from python_openclaw.gateway.secure_web import SecureWebConfig, SecureWebRequester
-from python_openclaw.gateway.secrets.store import SecretStore
-from python_openclaw.gateway.services import RequestService, ToolsService
-from python_openclaw.gateway.sessions import IdentityManager
-from python_openclaw.gateway.transcript import TranscriptStore
-from python_openclaw.security.gate import ApprovalGate
-from python_openclaw.security.permissions import PermissionDeniedException, PermissionEnforcer, PermissionStore
+@pytest.mark.asyncio
+async def test_gateway_routes_approval_request_to_gate():
+    svc = SheriffGatewayService()
+    svc.ai = AsyncMock()
+    svc.tg_gate = AsyncMock()
 
+    # AI returns tool call -> Gateway calls Tool -> Tool returns approval_requested
 
-class FakeSecureGateAdapter:
-    def __init__(self):
-        self.approvals = []
-        self.messages = []
+    # Mock the tool route method
+    svc._route_tool = AsyncMock(return_value={
+        "status": "approval_requested",
+        "approval_id": "123",
+        "resource": {"type": "tool", "value": "exec"}
+    })
 
-    async def send_approval_request(self, approval_id: str, context: dict) -> None:
-        self.approvals.append((approval_id, context))
+    # Mock AI stream
+    async def ai_stream():
+        yield {
+            "event": "tool.call",
+            "payload": {"tool_name": "tools.exec", "payload": {}}
+        }
 
-    async def send_secret_request(self, session_key: str, principal_id: str, handle: str) -> None:
-        self.messages.append((session_key, principal_id, handle))
+    # FIXED: Handle agent.session.open which expects (events, frame)
+    # AND agent.session.user_message which expects (stream, fut)
+    async def mock_ai_request(op, payload, stream_events=False):
+        if op == "agent.session.open":
+            return [], {"result": {"session_handle": "s1"}}
+        return ai_stream(), AsyncMock()
 
-    async def send_gate_message(self, session_key: str, text: str) -> None:
-        self.messages.append((session_key, text))
+    svc.ai.request.side_effect = mock_ai_request
 
+    # Call
+    res = await svc.handle_user_message({
+        "channel": "cli",
+        "principal_external_id": "u1",
+        "text": "run unsafe"
+    }, AsyncMock(), "r1")
 
-@pytest.fixture
-def core(tmp_path, monkeypatch):
-    import socket
-    import urllib.request
+    # Assert
+    assert res["status"] == "approval_requested"
 
-    monkeypatch.setattr(socket, "getaddrinfo", lambda *_args, **_kwargs: [(None, None, None, None, ("93.184.216.34", 0))])
-
-    class Resp:
-        headers = {}
-
-        def read(self):
-            return b"ok"
-
-        def getcode(self):
-            return 200
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_):
-            return False
-
-    class Opener:
-        def open(self, req, timeout=0):
-            return Resp()
-
-    monkeypatch.setattr(urllib.request, "build_opener", lambda *_: Opener())
-
-    identities = IdentityManager()
-    identities.bind_gate_channel("u1", "tg:dm:1")
-    permission_store = PermissionStore(tmp_path / "permissions.db")
-    secure_store = SecretStore(tmp_path / "secrets.enc")
-    secure_store.unlock("pw")
-    secure_store.set_secret("github", "tok")
-    secure_web = SecureWebRequester(
-        GatewayPolicy({"api.github.com"}),
-        secure_store,
-        SecureWebConfig(
-            header_allowlist={"accept"},
-            secret_header_allowlist={"authorization", "x-api-key"},
-            secret_handle_allowed_hosts={"github": {"api.github.com"}},
-        ),
-        permission_enforcer=PermissionEnforcer(store=permission_store),
+    # Check that TG Gate was notified
+    svc.tg_gate.request.assert_called_with(
+        "gate.notify_approval_required",
+        {
+            "principal_id": "cli:u1",
+            "approval_id": "123",
+            "context": {"status": "approval_requested", "approval_id": "123", "resource": {"type": "tool", "value": "exec"}}
+        }
     )
-    gateway = GatewayCore(
-        identities=identities,
-        transcripts=TranscriptStore(tmp_path / "t"),
-        ipc_client=IPCClient(),
-        secure_web=secure_web,
-        approval_gate=ApprovalGate(permission_store),
-        tools=ToolsService(permission_store, secure_store),
-        requests=RequestService(permission_store, secure_store),
+
+@pytest.mark.asyncio
+async def test_gateway_handles_secret_request():
+    svc = SheriffGatewayService()
+    svc.ai = AsyncMock()
+    svc.tg_gate = AsyncMock()
+    svc.secrets = AsyncMock()
+
+    # Mock secrets.ensure_handle returning False (secret missing)
+    svc.secrets.request.return_value = (None, {"result": {"ok": False}})
+
+    # Mock tool routing logic for secret.ensure
+    res = await svc._route_tool("u1", {
+        "tool_name": "secure.secret.ensure",
+        "payload": {"handle": "missing_key"}
+    })
+
+    assert res["status"] == "secret_requested"
+
+    # Verify Gate notification
+    svc.tg_gate.request.assert_called_with(
+        "gate.request_secret",
+        {"principal_id": "u1", "handle": "missing_key"}
     )
-    gateway.set_secure_gate_adapter(FakeSecureGateAdapter())
-    return gateway
-
-
-def test_secret_web_request_creates_gate_approval(core: GatewayCore):
-    principal = Principal("u1", "user")
-    payload = {
-        "tool_name": "secure.web.request",
-        "payload": {
-            "method": "GET",
-            "host": "api.github.com",
-            "path": "/user",
-            "secret_headers": {"Authorization": "github"},
-        },
-    }
-    result = core._handle_tool_call(principal, payload)
-    assert result["status"] == "approval_requested"
-    assert core.secure_gate_adapter.approvals
-
-
-def test_disclosure_flow_requires_one_time_approval_and_sends_to_gate(core: GatewayCore):
-    principal = Principal("u1", "user")
-    store = core.approval_gate.store
-    store.set_decision("u1", "tool", "python3", "ALLOW")
-
-    tool_result = core._handle_tool_call(principal, {"tool_name": "tools.exec", "payload": {"argv": ["python3", "-c", "print(42)"], "taint": True}})
-    run_id = tool_result["run_id"]
-
-    disclose = core._handle_tool_call(
-        principal,
-        {"tool_name": "secure.disclose_output", "payload": {"run_id": run_id, "target": "secure_channel"}},
-    )
-    approval_id = disclose["approval_id"]
-
-    core.approval_gate.apply_callback(approval_id, "approve_this_request")
-    asyncio.run(asyncio.sleep(0))
-
-    assert any("Disclosed output" in msg[1] for msg in core.secure_gate_adapter.messages)
-
-
-def test_allow_once_removed_and_always_allow_persists(core: GatewayCore):
-    prompt = core.approval_gate.request(PermissionDeniedException("u1", "domain", "api.github.com"))
-    core.approval_gate.apply_callback(prompt.approval_id, "allow_once")
-    assert core.approval_gate.store.get_decision("u1", "domain", "api.github.com") is None
-
-    prompt2 = core.approval_gate.request(PermissionDeniedException("u1", "domain", "api.github.com"))
-    core.approval_gate.apply_callback(prompt2.approval_id, "always_allow")
-    decision = core.approval_gate.store.get_decision("u1", "domain", "api.github.com")
-    assert decision and decision.decision == "ALLOW"

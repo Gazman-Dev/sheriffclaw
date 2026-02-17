@@ -1,23 +1,43 @@
-import time
+from shared.approvals import ApprovalGate
 
-from python_openclaw.gateway.approvals import ApprovalManager
+def test_approval_request_lifecycle():
+    gate = ApprovalGate()
 
+    # 1. Request
+    req = gate.request_permission("user1", "domain", "example.com", {"op": "test"})
+    approval_id = req["approval_id"]
+    assert approval_id in gate.pending
+    assert gate.pending[approval_id]["principal_id"] == "user1"
 
-def test_approval_token_one_time_and_expiry():
-    mgr = ApprovalManager(ttl_seconds=1)
-    req = mgr.request("p1", "secure.web.request", {"host": "api.github.com"})
-    token = mgr.decide(req.approval_id, True)
-    assert token
-    assert mgr.verify_and_consume(token) is True
-    assert mgr.verify_and_consume(token) is False
+    # 2. Approve (One-Off)
+    result = gate.apply_callback(approval_id, "approve_this_request")
+    assert result["action"] == "approve_this_request"
 
-    req2 = mgr.request("p1", "secure.web.request", {"host": "api.github.com"})
-    token2 = mgr.decide(req2.approval_id, True)
-    time.sleep(1.1)
-    assert mgr.verify_and_consume(token2) is False
+    # FIXED: It remains in pending until consumed because it's a one-off
+    assert approval_id in gate.pending
+    assert approval_id in gate.one_off
 
+    # 3. Consume
+    assert gate.consume_one_off(approval_id) is True
 
-def test_deny_returns_none():
-    mgr = ApprovalManager()
-    req = mgr.request("p", "secure.web.request", {})
-    assert mgr.decide(req.approval_id, False) is None
+    # FIXED: Now it is removed from pending
+    assert approval_id not in gate.pending
+
+    # Cannot consume twice
+    assert gate.consume_one_off(approval_id) is False
+
+def test_approval_deny():
+    gate = ApprovalGate()
+    req = gate.request_permission("user1", "tool", "exec")
+    approval_id = req["approval_id"]
+
+    gate.apply_callback(approval_id, "deny")
+
+    assert approval_id not in gate.pending
+    assert approval_id not in gate.one_off
+    assert gate.consume_one_off(approval_id) is False
+
+def test_unknown_approval_id():
+    gate = ApprovalGate()
+    assert gate.apply_callback("missing", "allow") is None
+    assert gate.consume_one_off("missing") is False

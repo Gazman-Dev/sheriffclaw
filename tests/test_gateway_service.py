@@ -1,0 +1,108 @@
+import pytest
+from unittest.mock import MagicMock, AsyncMock
+from services.sheriff_gateway.service import SheriffGatewayService
+
+# Mock ProcClient since we can't spawn real processes in unit tests
+class MockProcClient:
+    def __init__(self, name):
+        self.name = name
+        self.requests = []
+
+    async def request(self, op, payload, stream_events=False):
+        self.requests.append((op, payload))
+
+        # Default mock behavior
+        if op == "agent.session.open":
+            # FIXED: Returns (events, frame) for non-streaming calls
+            return [], {"result": {"session_handle": "sess-1"}}
+
+        if op == "agent.session.user_message":
+            # Return a stream generator and a future
+            async def _stream():
+                if False: yield {} # make it a generator
+            fut = AsyncMock()
+            return _stream(), fut
+
+        if op == "web.request":
+            return [], {"result": {"status": 200, "body": "web-ok"}}
+
+        return [], {"result": {}}
+
+@pytest.mark.asyncio
+async def test_gateway_opens_session_and_forwards_message():
+    svc = SheriffGatewayService()
+    svc.ai = MockProcClient("ai-worker")
+
+    # Mock the streaming response from AI
+    # We need to handle 'agent.session.open' AND 'agent.session.user_message'
+
+    async def ai_stream():
+        yield {"event": "assistant.delta", "payload": {"text": "hi"}}
+
+    async def mock_request(op, payload, stream_events=False):
+        if op == "agent.session.open":
+            return [], {"result": {"session_handle": "sess-1"}}
+        if op == "agent.session.user_message":
+            return ai_stream(), AsyncMock()
+        return [], {"result": {}}
+
+    svc.ai.request = AsyncMock(side_effect=mock_request)
+
+    events = []
+    async def emit(e, p): events.append((e,p))
+
+    await svc.handle_user_message({
+        "channel": "cli",
+        "principal_external_id": "u1",
+        "text": "hello"
+    }, emit, "req-1")
+
+    # Verify events passed through
+    assert ("assistant.delta", {"text": "hi"}) in events
+
+@pytest.mark.asyncio
+async def test_gateway_routes_web_tool():
+    svc = SheriffGatewayService()
+    svc.ai = MockProcClient("ai-worker")
+    svc.web = MockProcClient("sheriff-web")
+
+    # Mock AI returning a tool call
+    async def ai_stream():
+        yield {
+            "event": "tool.call",
+            "payload": {
+                "tool_name": "secure.web.request",
+                "payload": {"host": "example.com"}
+            }
+        }
+
+    async def mock_ai_request(op, payload, stream_events=False):
+        if op == "agent.session.open":
+            return [], {"result": {"session_handle": "sess-1"}}
+        if op == "agent.session.user_message":
+            return ai_stream(), AsyncMock()
+        # Fallback for tool_result etc
+        return [], {"result": {}}
+
+    svc.ai.request = AsyncMock(side_effect=mock_ai_request)
+
+    # Mock Web response
+    svc.web.request = AsyncMock(return_value=([], {"result": {"status": 200}}))
+
+    events = []
+    async def emit(e, p): events.append((e,p))
+
+    await svc.handle_user_message({
+        "channel": "cli",
+        "principal_external_id": "u1",
+        "text": "fetch web"
+    }, emit, "req-1")
+
+    # Check that tool result was emitted
+    tool_results = [p for e, p in events if e == "tool.result"]
+    assert len(tool_results) == 1
+    assert tool_results[0]["status"] == 200
+
+    # Check routing to web service
+    assert svc.web.request.call_args[0][0] == "web.request"
+    assert svc.web.request.call_args[0][1]["host"] == "example.com"

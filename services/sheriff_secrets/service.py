@@ -1,61 +1,59 @@
 from __future__ import annotations
 
-from python_openclaw.gateway.secrets.service import SecretsService
 from shared.paths import gw_root
+from shared.secrets_state import SecretsState
 
 
 class SheriffSecretsService:
     def __init__(self) -> None:
-        root = gw_root()
-        self.svc = SecretsService(
-            encrypted_path=root / "secrets_service.enc",
-            master_verifier_path=root / "master.json",
-            telegram_secrets_path=root / "telegram_secrets_channel.json",
-        )
+        state_dir = gw_root() / "state"
+        self.state = SecretsState(state_dir / "secrets.enc", state_dir / "master.json")
 
     async def initialize(self, payload, emit_event, req_id):
-        self.svc.initialize(**payload)
+        self.state.initialize(payload)
         return {"status": "initialized"}
 
     async def verify_master(self, payload, emit_event, req_id):
-        return {"ok": self.svc.verify_master_password(payload.get("password", ""))}
+        return {"ok": self.state.verify_master_password(payload["master_password"])}
 
     async def unlock(self, payload, emit_event, req_id):
-        self.svc.unlock(payload["password"])
-        return {"status": "unlocked"}
+        return {"ok": self.state.unlock(payload["master_password"])}
 
     async def lock(self, payload, emit_event, req_id):
-        self.svc.lock()
+        self.state.lock()
         return {"status": "locked"}
 
-    async def get_identity(self, payload, emit_event, req_id):
-        return {"identity": self.svc.get_identity_state()}
+    async def is_unlocked(self, payload, emit_event, req_id):
+        return {"unlocked": self.state.is_unlocked()}
 
-    async def save_identity(self, payload, emit_event, req_id):
-        self.svc.save_identity_state(payload.get("identity", {}))
-        return {"status": "saved"}
+    async def get_secret(self, payload, emit_event, req_id):
+        return {"value": self.state.get_secret(payload["handle"])}
 
     async def set_secret(self, payload, emit_event, req_id):
-        self.svc.set_secret(payload["handle"], payload["value"])
+        self.state.set_secret(payload["handle"], payload["value"])
         return {"status": "saved"}
 
     async def ensure_handle(self, payload, emit_event, req_id):
-        return {"ok": self.svc.ensure_handle(payload["handle"])}
+        return {"ok": self.state.ensure_handle(payload["handle"])}
 
-    async def get_secret(self, payload, emit_event, req_id):
-        return {"value": self.svc.get_secret(payload["handle"])}
+    async def get_llm_provider(self, payload, emit_event, req_id):
+        return {"provider": self.state.get_llm_provider()}
 
-    async def get_llm_bot(self, payload, emit_event, req_id):
-        return {"token": self.svc.get_llm_bot_token()}
+    async def get_llm_api_key(self, payload, emit_event, req_id):
+        return {"api_key": self.state.get_llm_api_key()}
 
-    async def get_gate_bot(self, payload, emit_event, req_id):
-        return {"token": self.svc.get_gate_bot_token()}
+    async def get_llm_bot_token(self, payload, emit_event, req_id):
+        return {"token": self.state.get_llm_bot_token()}
 
-    async def get_provider(self, payload, emit_event, req_id):
-        return {"provider": self.svc.get_provider()}
+    async def get_gate_bot_token(self, payload, emit_event, req_id):
+        return {"token": self.state.get_gate_bot_token()}
 
-    async def get_api_key(self, payload, emit_event, req_id):
-        return {"api_key": self.svc.get_llm_api_key()}
+    async def identity_get(self, payload, emit_event, req_id):
+        return self.state.get_identity()
+
+    async def identity_save(self, payload, emit_event, req_id):
+        self.state.save_identity(payload)
+        return {"status": "saved"}
 
     def ops(self):
         return {
@@ -63,13 +61,14 @@ class SheriffSecretsService:
             "secrets.verify_master_password": self.verify_master,
             "secrets.unlock": self.unlock,
             "secrets.lock": self.lock,
-            "secrets.get_identity_state": self.get_identity,
-            "secrets.save_identity_state": self.save_identity,
+            "secrets.is_unlocked": self.is_unlocked,
+            "secrets.get_llm_bot_token": self.get_llm_bot_token,
+            "secrets.get_gate_bot_token": self.get_gate_bot_token,
+            "secrets.get_llm_provider": self.get_llm_provider,
+            "secrets.get_llm_api_key": self.get_llm_api_key,
+            "secrets.get_secret": self.get_secret,
             "secrets.set_secret": self.set_secret,
             "secrets.ensure_handle": self.ensure_handle,
-            "secrets.get_secret": self.get_secret,
-            "secrets.get_llm_bot_token": self.get_llm_bot,
-            "secrets.get_gate_bot_token": self.get_gate_bot,
-            "secrets.get_llm_provider": self.get_provider,
-            "secrets.get_llm_api_key": self.get_api_key,
+            "secrets.identity.get": self.identity_get,
+            "secrets.identity.save": self.identity_save,
         }

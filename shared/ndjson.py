@@ -11,7 +11,8 @@ async def read_frames(reader) -> AsyncIterator[dict]:
             break
         if not line.strip():
             continue
-        yield json.loads(line)
+        text = line.decode("utf-8") if isinstance(line, (bytes, bytearray)) else line
+        yield json.loads(text)
 
 
 def encode_frame(frame: dict) -> bytes:

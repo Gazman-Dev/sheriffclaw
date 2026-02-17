@@ -11,3 +11,16 @@ dependencies = []
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+
+[project.scripts]
+sheriff-ctl = "services.sheriff_ctl.__main__:main"
+sheriff-gateway = "services.sheriff_gateway.__main__:main"
+sheriff-secrets = "services.sheriff_secrets.__main__:main"
+sheriff-policy = "services.sheriff_policy.__main__:main"
+sheriff-web = "services.sheriff_web.__main__:main"
+sheriff-tools = "services.sheriff_tools.__main__:main"
+sheriff-tg-gate = "services.sheriff_tg_gate.__main__:main"
+ai-worker = "services.ai_worker.__main__:main"
+ai-tg-llm = "services.ai_tg_llm.__main__:main"
+ai-skill-summarize = "services.ai_worker.__main__:main"

@@ -11,7 +11,12 @@ class SheriffPolicyService:
         self.gate = ApprovalGate()
 
     async def get_decision(self, payload, emit_event, req_id):
-        decision = self.store.get_decision(payload["principal_id"], payload["resource_type"], payload["resource_value"])
+        principal = payload["principal_id"]
+        # Check specific principal first
+        decision = self.store.get_decision(principal, payload["resource_type"], payload["resource_value"])
+        # Fallback to default (global) policy if no specific decision found
+        if decision is None and principal != "default":
+            decision = self.store.get_decision("default", payload["resource_type"], payload["resource_value"])
         return {"decision": decision}
 
     async def set_decision(self, payload, emit_event, req_id):

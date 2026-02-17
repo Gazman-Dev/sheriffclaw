@@ -32,6 +32,39 @@ async def test_policy_get_set_decision(policy_svc):
     assert res["decision"] == "ALLOW"
 
 @pytest.mark.asyncio
+async def test_policy_fallback_to_default(policy_svc):
+    # Set global allow
+    await policy_svc.set_decision({
+        "principal_id": "default",
+        "resource_type": "domain",
+        "resource_value": "global.com",
+        "decision": "ALLOW"
+    }, None, "r1")
+
+    # Check specific user gets global allow
+    res = await policy_svc.get_decision({
+        "principal_id": "u1",
+        "resource_type": "domain",
+        "resource_value": "global.com"
+    }, None, "r2")
+    assert res["decision"] == "ALLOW"
+
+    # Specific override
+    await policy_svc.set_decision({
+        "principal_id": "u1",
+        "resource_type": "domain",
+        "resource_value": "global.com",
+        "decision": "DENY"
+    }, None, "r3")
+
+    res = await policy_svc.get_decision({
+        "principal_id": "u1",
+        "resource_type": "domain",
+        "resource_value": "global.com"
+    }, None, "r4")
+    assert res["decision"] == "DENY"
+
+@pytest.mark.asyncio
 async def test_policy_approval_request(policy_svc):
     # Request permission
     req = await policy_svc.request_permission({

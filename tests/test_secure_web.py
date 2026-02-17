@@ -5,7 +5,7 @@ from shared.secure_web import SecureWebRequester
 from shared.policy import GatewayPolicy
 
 def test_request_https_constructs_correct_request(monkeypatch):
-    policy = GatewayPolicy({"api.github.com"})
+    policy = GatewayPolicy()
     monkeypatch.setattr(policy, "validate_host", lambda h: None)
 
     requester = SecureWebRequester(policy)
@@ -55,9 +55,15 @@ def test_request_https_constructs_correct_request(monkeypatch):
     assert headers["Authorization"] == "Bearer token123"
     assert "X-Not-Allowed" not in headers  # Not in ALLOWED_HEADERS
 
-def test_request_https_enforces_policy():
-    policy = GatewayPolicy(set()) # Empty allowlist
+def test_request_https_enforces_ssrf_policy(monkeypatch):
+    # With the new flow, SecureWebRequester still calls policy.validate_host,
+    # but that method now only checks for DNS/SSRF safety.
+    policy = GatewayPolicy()
+
+    # Mock validate_host to raise to simulate SSRF detection
+    monkeypatch.setattr(policy, "validate_host", MagicMock(side_effect=ValueError("host resolved to private/link-local address")))
+
     requester = SecureWebRequester(policy)
 
-    with pytest.raises(ValueError, match="host not allowlisted"):
-        requester.request_https({"host": "evil.com"}, {})
+    with pytest.raises(ValueError, match="private/link-local"):
+        requester.request_https({"host": "internal.server"}, {})

@@ -31,22 +31,13 @@ class SheriffToolsService:
         return {"status": "not_found"} if out is None else {"status": "ok", **out}
 
     async def disclose_output(self, payload, emit_event, req_id):
-        approval_id = payload.get("approval_id")
-        if approval_id:
-            _, one = await self.policy.request("policy.consume_one_off", {"approval_id": approval_id})
-            if not one["result"].get("approved"):
-                return {"status": "approval_requested", "approval_id": approval_id}
-        else:
-            _, req = await self.policy.request(
-                "policy.request_permission",
-                {
-                    "principal_id": payload["principal_id"],
-                    "resource_type": "disclose_output",
-                    "resource_value": payload["run_id"],
-                    "metadata": {"target": payload.get("target", "secure_channel")},
-                },
-            )
-            return {"status": "approval_requested", "approval_id": req["result"]["approval_id"]}
+        principal = payload["principal_id"]
+        run_id = payload["run_id"]
+        _, dec = await self.policy.request("policy.get_decision", {"principal_id": principal, "resource_type": "disclose_output", "resource_value": run_id})
+
+        if dec["result"].get("decision") != "ALLOW":
+            return {"status": "needs_disclose_approval", "run_id": run_id}
+
         return await self.get_output(payload, emit_event, req_id)
 
     def ops(self):

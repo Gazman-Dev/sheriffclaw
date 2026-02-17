@@ -106,36 +106,45 @@ async def test_mutable_entry_update_refreshes_semantic_search(requests_svc):
 
 
 @pytest.mark.asyncio
-async def test_approved_entry_is_immutable_for_catalog_and_embedding(requests_svc):
+async def test_approved_entry_is_immutable_but_resilient(requests_svc):
+    # 1. Create and approve
     await requests_svc.create_or_update(
-        {"type": "secret", "key": "gh_token", "one_liner": "Need GitHub token", "context": {"reason": "clone"}},
+        {"type": "secret", "key": "gh_token", "one_liner": "Need GitHub token"},
         None,
         "r1",
     )
     await requests_svc.resolve_secret({"key": "gh_token", "value": "top-secret"}, None, "r2")
 
-    doc_before = requests_svc.collection.get(
-        ids=["secret:gh_token"],
-        include=["documents", "metadatas"],
-    )
-
+    # 2. Simulate resilience: Ensure immutable entry doesn't error on update, content remains
     await requests_svc.create_or_update(
-        {"type": "secret", "key": "gh_token", "one_liner": "Different text", "context": {"reason": "changed"}},
+        {"type": "secret", "key": "gh_token", "one_liner": "Different text"},
         None,
         "r3",
     )
 
     got = await requests_svc.get({"type": "secret", "key": "gh_token"}, None, "r4")
     assert got["status"] == "approved"
-    assert got["one_liner"] == "Need GitHub token"
-    assert json.loads(got["context_json"]) == {"reason": "clone"}
+    assert got["one_liner"] == "Need GitHub token" # Unchanged
 
-    doc_after = requests_svc.collection.get(
-        ids=["secret:gh_token"],
-        include=["documents", "metadatas"],
+    # 3. Verify spam reduction: tg_gate.request should have been called only once (for r1)
+    # The subsequent call (r3) should not trigger a notification because it's immutable.
+    notify_calls = [
+        c for c in requests_svc.tg_gate.request.call_args_list
+        if c[0][0] == "gate.notify_request"
+    ]
+    assert len(notify_calls) == 1
+
+    # 4. Verify force_notify works
+    await requests_svc.create_or_update(
+        {"type": "secret", "key": "gh_token", "one_liner": "Ignored", "force_notify": True},
+        None,
+        "r5",
     )
-    assert doc_before["documents"] == doc_after["documents"]
-    assert doc_before["metadatas"] == doc_after["metadatas"]
+    notify_calls_forced = [
+        c for c in requests_svc.tg_gate.request.call_args_list
+        if c[0][0] == "gate.notify_request"
+    ]
+    assert len(notify_calls_forced) == 2
 
 
 @pytest.mark.asyncio

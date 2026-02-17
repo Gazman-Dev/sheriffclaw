@@ -160,6 +160,7 @@ class SheriffRequestsService:
         one_liner = payload["one_liner"]
         context_obj = payload.get("context") or {}
         context_json = json.dumps(context_obj, ensure_ascii=False, sort_keys=True)
+        force_notify = payload.get("force_notify", False)
 
         with self._conn() as conn:
             row = conn.execute(
@@ -173,36 +174,41 @@ class SheriffRequestsService:
                     "INSERT INTO catalog_entries(entry_id, type, key, status, one_liner, context_json, created_at, updated_at, immutable) VALUES(?, ?, ?, 'requested', ?, ?, ?, ?, 0)",
                     (entry_id, entry_type, key, one_liner, context_json, now, now),
                 )
-                should_upsert = True
+                should_update_content = True
+                is_immutable = False
             else:
                 entry_id = row[0]
-                immutable = bool(row[2]) or row[1] == "approved"
-                if immutable:
-                    should_upsert = False
+                is_immutable = bool(row[2]) or row[1] == "approved"
+                if is_immutable:
+                    should_update_content = False
                 else:
                     conn.execute(
                         "UPDATE catalog_entries SET status='requested', one_liner=?, context_json=?, updated_at=? WHERE entry_id=?",
                         (one_liner, context_json, now, entry_id),
                     )
-                    should_upsert = True
+                    should_update_content = True
             request_id = self._insert_request_instance(conn, entry_id)
 
-        if should_upsert:
-            self._upsert_existing_entry(entry_type, key)
+        # Resilient upsert: Always ensure the entry is in Chroma, even if immutable.
+        self._upsert_existing_entry(entry_type, key)
 
         entry = self._get_entry(entry_type, key)
-        await self.tg_gate.request(
-            "gate.notify_request",
-            {
-                "event": "request",
-                "type": entry_type,
-                "key": key,
-                "one_liner": entry["one_liner"],
-                "status": "requested",
-                "request_id": request_id,
-                "context": context_obj,
-            },
-        )
+
+        # Notify only if not immutable (fresh request) or forced
+        if not is_immutable or force_notify:
+            await self.tg_gate.request(
+                "gate.notify_request",
+                {
+                    "event": "request",
+                    "type": entry_type,
+                    "key": key,
+                    "one_liner": entry["one_liner"],
+                    "status": "requested",
+                    "request_id": request_id,
+                    "context": context_obj,
+                },
+            )
+
         return {
             "status": "requested",
             "entry": {
@@ -327,6 +333,9 @@ class SheriffRequestsService:
     async def resolve_tool(self, payload, emit_event, req_id):
         return await self._resolve_policy_item("tool", payload["key"], payload["action"])
 
+    async def resolve_disclose_output(self, payload, emit_event, req_id):
+        return await self._resolve_policy_item("disclose_output", payload["key"], payload["action"])
+
     async def boot_check(self, payload, emit_event, req_id):
         _, unlocked = await self.secrets.request("secrets.is_unlocked", {})
         if unlocked["result"].get("unlocked"):
@@ -361,6 +370,7 @@ class SheriffRequestsService:
             "requests.resolve_secret": self.resolve_secret,
             "requests.resolve_domain": self.resolve_domain,
             "requests.resolve_tool": self.resolve_tool,
+            "requests.resolve_disclose_output": self.resolve_disclose_output,
             "requests.boot_check": self.boot_check,
             "requests.submit_master_password": self.submit_master_password,
         }

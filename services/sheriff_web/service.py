@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import json
-
-from shared.paths import gw_root
 from shared.policy import GatewayPolicy
 from shared.proc_rpc import ProcClient
 from shared.secure_web import SecureWebRequester
@@ -10,12 +7,7 @@ from shared.secure_web import SecureWebRequester
 
 class SheriffWebService:
     def __init__(self) -> None:
-        cfg_path = gw_root() / "state" / "config.json"
-        allowed = {"api.github.com"}
-        if cfg_path.exists():
-            data = json.loads(cfg_path.read_text(encoding="utf-8"))
-            allowed = set(data.get("allowed_hosts", ["api.github.com"]))
-        self.requester = SecureWebRequester(GatewayPolicy(allowed))
+        self.requester = SecureWebRequester(GatewayPolicy())
         self.secrets = ProcClient("sheriff-secrets")
         self.policy = ProcClient("sheriff-policy")
 

@@ -5,15 +5,21 @@ import socket
 
 
 class GatewayPolicy:
-    def __init__(self, allowed_hosts: set[str]):
-        self.allowed_hosts = allowed_hosts
+    def __init__(self) -> None:
+        pass
 
     def validate_host(self, host: str) -> None:
-        if host not in self.allowed_hosts:
-            raise ValueError(f"host not allowlisted: {host}")
-        infos = socket.getaddrinfo(host, None)
+        try:
+            infos = socket.getaddrinfo(host, None)
+        except socket.gaierror as e:
+            raise ValueError(f"host resolution failed: {host}") from e
+
         for info in infos:
             addr = info[4][0]
-            ip = ipaddress.ip_address(addr)
+            try:
+                ip = ipaddress.ip_address(addr)
+            except ValueError:
+                continue
+
             if ip.is_private or ip.is_loopback or ip.is_link_local:
                 raise ValueError("host resolved to private/link-local address")

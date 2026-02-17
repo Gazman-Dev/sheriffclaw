@@ -7,7 +7,7 @@ name = "sheriffclaw"
 version = "0.1.0"
 description = "Python OpenClaw clone prototype"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["chromadb", "sentence-transformers"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -19,6 +19,7 @@ sheriff-ctl = "services.sheriff_ctl.__main__:main"
 sheriff-gateway = "services.sheriff_gateway.__main__:main"
 sheriff-secrets = "services.sheriff_secrets.__main__:main"
 sheriff-policy = "services.sheriff_policy.__main__:main"
+sheriff-requests = "services.sheriff_requests.__main__:main"
 sheriff-web = "services.sheriff_web.__main__:main"
 sheriff-tools = "services.sheriff_tools.__main__:main"
 sheriff-tg-gate = "services.sheriff_tg_gate.__main__:main"

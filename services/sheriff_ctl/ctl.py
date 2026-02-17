@@ -15,6 +15,7 @@ from shared.proc_rpc import ProcClient
 GW_ORDER = [
     "sheriff-secrets",
     "sheriff-policy",
+    "sheriff-requests",
     "sheriff-web",
     "sheriff-tools",
     "sheriff-gateway",
@@ -107,6 +108,8 @@ def cmd_logs(args):
 def cmd_onboard(args):
     cfg = gw_root() / "state" / "config.json"
     cfg.write_text(json.dumps({"allowed_hosts": ["api.github.com", "github.com"]}), encoding="utf-8")
+    master_policy = gw_root() / "state" / "master_policy.json"
+    master_policy.write_text(json.dumps({"allow_telegram_master_password": bool(args.allow_telegram_master_password)}), encoding="utf-8")
 
     async def _run():
         cli = ProcClient("sheriff-secrets")

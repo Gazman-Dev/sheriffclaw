@@ -19,6 +19,22 @@ class SheriffTgGateService:
         append_jsonl(self.log_path, {"event": "request_secret", **payload})
         return {"status": "logged"}
 
+    async def notify_request(self, payload, emit_event, req_id):
+        append_jsonl(self.log_path, payload)
+        return {"status": "logged"}
+
+    async def notify_request_resolved(self, payload, emit_event, req_id):
+        append_jsonl(self.log_path, payload)
+        return {"status": "logged"}
+
+    async def notify_master_password_required(self, payload, emit_event, req_id):
+        append_jsonl(self.log_path, payload)
+        return {"status": "logged"}
+
+    async def notify_master_password_accepted(self, payload, emit_event, req_id):
+        append_jsonl(self.log_path, payload)
+        return {"status": "logged"}
+
     async def submit_secret(self, payload, emit_event, req_id):
         _, r = await self.secrets.request("secrets.set_secret", {"handle": payload["handle"], "value": payload["value"]})
         return r["result"]
@@ -31,6 +47,10 @@ class SheriffTgGateService:
         return {
             "gate.notify_approval_required": self.notify_approval_required,
             "gate.request_secret": self.request_secret,
+            "gate.notify_request": self.notify_request,
+            "gate.notify_request_resolved": self.notify_request_resolved,
+            "gate.notify_master_password_required": self.notify_master_password_required,
+            "gate.notify_master_password_accepted": self.notify_master_password_accepted,
             "gate.submit_secret": self.submit_secret,
             "gate.apply_callback": self.apply_callback,
         }

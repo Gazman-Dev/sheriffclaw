@@ -25,11 +25,7 @@ class SheriffWebService:
         _, dec = await self.policy.request("policy.get_decision", {"principal_id": principal_id, "resource_type": "domain", "resource_value": host})
         decision = dec["result"].get("decision")
         if decision != "ALLOW":
-            _, apr = await self.policy.request(
-                "policy.request_permission",
-                {"principal_id": principal_id, "resource_type": "domain", "resource_value": host, "metadata": {"op": "web.request"}},
-            )
-            return {"status": "approval_requested", "approval_id": apr["result"]["approval_id"], "resource": {"type": "domain", "value": host}}
+            return {"status": "needs_domain_approval", "host": host}
 
         resolved = {}
         for header, handle in (payload.get("secret_headers") or {}).items():

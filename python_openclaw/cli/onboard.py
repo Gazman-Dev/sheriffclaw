@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import getpass
 import json
+import time
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
-from python_openclaw.gateway.credentials import CredentialStore
-from python_openclaw.gateway.identity_store import IdentityStore
-from python_openclaw.gateway.master_password import create_verifier
-from python_openclaw.gateway.secrets.store import SecretStore
+from python_openclaw.gateway.secrets.service import SecretsService
 
 SUPPORTED_PROVIDERS = ("openai", "anthropic", "google", "moonshot")
 
@@ -37,55 +37,84 @@ def _select_provider() -> str:
                 return SUPPORTED_PROVIDERS[index - 1]
 
 
+def _bool_prompt(prompt: str) -> bool:
+    while True:
+        raw = input(f"{prompt} [y/n]: ").strip().lower()
+        if raw in {"y", "yes"}:
+            return True
+        if raw in {"n", "no"}:
+            return False
+
+
+def _telegram_get_updates(token: str, *, timeout: int = 20) -> list[dict]:
+    query = urllib.parse.urlencode({"timeout": timeout, "allowed_updates": json.dumps(["message"])})
+    with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/getUpdates?{query}", timeout=timeout + 5) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if not payload.get("ok"):
+        raise RuntimeError("telegram getUpdates failed")
+    return [item for item in payload.get("result", []) if isinstance(item, dict)]
+
+
+def _wait_for_bot_message(token: str, bot_label: str) -> tuple[int, str]:
+    print(f"Send a message to your {bot_label} bot now. Waiting up to 120 seconds...")
+    started = time.time()
+    while time.time() - started < 120:
+        updates = _telegram_get_updates(token, timeout=10)
+        for item in reversed(updates):
+            msg = item.get("message") or {}
+            user = msg.get("from") or {}
+            text = msg.get("text")
+            if text and "id" in user:
+                print(f"{bot_label} echo candidate -> user_id={user['id']} text={text!r}")
+                if _bool_prompt("Confirm this user/message?"):
+                    return int(user["id"]), str(text)
+        time.sleep(1)
+    raise RuntimeError(f"No {bot_label} message confirmed during onboarding")
+
+
 def run_onboard(base_dir: Path) -> None:
     base_dir.mkdir(parents=True, exist_ok=True)
     print("Sheriff Claw onboarding wizard")
 
+    master_password = getpass.getpass("Choose master password: ")
     selected = _select_provider()
-    mode = input("Credential mode (A=plaintext telegram, B=encrypted everything) [A/B]: ").strip().lower()
-    encrypted_mode = mode == "b"
-    storage_mode = "encrypted" if encrypted_mode else "plaintext"
+    provider_key = getpass.getpass(f"Provide {selected} API key/token: ")
 
-    master_password = ""
-    if encrypted_mode:
-        master_password = getpass.getpass("Master password: ")
-        (base_dir / "master.json").write_text(json.dumps(create_verifier(master_password), indent=2), encoding="utf-8")
+    llm_bot_token = input("Telegram LLM bot token: ").strip()
+    secrets_bot_token = input("Telegram Secrets bot token: ").strip()
+    allow_telegram_master_password = _bool_prompt("Do you want to send master password via Telegram?")
 
-    agent_token = input("Telegram agent token: ").strip()
-    gate_token = input("Telegram gate token: ").strip()
-    provider_key = getpass.getpass(f"{selected} API key (empty allowed): ")
+    service = SecretsService(
+        encrypted_path=base_dir / "secrets_service.enc",
+        master_verifier_path=base_dir / "master.json",
+        telegram_secrets_path=base_dir / "telegram_secrets_channel.json",
+    )
+    service.initialize(
+        master_password=master_password,
+        provider=selected,
+        llm_api_key=provider_key,
+        llm_bot_token=llm_bot_token,
+        gate_bot_token=secrets_bot_token,
+        allow_telegram_master_password=allow_telegram_master_password,
+    )
+
+    llm_user_id, _ = _wait_for_bot_message(llm_bot_token, "LLM")
+    gate_user_id, _ = _wait_for_bot_message(secrets_bot_token, "Secrets")
+
+    identity_state = service.get_identity_state()
+    identity_state["llm_allowed_telegram_user_ids"] = sorted({*identity_state["llm_allowed_telegram_user_ids"], llm_user_id})
+    identity_state["trusted_gate_user_ids"] = sorted({*identity_state["trusted_gate_user_ids"], gate_user_id})
+    identity_state["gate_bindings"][f"tg:{llm_user_id}"] = f"tg:dm:{gate_user_id}"
+    service.save_identity_state(identity_state)
 
     cfg = {
-        "agents": {"defaults": {"model": {"primary": f"{selected}/best", "fallbacks": []}}},
-        "provider": selected,
-        "users": [],
-        "gate_users": [],
-        "storage_mode": storage_mode,
-        "unlock_host": "127.0.0.1",
-        "unlock_port": 8443,
+        "llm_provider": selected,
+        "allow_telegram_master_password": allow_telegram_master_password,
     }
     (base_dir / "openclaw.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-
-    credentials = {
-        "telegram": {"agent_token": agent_token, "gate_token": gate_token},
-        "llm": {
-            "openai_api_key": provider_key if selected == "openai" else "",
-            "anthropic_api_key": provider_key if selected == "anthropic" else "",
-            "google_api_key": provider_key if selected == "google" else "",
-            "moonshot_api_key": provider_key if selected == "moonshot" else "",
-        },
-    }
-    credential_store = CredentialStore(base_dir / "credentials.json", base_dir / "credentials.enc", mode=storage_mode)
-    credential_store.set_initial(credentials, master_password=master_password if encrypted_mode else None)
-
-    identity_store = IdentityStore(base_dir / "identity.json", base_dir / "identity.enc", mode="encrypted" if encrypted_mode else "plaintext")
-    identity_store.persist_unlocked({"llm_allowed_telegram_user_ids": [], "gate_bindings": {}}, master_password=master_password)
-
-    secret_store = SecretStore(base_dir / "secrets.enc")
-    secret_store.unlock(master_password if encrypted_mode else "")
-
     _ensure_identity_templates(base_dir / "workspace")
-    print(f"Wrote config and workspace under {base_dir}")
+    service.lock()
+    print(f"Wrote v1 config under {base_dir}")
 
 
 if __name__ == "__main__":

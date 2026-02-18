@@ -7,7 +7,7 @@ name = "sheriffclaw"
 version = "0.1.0"
 description = "Python OpenClaw clone prototype"
 requires-python = ">=3.10"
-dependencies = ["chromadb", "sentence-transformers"]
+dependencies = ["chromadb", "sentence-transformers", "cryptography"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

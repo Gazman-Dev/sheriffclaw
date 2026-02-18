@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import json
 import os
 import signal
@@ -106,26 +107,69 @@ def cmd_logs(args):
 
 
 def cmd_onboard(args):
+    print("=== SheriffClaw Onboarding ===")
+
+    mp = args.master_password
+    if mp is None:
+        while not mp:
+            mp = getpass.getpass("Set Master Password: ")
+
+    llm_prov = args.llm_provider
+    if llm_prov is None:
+        llm_prov = input("LLM Provider (stub/openai/anthropic) [stub]: ").strip() or "stub"
+
+    llm_key = args.llm_api_key
+    if llm_key is None:
+        llm_key = getpass.getpass(f"API Key for {llm_prov} (enter to skip): ").strip()
+
+    llm_bot = args.llm_bot_token
+    if llm_bot is None:
+        llm_bot = input("Telegram Bot Token for LLM (enter to skip): ").strip()
+
+    gate_bot = args.gate_bot_token
+    if gate_bot is None:
+        gate_bot = input("Telegram Bot Token for Gate (enter to skip): ").strip()
+
+    allow_tg = False
+    if args.allow_telegram:
+        allow_tg = True
+    elif args.deny_telegram:
+        allow_tg = False
+    else:
+        ans = input("Allow sending master password via Telegram to unlock? [y/N]: ").strip().lower()
+        allow_tg = ans in ("y", "yes")
+
+    print(f"\nConfiguration:\nProvider: {llm_prov}\nTelegram Unlock: {allow_tg}\nSaving...")
+
     master_policy = gw_root() / "state" / "master_policy.json"
-    master_policy.write_text(json.dumps({"allow_telegram_master_password": bool(args.allow_telegram_master_password)}), encoding="utf-8")
+    master_policy.parent.mkdir(parents=True, exist_ok=True)
+    master_policy.write_text(json.dumps({"allow_telegram_master_password": allow_tg}), encoding="utf-8")
 
     async def _run():
         cli = ProcClient("sheriff-secrets")
+        # Give services a moment to be ready if we just started them
+        for _ in range(5):
+            try:
+                await cli.request("health", {})
+                break
+            except Exception:
+                await asyncio.sleep(1)
+
         await cli.request(
             "secrets.initialize",
             {
-                "master_password": args.master_password,
-                "llm_provider": args.llm_provider,
-                "llm_api_key": args.llm_api_key,
-                "llm_bot_token": args.llm_bot_token,
-                "gate_bot_token": args.gate_bot_token,
-                "allow_telegram_master_password": args.allow_telegram_master_password,
+                "master_password": mp,
+                "llm_provider": llm_prov,
+                "llm_api_key": llm_key,
+                "llm_bot_token": llm_bot,
+                "gate_bot_token": gate_bot,
+                "allow_telegram_master_password": allow_tg,
             },
         )
-        await cli.request("secrets.unlock", {"master_password": args.master_password})
+        await cli.request("secrets.unlock", {"master_password": mp})
 
     asyncio.run(_run())
-    print("onboarded")
+    print("Onboarding complete. Secrets initialized and unlocked.")
 
 
 def cmd_skill(args):
@@ -157,19 +201,26 @@ def build_parser() -> argparse.ArgumentParser:
     lg = sub.add_parser("logs")
     lg.add_argument("service", choices=ALL)
     lg.set_defaults(func=cmd_logs)
+
     ob = sub.add_parser("onboard")
-    ob.add_argument("--master-password", default="devpass")
-    ob.add_argument("--llm-provider", default="stub")
-    ob.add_argument("--llm-api-key", default="")
-    ob.add_argument("--llm-bot-token", default="")
-    ob.add_argument("--gate-bot-token", default="")
-    ob.add_argument("--allow-telegram-master-password", action="store_true")
+    ob.add_argument("--master-password", default=None)
+    ob.add_argument("--llm-provider", default=None)
+    ob.add_argument("--llm-api-key", default=None)
+    ob.add_argument("--llm-bot-token", default=None)
+    ob.add_argument("--gate-bot-token", default=None)
+
+    tg_group = ob.add_mutually_exclusive_group()
+    tg_group.add_argument("--allow-telegram", action="store_true", help="Non-interactive: Allow telegram unlock")
+    tg_group.add_argument("--deny-telegram", action="store_true", help="Non-interactive: Deny telegram unlock")
+
     ob.set_defaults(func=cmd_onboard)
+
     sp = sub.add_parser("skill")
     sp.add_argument("name")
     sp.add_argument("argv", nargs="*")
     sp.add_argument("--stdin", default="")
     sp.set_defaults(func=cmd_skill)
+
     cl = sub.add_parser("call")
     cl.add_argument("service")
     cl.add_argument("op")

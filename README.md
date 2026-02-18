@@ -1,6 +1,5 @@
-Here is the updated `README.md`. It focuses strictly on the technical reality of the two-channel system and the specific workflow of handling secrets, without the fluff.
-
-***
+# Project Status
+Pre Alpha - Don't install yet ;)
 
 # Sheriff Claw 🤠
 **The Secure Way to Use Autonomous AI Agents**

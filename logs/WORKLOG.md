@@ -28,3 +28,11 @@
   - `/ yes I agree` routed to Sheriff
 - Identified a UX consistency gap: installer still referenced daemon status flow; updated to on-demand startup messaging.
 - Added sheriff-cli-gate to `/status` check list in cli gate service.
+## 2026-02-20 09:06 EST
+- Deployed commit `e6ba500` to `main`.
+- Performed post-deploy clean install from GitHub clone path via installer.
+- Post-deploy E2E verification passed:
+  - `/status` => all services healthy, including `sheriff-cli-gate`
+  - plain text route => Agent response (`TestBot[test/default]: what / do?`)
+  - slash text route => Sheriff response (`Sheriff received: / yes I agree`)
+- Acceptance criteria covered on macOS local environment.

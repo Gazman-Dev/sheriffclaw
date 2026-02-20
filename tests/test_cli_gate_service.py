@@ -43,3 +43,18 @@ async def test_allow_tool_command_routes_to_policy_resolution():
     assert res["kind"] == "sheriff"
     assert "approved" in res["message"]
     svc.requests.request.assert_called_with("requests.resolve_tool", {"key": "python", "action": "always_allow"})
+
+
+@pytest.mark.asyncio
+async def test_api_login_saves_provider_and_key():
+    svc = SheriffCliGateService()
+    svc.secrets = AsyncMock()
+    svc.secrets.request.return_value = (None, {"result": {"status": "saved"}})
+
+    res = await svc.handle_message({"text": "/api-login sk-test openai-codex"}, None, "r1")
+
+    assert res["kind"] == "sheriff"
+    assert "provider=openai-codex" in res["message"]
+    calls = [c.args for c in svc.secrets.request.call_args_list]
+    assert ("secrets.set_llm_provider", {"provider": "openai-codex"}) in calls
+    assert ("secrets.set_llm_api_key", {"api_key": "sk-test"}) in calls

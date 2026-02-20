@@ -46,6 +46,7 @@ class SheriffCliGateService:
                     "/allow-domain <domain> | /deny-domain <domain>\n"
                     "/allow-tool <tool> | /deny-tool <tool>\n"
                     "/allow-output <key> | /deny-output <key>\n"
+                    "/api-login <openai_api_key> [provider=openai-codex]\n"
                     "Any other /... input is recorded as Sheriff chat."
                 ),
             }
@@ -77,6 +78,15 @@ class SheriffCliGateService:
             _, res = await self.requests.request("requests.resolve_secret", {"key": handle, "value": value})
             status = res.get("result", {}).get("status", "unknown")
             return {"kind": "sheriff", "message": f"Secret {handle}: {status}"}
+
+        if cmd == "api-login":
+            if not args:
+                return {"kind": "error", "message": "Usage: /api-login <openai_api_key> [provider=openai-codex]"}
+            api_key = args[0]
+            provider = args[1] if len(args) > 1 else "openai-codex"
+            await self.secrets.request("secrets.set_llm_provider", {"provider": provider})
+            await self.secrets.request("secrets.set_llm_api_key", {"api_key": api_key})
+            return {"kind": "sheriff", "message": f"LLM auth saved (provider={provider})."}
 
         if cmd in {"allow-domain", "deny-domain", "allow-tool", "deny-tool", "allow-output", "deny-output"}:
             if not args:

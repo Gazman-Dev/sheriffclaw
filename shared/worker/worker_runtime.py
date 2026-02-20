@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from shared.llm.providers import StubProvider, TestProvider
+from shared.llm.providers import OpenAICodexProvider, StubProvider, TestProvider
 from shared.llm.registry import resolve_model
 from shared.skills.loader import SkillLoader
 
@@ -64,6 +64,8 @@ class WorkerRuntime:
         if key not in self.providers:
             if provider == "test":
                 self.providers[key] = TestProvider()
+            elif provider == "openai-codex":
+                self.providers[key] = OpenAICodexProvider(api_key=api_key, base_url=base_url or "https://api.openai.com/v1")
             else:
                 self.providers[key] = StubProvider()
         return self.providers[key]
@@ -76,7 +78,16 @@ class WorkerRuntime:
     async def session_close(self, session_handle: str) -> None:
         self.sessions.pop(session_handle, None)
 
-    async def user_message(self, session_handle: str, text: str, model_ref: str | None, emit_event):
+    async def user_message(
+        self,
+        session_handle: str,
+        text: str,
+        model_ref: str | None,
+        emit_event,
+        provider_name: str | None = None,
+        api_key: str = "",
+        base_url: str = "",
+    ):
         history = self.sessions.setdefault(session_handle, [])
         history.append({"role": "user", "content": text})
         model = resolve_model(model_ref)
@@ -87,8 +98,8 @@ class WorkerRuntime:
             lower = text.lower()
             if "tool" in lower:
                 await emit_event("tool.call", {"tool_name": "tools.exec", "payload": {"argv": ["echo", "tool-invoked"], "taint": False}, "reason": "trigger word"})
-            provider_name = "test" if model.startswith("test/") else "stub"
-            provider = self._provider(provider_name, "", "")
+            selected_provider = provider_name or ("test" if model.startswith("test/") else "stub")
+            provider = self._provider(selected_provider, api_key, base_url)
             answer = await provider.generate(history, model=model)
 
         await emit_event("assistant.delta", {"text": answer})

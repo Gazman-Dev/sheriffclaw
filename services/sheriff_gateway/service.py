@@ -29,9 +29,28 @@ class SheriffGatewayService:
             self.sessions[principal_id] = session
 
         append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "user", "content": text})
+
+        provider_name = "stub"
+        api_key = ""
+        base_url = ""
+        try:
+            _, prov = await self.secrets.request("secrets.get_llm_provider", {})
+            provider_name = prov.get("result", {}).get("provider") or provider_name
+            _, key = await self.secrets.request("secrets.get_llm_api_key", {})
+            api_key = key.get("result", {}).get("api_key") or ""
+        except Exception:
+            pass
+
         stream, final = await self.ai.request(
             "agent.session.user_message",
-            {"session_handle": session, "text": text, "model_ref": payload.get("model_ref")},
+            {
+                "session_handle": session,
+                "text": text,
+                "model_ref": payload.get("model_ref"),
+                "provider_name": provider_name,
+                "api_key": api_key,
+                "base_url": base_url,
+            },
             stream_events=True,
         )
         async for frame in stream:

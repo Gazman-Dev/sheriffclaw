@@ -86,3 +86,10 @@
   - installation E2E passed
   - reinstall idempotency check passed
   - final result: `Linux docker test suite passed`
+## 2026-02-20 12:32 EST
+- Started OpenAI Codex integration using secrets storage only (no host CLI auth dependency).
+- Added `OpenAICodexProvider` against OpenAI Responses API.
+- Updated default model resolution to `gpt-5.3-codex`.
+- Plumbed provider/api key from Sheriff secrets through gateway -> ai-worker -> runtime.
+- Added `/api-login <key> [provider]` sheriff command to save LLM provider+API key into encrypted vault.
+- Added secrets ops for `secrets.set_llm_provider` and `secrets.set_llm_api_key`.

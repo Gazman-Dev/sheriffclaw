@@ -84,6 +84,16 @@ class SecretsState:
         self._require()
         return self._state.get("llm_api_key", "")
 
+    def set_llm_provider(self, provider: str) -> None:
+        self._require()
+        self._state["llm_provider"] = provider
+        self._persist()
+
+    def set_llm_api_key(self, api_key: str) -> None:
+        self._require()
+        self._state["llm_api_key"] = api_key
+        self._persist()
+
     def get_llm_bot_token(self) -> str:
         self._require()
         return self._state.get("llm_bot_token", "")

@@ -15,7 +15,15 @@ class AIWorkerService:
         return {"status": "closed"}
 
     async def user_message(self, payload, emit_event, req_id):
-        await self.runtime.user_message(payload["session_handle"], payload.get("text", ""), payload.get("model_ref"), emit_event)
+        await self.runtime.user_message(
+            payload["session_handle"],
+            payload.get("text", ""),
+            payload.get("model_ref"),
+            emit_event,
+            provider_name=payload.get("provider_name"),
+            api_key=payload.get("api_key", ""),
+            base_url=payload.get("base_url", ""),
+        )
         return {"status": "done"}
 
     async def tool_result(self, payload, emit_event, req_id):

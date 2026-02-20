@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import uuid
 from collections import deque
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 from shared.errors import ProtocolError, ServiceCrashedError
 from shared.ndjson import encode_frame
@@ -22,8 +24,13 @@ class ProcClient:
     async def start(self):
         if self.proc and self.proc.returncode is None:
             return
+        binary = self.binary
+        candidate = Path(sys.executable).resolve().parent / self.binary
+        if candidate.exists():
+            binary = str(candidate)
+
         self.proc = await asyncio.create_subprocess_exec(
-            self.binary,
+            binary,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

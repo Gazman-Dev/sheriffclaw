@@ -7,6 +7,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -40,11 +41,16 @@ def _log_paths(service: str) -> tuple[Path, Path]:
     return root / f"{service}.out", root / f"{service}.err"
 
 
+def _resolve_service_binary(service: str) -> str:
+    venv_bin = Path(sys.executable).resolve().parent / service
+    return str(venv_bin) if venv_bin.exists() else service
+
+
 def _start_service(service: str) -> None:
     out_path, err_path = _log_paths(service)
     out = out_path.open("a", encoding="utf-8")
     err = err_path.open("a", encoding="utf-8")
-    proc = subprocess.Popen([service], stdout=out, stderr=err)  # noqa: S603
+    proc = subprocess.Popen([_resolve_service_binary(service)], stdout=out, stderr=err)  # noqa: S603
     _pid_path(service).write_text(str(proc.pid), encoding="utf-8")
 
 

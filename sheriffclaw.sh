@@ -73,8 +73,32 @@ echo -e "${BLUE}           Interactive Setup             ${NC}"
 echo -e "${BLUE}=========================================${NC}"
 echo ""
 
-# Run interactive onboarding
-"$VENV_DIR/bin/sheriff-ctl" onboard
+# Run onboarding (interactive when TTY is available, non-interactive otherwise)
+if [ -t 0 ]; then
+    "$VENV_DIR/bin/sheriff-ctl" onboard
+else
+    MP="${SHERIFF_MASTER_PASSWORD:-}"
+    if [ -z "$MP" ]; then
+        MP="local-dev-master-password"
+    fi
+    LLM_PROVIDER="${SHERIFF_LLM_PROVIDER:-stub}"
+    LLM_API_KEY="${SHERIFF_LLM_API_KEY:-}"
+    LLM_BOT_TOKEN="${SHERIFF_LLM_BOT_TOKEN:-}"
+    GATE_BOT_TOKEN="${SHERIFF_GATE_BOT_TOKEN:-}"
+
+    TELEGRAM_FLAG="--deny-telegram"
+    if [ "${SHERIFF_ALLOW_TELEGRAM_UNLOCK:-0}" = "1" ]; then
+        TELEGRAM_FLAG="--allow-telegram"
+    fi
+
+    "$VENV_DIR/bin/sheriff-ctl" onboard \
+        --master-password "$MP" \
+        --llm-provider "$LLM_PROVIDER" \
+        --llm-api-key "$LLM_API_KEY" \
+        --llm-bot-token "$LLM_BOT_TOKEN" \
+        --gate-bot-token "$GATE_BOT_TOKEN" \
+        $TELEGRAM_FLAG
+fi
 
 echo ""
 echo -e "${GREEN}=========================================${NC}"

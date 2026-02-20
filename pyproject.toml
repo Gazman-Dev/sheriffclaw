@@ -6,8 +6,11 @@ build-backend = "setuptools.build_meta"
 name = "sheriffclaw"
 version = "0.1.0"
 description = "Python OpenClaw clone prototype"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 dependencies = ["chromadb", "sentence-transformers", "cryptography"]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -23,6 +26,7 @@ sheriff-requests = "services.sheriff_requests.__main__:main"
 sheriff-web = "services.sheriff_web.__main__:main"
 sheriff-tools = "services.sheriff_tools.__main__:main"
 sheriff-tg-gate = "services.sheriff_tg_gate.__main__:main"
+sheriff-cli-gate = "services.sheriff_cli_gate.__main__:main"
 
 ai-worker = "services.ai_worker.__main__:main"
 ai-tg-llm = "services.ai_tg_llm.__main__:main"

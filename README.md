@@ -56,6 +56,29 @@ Here is exactly how you can let the AI manage your accounts without ever giving 
 
 ---
 
+## 🖥️ Terminal Channel (new)
+
+After install, start an interactive terminal channel:
+
+```bash
+sheriff-ctl chat
+```
+
+Routing rules:
+- messages starting with `/` go to **Sheriff**
+- any other text goes to the **AI bot**
+
+Examples:
+- `/status` → Sheriff
+- `/ yes I agree` → Sheriff
+- `what / do?` → AI bot
+
+Optional test bot route:
+
+```bash
+sheriff-ctl chat --model-ref test/default
+```
+
 ## 🏁 Getting Started
 
 1.  **Run the install command** above.

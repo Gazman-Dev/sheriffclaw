@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 from shared.identity import principal_id_for_channel
 from shared.paths import gw_root
 from shared.proc_rpc import ProcClient
@@ -27,7 +29,11 @@ class SheriffGatewayService:
             self.sessions[principal_id] = session
 
         append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "user", "content": text})
-        stream, final = await self.ai.request("agent.session.user_message", {"session_handle": session, "text": text}, stream_events=True)
+        stream, final = await self.ai.request(
+            "agent.session.user_message",
+            {"session_handle": session, "text": text, "model_ref": payload.get("model_ref")},
+            stream_events=True,
+        )
         async for frame in stream:
             if frame["event"] == "tool.call":
                 result = await self._route_tool(principal_id, frame.get("payload", {}))
@@ -38,7 +44,8 @@ class SheriffGatewayService:
                 )
                 continue
             await emit_event(frame["event"], frame.get("payload", {}))
-        await final
+        if inspect.isawaitable(final):
+            await final
         return {"status": "done", "session_handle": session}
 
     async def _route_tool(self, principal_id: str, tool_call: dict) -> dict:

@@ -235,7 +235,7 @@ class SheriffRequestsService:
         distances = result.get("distances", [[]])[0]
 
         matches = []
-        for doc_id, distance in zip(ids, distances, strict=False):
+        for doc_id, distance in zip(ids, distances):
             entry_type, key = doc_id.split(":", 1)
             entry = self._get_entry(entry_type, key)
             if entry is None:

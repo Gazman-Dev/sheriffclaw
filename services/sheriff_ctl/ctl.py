@@ -21,6 +21,7 @@ GW_ORDER = [
     "sheriff-tools",
     "sheriff-gateway",
     "sheriff-tg-gate",
+    "sheriff-cli-gate",
 ]
 LLM_ORDER = ["ai-worker", "ai-tg-llm"]
 ALL = [*GW_ORDER, *LLM_ORDER]
@@ -192,6 +193,63 @@ def cmd_call(args):
     asyncio.run(_run())
 
 
+def cmd_chat(args):
+    principal = args.principal
+    model_ref = args.model_ref
+
+    async def _send_bot(gateway: ProcClient, text: str):
+        stream, final = await gateway.request(
+            "gateway.handle_user_message",
+            {"channel": "cli", "principal_external_id": principal, "text": text, "model_ref": model_ref},
+            stream_events=True,
+        )
+        bot_printed = False
+        async for frame in stream:
+            event = frame.get("event")
+            payload = frame.get("payload", {})
+            if event == "assistant.delta":
+                print(f"[AGENT] {payload.get('text', '')}")
+                bot_printed = True
+            elif event == "assistant.final" and not bot_printed:
+                print(f"[AGENT] {payload.get('text', '')}")
+                bot_printed = True
+            elif event == "tool.result":
+                print(f"[TOOL] {json.dumps(payload, ensure_ascii=False)}")
+        await final
+
+    async def _send_sheriff(cli_gate: ProcClient, text: str):
+        _, res = await cli_gate.request("cli.handle_message", {"text": text})
+        msg = res.get("result", {}).get("message", "")
+        kind = res.get("result", {}).get("kind", "sheriff").upper()
+        print(f"[{kind}] {msg}")
+
+    async def _run():
+        gateway = ProcClient("sheriff-gateway")
+        cli_gate = ProcClient("sheriff-cli-gate")
+        print("SheriffClaw terminal chat")
+        print("- Enter sends a single-line message")
+        print("- /... routes to Sheriff, anything else routes to Agent")
+        print("- Type /quit or /exit to leave")
+        while True:
+            try:
+                line = await asyncio.to_thread(input, "> ")
+            except (EOFError, KeyboardInterrupt):
+                print("\nbye")
+                return
+            text = line.rstrip("\n")
+            if not text:
+                continue
+            if text in {"/quit", "/exit"}:
+                print("bye")
+                return
+            if text.startswith("/"):
+                await _send_sheriff(cli_gate, text)
+            else:
+                await _send_bot(gateway, text)
+
+    asyncio.run(_run())
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="sheriff-ctl")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -226,6 +284,11 @@ def build_parser() -> argparse.ArgumentParser:
     cl.add_argument("op")
     cl.add_argument("--json", default="{}")
     cl.set_defaults(func=cmd_call)
+
+    chat = sub.add_parser("chat")
+    chat.add_argument("--principal", default="local-cli")
+    chat.add_argument("--model-ref", default=None, help="Model route, e.g. test/default")
+    chat.set_defaults(func=cmd_chat)
     return p
 
 

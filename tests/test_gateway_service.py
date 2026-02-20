@@ -61,6 +61,40 @@ async def test_gateway_opens_session_and_forwards_message():
     assert ("assistant.delta", {"text": "hi"}) in events
 
 @pytest.mark.asyncio
+async def test_gateway_passes_model_ref_to_worker():
+    svc = SheriffGatewayService()
+    svc.ai = MockProcClient("ai-worker")
+
+    async def ai_stream():
+        if False:
+            yield {}
+
+    async def mock_ai_request(op, payload, stream_events=False):
+        if op == "agent.session.open":
+            return [], {"result": {"session_handle": "sess-1"}}
+        if op == "agent.session.user_message":
+            assert payload["model_ref"] == "test/default"
+            return ai_stream(), AsyncMock()
+        return [], {"result": {}}
+
+    svc.ai.request = AsyncMock(side_effect=mock_ai_request)
+
+    async def emit(e, p):
+        return
+
+    await svc.handle_user_message(
+        {
+            "channel": "cli",
+            "principal_external_id": "u1",
+            "text": "hello",
+            "model_ref": "test/default",
+        },
+        emit,
+        "req-2",
+    )
+
+
+@pytest.mark.asyncio
 async def test_gateway_routes_web_tool():
     svc = SheriffGatewayService()
     svc.ai = MockProcClient("ai-worker")

@@ -47,18 +47,23 @@ pip install "$SOURCE_DIR" --quiet
 
 # Alias Setup
 SHELL_CFG=""
-if [ -f "$HOME/.zshrc" ]; then SHELL_CFG="$HOME/.zshrc"; fi
-if [ -f "$HOME/.bashrc" ]; then SHELL_CFG="$HOME/.bashrc"; fi
+if [ -f "$HOME/.zshrc" ]; then
+    SHELL_CFG="$HOME/.zshrc"
+elif [ -f "$HOME/.bashrc" ]; then
+    SHELL_CFG="$HOME/.bashrc"
+elif [ -f "$HOME/.bash_profile" ]; then
+    SHELL_CFG="$HOME/.bash_profile"
+fi
 
-if [ ! -z "$SHELL_CFG" ]; then
-    if ! grep -q "sheriff-ctl" "$SHELL_CFG"; then
+if [ -n "$SHELL_CFG" ]; then
+    if ! grep -q "alias sheriff-ctl=\|$VENV_DIR/bin/sheriff-ctl" "$SHELL_CFG"; then
         echo "alias sheriff-ctl='$VENV_DIR/bin/sheriff-ctl'" >> "$SHELL_CFG"
         echo -e "${GREEN}[+] Added alias 'sheriff-ctl' to $SHELL_CFG${NC}"
     fi
 fi
 
 echo -e "${GREEN}[+] Starting Services...${NC}"
-sheriff-ctl start
+"$VENV_DIR/bin/sheriff-ctl" start
 
 # Wait briefly for services to initialize
 sleep 2
@@ -69,7 +74,7 @@ echo -e "${BLUE}=========================================${NC}"
 echo ""
 
 # Run interactive onboarding
-sheriff-ctl onboard
+"$VENV_DIR/bin/sheriff-ctl" onboard
 
 echo ""
 echo -e "${GREEN}=========================================${NC}"

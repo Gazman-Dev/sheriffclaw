@@ -62,11 +62,13 @@ if [ -n "$SHELL_CFG" ]; then
     fi
 fi
 
-echo -e "${GREEN}[+] Starting Services...${NC}"
-"$VENV_DIR/bin/sheriff-ctl" start
-
-# Wait briefly for services to initialize
-sleep 2
+if [ "${SHERIFF_START_DAEMONS:-0}" = "1" ]; then
+    echo -e "${GREEN}[+] Starting Services...${NC}"
+    "$VENV_DIR/bin/sheriff-ctl" start
+    sleep 2
+else
+    echo -e "${GREEN}[+] Skipping daemon start (services are started on-demand).${NC}"
+fi
 
 echo -e "${BLUE}=========================================${NC}"
 echo -e "${BLUE}           Interactive Setup             ${NC}"
@@ -104,5 +106,6 @@ echo ""
 echo -e "${GREEN}=========================================${NC}"
 echo -e "${GREEN}       Installation Complete!            ${NC}"
 echo -e "${GREEN}=========================================${NC}"
-echo "Use 'sheriff-ctl status' to check service health."
+echo "Use 'sheriff-ctl chat' to start interacting immediately."
+echo "Use '/status' inside chat for on-demand health checks."
 echo "Restart your terminal to use the 'sheriff-ctl' command directly."

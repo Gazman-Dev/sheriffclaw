@@ -15,6 +15,7 @@ class SheriffCliGateService:
             "sheriff-tools",
             "sheriff-gateway",
             "sheriff-tg-gate",
+            "sheriff-cli-gate",
             "ai-worker",
             "ai-tg-llm",
         ]

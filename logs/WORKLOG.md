@@ -72,3 +72,17 @@
   - `pytest` passed (55)
   - installation E2E passed.
 - Host limitation encountered: `docker` binary is not installed on this machine, so Linux container run cannot execute locally yet. Added explicit precheck/error message in docker runner script.
+## 2026-02-20 12:21 EST
+- Resumed full Linux blank-environment validation with Docker/Colima.
+- Hardened installer:
+  - auto-installs missing git/python on Linux/macOS package managers
+  - install lock to prevent concurrent duplicate installation runs
+  - idempotent source/venv reuse and onboarding skip when already initialized
+  - non-interactive enforcement when `SHERIFF_MASTER_PASSWORD` is provided or `SHERIFF_NON_INTERACTIVE=1`
+- Added reinstall idempotency test script.
+- Ran full docker suite to completion:
+  - unit tests passed (55)
+  - CLI simulation E2E passed
+  - installation E2E passed
+  - reinstall idempotency check passed
+  - final result: `Linux docker test suite passed`

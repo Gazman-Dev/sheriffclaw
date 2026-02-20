@@ -97,10 +97,16 @@ Run install-path E2E check (fresh ~/.sheriffclaw install + chat flow):
 ./scripts/e2e_installation_check.sh
 ```
 
-Run Linux validation in Docker (unit + CLI E2E + installer E2E):
+Run Linux validation in Docker (unit + CLI E2E + installer E2E + reinstall idempotency):
 
 ```bash
 ./scripts/test_linux_docker.sh
+```
+
+Run reinstall idempotency check locally:
+
+```bash
+./scripts/e2e_reinstall_idempotency.sh
 ```
 
 ## 🏁 Getting Started

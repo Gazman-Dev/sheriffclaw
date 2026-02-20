@@ -79,6 +79,18 @@ Optional test bot route:
 sheriff-ctl chat --model-ref test/default
 ```
 
+Deterministic scenario simulator (for testing permissions + secrets):
+
+```bash
+sheriff-ctl chat --model-ref scenario/default
+```
+
+Run scripted E2E simulation locally:
+
+```bash
+./scripts/e2e_cli_simulation.sh
+```
+
 ## 🏁 Getting Started
 
 1.  **Run the install command** above.

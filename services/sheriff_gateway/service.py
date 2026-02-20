@@ -59,7 +59,9 @@ class SheriffGatewayService:
             return res["result"]
         if tool_name == "secure.secret.ensure":
             _, res = await self.secrets.request("secrets.ensure_handle", payload)
-            if res["result"].get("ok"):
+            if not res.get("ok", True):
+                return {"status": "needs_secret", "handle": payload.get("handle"), "error": res.get("error", "secrets_unavailable")}
+            if res.get("result", {}).get("ok"):
                 return {"status": "available"}
             return {"status": "needs_secret", "handle": payload.get("handle")}
         if tool_name.startswith("requests."):

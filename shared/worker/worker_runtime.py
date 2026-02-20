@@ -15,6 +15,50 @@ class WorkerRuntime:
         self.skill_loader = SkillLoader(Path.cwd() / "skills")
         self.skills = self.skill_loader.load()
 
+    @staticmethod
+    def _last_tool_result(history: list[dict]) -> str:
+        for entry in reversed(history):
+            if entry.get("role") == "tool":
+                return str(entry.get("content", ""))
+        return "none"
+
+    async def _scenario_message(self, history: list[dict], text: str, model: str, emit_event) -> str:
+        stripped = text.strip()
+        lower = stripped.lower()
+
+        if lower.startswith("scenario secret "):
+            handle = stripped.split(maxsplit=2)[2]
+            await emit_event(
+                "tool.call",
+                {"tool_name": "secure.secret.ensure", "payload": {"handle": handle}, "reason": "scenario-secret"},
+            )
+            return f"Scenario[{model}] requested secret handle: {handle}"
+
+        if lower.startswith("scenario exec "):
+            tool_name = stripped.split(maxsplit=2)[2]
+            await emit_event(
+                "tool.call",
+                {
+                    "tool_name": "tools.exec",
+                    "payload": {"argv": [tool_name, "--version"], "taint": False},
+                    "reason": "scenario-exec",
+                },
+            )
+            return f"Scenario[{model}] requested tool execution: {tool_name}"
+
+        if lower.startswith("scenario web "):
+            host = stripped.split(maxsplit=2)[2]
+            await emit_event(
+                "tool.call",
+                {"tool_name": "secure.web.request", "payload": {"host": host, "path": "/", "method": "GET"}, "reason": "scenario-web"},
+            )
+            return f"Scenario[{model}] requested web access: {host}"
+
+        if lower == "scenario last tool":
+            return f"Scenario[{model}] last tool result: {self._last_tool_result(history)}"
+
+        return f"Scenario[{model}] echo: {text}"
+
     def _provider(self, provider: str, api_key: str, base_url: str = ""):
         key = f"{provider}:{api_key}:{base_url}"
         if key not in self.providers:
@@ -35,13 +79,18 @@ class WorkerRuntime:
     async def user_message(self, session_handle: str, text: str, model_ref: str | None, emit_event):
         history = self.sessions.setdefault(session_handle, [])
         history.append({"role": "user", "content": text})
-        lower = text.lower()
-        if "tool" in lower:
-            await emit_event("tool.call", {"tool_name": "tools.exec", "payload": {"argv": ["echo", "tool-invoked"], "taint": False}, "reason": "trigger word"})
         model = resolve_model(model_ref)
-        provider_name = "test" if model.startswith("test/") else "stub"
-        provider = self._provider(provider_name, "", "")
-        answer = await provider.generate(history, model=model)
+
+        if model.startswith("scenario/"):
+            answer = await self._scenario_message(history, text, model, emit_event)
+        else:
+            lower = text.lower()
+            if "tool" in lower:
+                await emit_event("tool.call", {"tool_name": "tools.exec", "payload": {"argv": ["echo", "tool-invoked"], "taint": False}, "reason": "trigger word"})
+            provider_name = "test" if model.startswith("test/") else "stub"
+            provider = self._provider(provider_name, "", "")
+            answer = await provider.generate(history, model=model)
+
         await emit_event("assistant.delta", {"text": answer})
         await emit_event("assistant.final", {"text": answer})
         history.append({"role": "assistant", "content": answer})

@@ -36,3 +36,26 @@
   - plain text route => Agent response (`TestBot[test/default]: what / do?`)
   - slash text route => Sheriff response (`Sheriff received: / yes I agree`)
 - Acceptance criteria covered on macOS local environment.
+## 2026-02-20 09:15 EST
+- New scope: build deterministic agent simulation for CLI tests (unit + e2e) covering permissions and secret-management flows.
+- Plan:
+  1) add scenario provider in worker runtime
+  2) implement scripted tool-call triggers
+  3) add scenario-focused unit tests
+  4) add e2e harness script that drives `sheriff-ctl chat` stdin/stdout
+  5) run tests + deploy
+## 2026-02-20 09:28 EST
+- Implemented deterministic `scenario/default` model path in worker runtime.
+  - `scenario secret <handle>` => emits `secure.secret.ensure`
+  - `scenario exec <tool>` => emits `tools.exec`
+  - `scenario web <host>` => emits `secure.web.request`
+  - `scenario last tool` => echoes latest tool-result from session history
+- Added unit coverage for scenario simulation and gateway locked-secret handling.
+- Built scripted E2E harness: `scripts/e2e_cli_simulation.sh`.
+  - Drives `sheriff-ctl chat` with mixed Sheriff/Bot lines.
+  - Validates secret-management flow (`/unlock`, `/secret`) and permission flow (`/allow-tool`).
+  - Verifies persisted policy/requests state via `sheriff-ctl call` assertions.
+- Fixed gateway crash path on locked secret lookup (was KeyError on missing `result`).
+- Current local validation:
+  - `pytest`: 55 passed
+  - `./scripts/e2e_cli_simulation.sh`: passed

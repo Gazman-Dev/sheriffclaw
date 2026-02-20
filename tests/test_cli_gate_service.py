@@ -30,3 +30,16 @@ async def test_secret_command_routes_to_requests():
     assert res["kind"] == "sheriff"
     assert "approved" in res["message"]
     svc.requests.request.assert_called_with("requests.resolve_secret", {"key": "gh_token", "value": "abc123"})
+
+
+@pytest.mark.asyncio
+async def test_allow_tool_command_routes_to_policy_resolution():
+    svc = SheriffCliGateService()
+    svc.requests = AsyncMock()
+    svc.requests.request.return_value = (None, {"result": {"status": "approved"}})
+
+    res = await svc.handle_message({"text": "/allow-tool python"}, None, "r1")
+
+    assert res["kind"] == "sheriff"
+    assert "approved" in res["message"]
+    svc.requests.request.assert_called_with("requests.resolve_tool", {"key": "python", "action": "always_allow"})

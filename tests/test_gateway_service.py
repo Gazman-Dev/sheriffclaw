@@ -95,6 +95,21 @@ async def test_gateway_passes_model_ref_to_worker():
 
 
 @pytest.mark.asyncio
+async def test_gateway_handles_locked_secret_tool_without_crash():
+    svc = SheriffGatewayService()
+    svc.secrets = MockProcClient("sheriff-secrets")
+
+    async def mock_secret_request(op, payload, stream_events=False):
+        return [], {"ok": False, "error": "RuntimeError", "details": {}}
+
+    svc.secrets.request = AsyncMock(side_effect=mock_secret_request)
+
+    out = await svc._route_tool("u1", {"tool_name": "secure.secret.ensure", "payload": {"handle": "gh_token"}})
+    assert out["status"] == "needs_secret"
+    assert out["handle"] == "gh_token"
+
+
+@pytest.mark.asyncio
 async def test_gateway_routes_web_tool():
     svc = SheriffGatewayService()
     svc.ai = MockProcClient("ai-worker")

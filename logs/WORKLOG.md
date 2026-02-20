@@ -93,3 +93,8 @@
 - Plumbed provider/api key from Sheriff secrets through gateway -> ai-worker -> runtime.
 - Added `/api-login <key> [provider]` sheriff command to save LLM provider+API key into encrypted vault.
 - Added secrets ops for `secrets.set_llm_provider` and `secrets.set_llm_api_key`.
+## 2026-02-20 12:40 EST
+- Aligned Sheriff behavior with product definition: removed user-initiated auth provisioning from Sheriff chat.
+- Removed `/api-login` command from Sheriff channel help/README/tests.
+- Kept Codex secrets-backed provider plumbing, but credential provisioning is no longer exposed as Sheriff-action.
+- Validation: pytest passed (56).

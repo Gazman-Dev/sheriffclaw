@@ -72,7 +72,6 @@ Examples:
 - `/status` → Sheriff
 - `/ yes I agree` → Sheriff
 - `what / do?` → AI bot
-- `/api-login <OPENAI_API_KEY> [openai-codex]` → store Codex auth in Sheriff vault
 
 Optional test bot route:
 

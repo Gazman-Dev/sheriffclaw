@@ -56,6 +56,11 @@ Here is exactly how you can let the AI manage your accounts without ever giving 
 
 ---
 
+## 📚 Wiki Docs
+
+- [LLM vs Sheriff Roles](docs/WIKI_ROLES.md)
+- [System Usage Guide](docs/WIKI_USAGE.md)
+
 ## 🖥️ Terminal Channel (new)
 
 After install, start an interactive terminal channel:

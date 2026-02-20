@@ -110,3 +110,8 @@
 - Validation:
   - pytest: 57 passed
   - install-path E2E: passed
+## 2026-02-20 13:05 EST
+- Added wiki documentation per request:
+  - `docs/WIKI_ROLES.md` (LLM vs Sheriff responsibilities + trust boundary)
+  - `docs/WIKI_USAGE.md` (installation, config, runtime usage, testing, troubleshooting)
+- Added README wiki links section for discoverability.

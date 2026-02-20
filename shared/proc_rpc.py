@@ -25,7 +25,7 @@ class ProcClient:
         if self.proc and self.proc.returncode is None:
             return
         binary = self.binary
-        candidate = Path(sys.executable).resolve().parent / self.binary
+        candidate = Path(sys.executable).parent / self.binary
         if candidate.exists():
             binary = str(candidate)
 

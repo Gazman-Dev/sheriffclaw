@@ -42,7 +42,7 @@ def _log_paths(service: str) -> tuple[Path, Path]:
 
 
 def _resolve_service_binary(service: str) -> str:
-    venv_bin = Path(sys.executable).resolve().parent / service
+    venv_bin = Path(sys.executable).parent / service
     return str(venv_bin) if venv_bin.exists() else service
 
 

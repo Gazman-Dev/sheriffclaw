@@ -199,6 +199,29 @@ def cmd_call(args):
     asyncio.run(_run())
 
 
+def cmd_configure_llm(args):
+    provider = args.provider or "openai-codex"
+    api_key = args.api_key
+    if api_key is None:
+        api_key = getpass.getpass(f"API key for {provider}: ").strip()
+
+    async def _run():
+        cli = ProcClient("sheriff-secrets")
+        _, unlocked = await cli.request("secrets.is_unlocked", {})
+        if not unlocked.get("result", {}).get("unlocked"):
+            if not args.master_password:
+                raise RuntimeError("vault is locked; pass --master-password to configure llm")
+            _, res = await cli.request("secrets.unlock", {"master_password": args.master_password})
+            if not res.get("result", {}).get("ok"):
+                raise RuntimeError("failed to unlock vault with provided master password")
+
+        await cli.request("secrets.set_llm_provider", {"provider": provider})
+        await cli.request("secrets.set_llm_api_key", {"api_key": api_key})
+
+    asyncio.run(_run())
+    print(f"LLM provider configured: {provider}")
+
+
 def cmd_chat(args):
     principal = args.principal
     model_ref = args.model_ref
@@ -290,6 +313,12 @@ def build_parser() -> argparse.ArgumentParser:
     cl.add_argument("op")
     cl.add_argument("--json", default="{}")
     cl.set_defaults(func=cmd_call)
+
+    cfg = sub.add_parser("configure-llm")
+    cfg.add_argument("--provider", default="openai-codex")
+    cfg.add_argument("--api-key", default=None)
+    cfg.add_argument("--master-password", default=None, help="Required if vault is locked")
+    cfg.set_defaults(func=cmd_configure_llm)
 
     chat = sub.add_parser("chat")
     chat.add_argument("--principal", default="local-cli")

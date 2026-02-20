@@ -98,3 +98,15 @@
 - Removed `/api-login` command from Sheriff channel help/README/tests.
 - Kept Codex secrets-backed provider plumbing, but credential provisioning is no longer exposed as Sheriff-action.
 - Validation: pytest passed (56).
+## 2026-02-20 12:52 EST
+- Proceeding with non-Sheriff LLM provisioning path: add `sheriff-ctl configure-llm` command.
+- Goal: keep Sheriff channel firewall-only while enabling explicit local setup command for provider + API key in secure vault.
+## 2026-02-20 12:56 EST
+- Added explicit non-Sheriff LLM setup command: `sheriff-ctl configure-llm`.
+  - Stores provider + API key into encrypted Sheriff secrets.
+  - If vault is locked, requires `--master-password` to unlock first.
+- Updated docs to point auth setup to `configure-llm` (not Sheriff chat).
+- Added parser test for new command.
+- Validation:
+  - pytest: 57 passed
+  - install-path E2E: passed

@@ -73,6 +73,12 @@ Examples:
 - `/ yes I agree` → Sheriff
 - `what / do?` → AI bot
 
+Configure Codex auth (outside Sheriff channel, stored in encrypted vault):
+
+```bash
+sheriff-ctl configure-llm --provider openai-codex --api-key <OPENAI_API_KEY> --master-password <MASTER_PASSWORD>
+```
+
 Optional test bot route:
 
 ```bash

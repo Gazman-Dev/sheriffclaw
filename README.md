@@ -91,6 +91,18 @@ Run scripted E2E simulation locally:
 ./scripts/e2e_cli_simulation.sh
 ```
 
+Run install-path E2E check (fresh ~/.sheriffclaw install + chat flow):
+
+```bash
+./scripts/e2e_installation_check.sh
+```
+
+Run Linux validation in Docker (unit + CLI E2E + installer E2E):
+
+```bash
+./scripts/test_linux_docker.sh
+```
+
 ## 🏁 Getting Started
 
 1.  **Run the install command** above.

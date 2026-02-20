@@ -59,3 +59,16 @@
 - Current local validation:
   - `pytest`: 55 passed
   - `./scripts/e2e_cli_simulation.sh`: passed
+## 2026-02-20 09:36 EST
+- New request: add installation testing and Linux validation via Docker container.
+- Plan: create install-focused smoke test script + dockerized linux test runner that executes unit tests and installer E2E.
+## 2026-02-20 09:41 EST
+- Added installer-focused E2E script: `scripts/e2e_installation_check.sh`.
+- Added Linux docker test harness:
+  - `docker/linux-test.Dockerfile`
+  - `scripts/test_linux_docker.sh`
+  - Runner executes unit tests + CLI E2E + installer E2E in container.
+- Local validation:
+  - `pytest` passed (55)
+  - installation E2E passed.
+- Host limitation encountered: `docker` binary is not installed on this machine, so Linux container run cannot execute locally yet. Added explicit precheck/error message in docker runner script.

@@ -36,7 +36,7 @@ GW_ORDER = [
     "sheriff-tg-gate",
     "sheriff-cli-gate",
 ]
-LLM_ORDER = ["ai-worker", "ai-tg-llm", "telegram-listener"]
+LLM_ORDER = ["ai-worker", "ai-tg-llm", "telegram-webhook"]
 ALL = [*GW_ORDER, *LLM_ORDER]
 
 
@@ -105,6 +105,16 @@ def _stop_service(service: str) -> None:
 
 
 def cmd_start(args):
+    already = [svc for svc in ALL if (_read_pid(svc) and _alive(_read_pid(svc)))]
+    if already and sys.stdin.isatty():
+        ans = input(f"Services already running ({', '.join(already)}). Stop and restart? [y/N]: ").strip().lower()
+        if ans in ("y", "yes"):
+            for svc in reversed(already):
+                _stop_service(svc)
+        else:
+            print("Start cancelled.")
+            return
+
     for svc in ALL:
         _start_service(svc)
 

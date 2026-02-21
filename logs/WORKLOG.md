@@ -330,3 +330,12 @@
 - Added process lifecycle integration:
   - included `telegram-listener` in managed services start/stop/status
   - added duplicate-start protection in service starter (alive PID check)
+## 2026-02-21 02:11 EST
+- Implemented Telegram webhook service (`telegram-webhook`) with security controls:
+  - unguessable GUID paths per bot role
+  - random high port persisted in config
+  - HTTPS-only enforced via cert/key env requirements
+  - verifies `X-Telegram-Bot-Api-Secret-Token` per role
+  - sets Telegram webhook with secret tokens and message-only updates
+- Switched managed runtime service from polling listener to webhook daemon (`telegram-webhook`).
+- Added start UX guard: when services are already running, `sheriff-ctl start` prompts user to stop/restart (y/n).

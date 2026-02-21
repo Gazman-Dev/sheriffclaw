@@ -12,6 +12,9 @@ import sys
 import time
 import warnings
 from pathlib import Path
+import select
+import termios
+import tty
 
 # requests is imported lazily in onboarding activation flow to avoid noisy startup warnings.
 
@@ -38,6 +41,31 @@ GW_ORDER = [
 ]
 LLM_ORDER = ["ai-worker", "ai-tg-llm", "telegram-webhook"]
 ALL = [*GW_ORDER, *LLM_ORDER]
+
+
+def _debug_mode_path() -> Path:
+    return gw_root() / "state" / "debug_mode.json"
+
+
+def _debug_messages_path() -> Path:
+    return gw_root() / "state" / "debug.agent.jsonl"
+
+
+def _read_debug_mode() -> bool:
+    p = _debug_mode_path()
+    if not p.exists():
+        return False
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+        return bool(obj.get("enabled", False))
+    except Exception:
+        return False
+
+
+def _write_debug_mode(enabled: bool) -> None:
+    p = _debug_mode_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"enabled": enabled}), encoding="utf-8")
 
 
 def _island_root(service: str) -> Path:
@@ -392,6 +420,78 @@ def cmd_onboard(args):
     print("Onboarding complete. Secrets initialized and unlocked.")
 
 
+def cmd_debug(args):
+    enabled = str(args.value).lower() == "on"
+    _write_debug_mode(enabled)
+    print(f"Debug mode {'ON' if enabled else 'OFF'}")
+
+
+def _wait_extra_or_esc(seconds: int = 10) -> None:
+    if not sys.stdin.isatty():
+        time.sleep(seconds)
+        return
+
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    end_at = time.time() + seconds
+    try:
+        tty.setcbreak(fd)
+        while time.time() < end_at:
+            r, _, _ = select.select([fd], [], [], 0.2)
+            if not r:
+                continue
+            ch = os.read(fd, 1)
+            if ch == b"\x1b":
+                print("\n(wait cancelled)")
+                return
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def _is_onboarded() -> bool:
+    state = gw_root() / "state"
+    for name in ("secrets.db", "secrets.enc", "master.json"):
+        if (state / name).exists():
+            return True
+    return False
+
+
+def cmd_entry(args):
+    msg = (" ".join(args.message)).strip() if args.message else ""
+    if msg:
+        if msg.startswith("/"):
+            cmd_chat(argparse.Namespace(principal="local-cli", model_ref=None, one_shot=msg))
+            return
+        cmd_chat(argparse.Namespace(principal="local-cli", model_ref=None, one_shot=msg))
+        return
+
+    if not _is_onboarded():
+        cmd_onboard(argparse.Namespace(master_password=None, llm_provider=None, llm_api_key=None, llm_bot_token=None, gate_bot_token=None, allow_telegram=False, deny_telegram=False))
+        return
+
+    while True:
+        choice = input("Choose: onboard | chat | restart | update | factory reset > ").strip().lower()
+        if choice == "onboard":
+            cmd_onboard(argparse.Namespace(master_password=None, llm_provider=None, llm_api_key=None, llm_bot_token=None, gate_bot_token=None, allow_telegram=False, deny_telegram=False))
+            return
+        if choice == "chat":
+            cmd_chat(argparse.Namespace(principal="local-cli", model_ref=None, one_shot=None))
+            return
+        if choice == "restart":
+            _ = getpass.getpass("Master password required to restart services: ")
+            cmd_stop(argparse.Namespace())
+            cmd_start(argparse.Namespace())
+            print("Services restarted.")
+            return
+        if choice == "update":
+            print("Update flow placeholder: run install/update script for your deployment.")
+            return
+        if choice in {"factory reset", "factory-reset"}:
+            cmd_reinstall(argparse.Namespace(yes=False))
+            return
+        print("Unknown choice.")
+
+
 def cmd_skill(args):
     async def _run():
         cli = ProcClient("ai-worker")
@@ -485,6 +585,17 @@ def cmd_chat(args):
     async def _run():
         gateway = ProcClient("sheriff-gateway")
         cli_gate = ProcClient("sheriff-cli-gate")
+
+        one_shot = getattr(args, "one_shot", None)
+        if one_shot is not None:
+            if one_shot.startswith("/"):
+                await _send_sheriff(cli_gate, one_shot)
+            else:
+                await _send_bot(gateway, one_shot)
+            print("(waiting up to 10s for additional responses; press Esc to cancel)")
+            await asyncio.to_thread(_wait_extra_or_esc, 10)
+            return
+
         print("SheriffClaw terminal chat")
         print("- Enter sends a single-line message")
         print("- /... routes to Sheriff, anything else routes to Agent")
@@ -537,6 +648,14 @@ def build_parser() -> argparse.ArgumentParser:
     reinstall.add_argument("--yes", action="store_true", help="Skip confirmation prompts")
     reinstall.set_defaults(func=cmd_reinstall)
 
+    fr = sub.add_parser("factory-reset")
+    fr.add_argument("--yes", action="store_true", help="Skip confirmation prompts")
+    fr.set_defaults(func=cmd_reinstall)
+
+    dbg = sub.add_parser("debug")
+    dbg.add_argument("value", choices=["on", "off"])
+    dbg.set_defaults(func=cmd_debug)
+
     sp = sub.add_parser("skill")
     sp.add_argument("name")
     sp.add_argument("argv", nargs="*")
@@ -570,3 +689,13 @@ def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
     args.func(args)
+
+def main_sheriff(argv: list[str] | None = None) -> None:
+    p = argparse.ArgumentParser(prog="sheriff")
+    p.add_argument("--debug", choices=["on", "off"], default=None)
+    p.add_argument("message", nargs="*")
+    args = p.parse_args(argv)
+    if args.debug is not None:
+        cmd_debug(argparse.Namespace(value=args.debug))
+        return
+    cmd_entry(args)

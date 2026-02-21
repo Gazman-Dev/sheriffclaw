@@ -32,3 +32,15 @@ def test_logout_llm_parses():
     parser = build_parser()
     args = parser.parse_args(["logout-llm", "--master-password", "x"])
     assert args.master_password == "x"
+
+
+def test_factory_reset_parses():
+    parser = build_parser()
+    args = parser.parse_args(["factory-reset", "--yes"])
+    assert args.yes is True
+
+
+def test_debug_parses():
+    parser = build_parser()
+    args = parser.parse_args(["debug", "on"])
+    assert args.value == "on"

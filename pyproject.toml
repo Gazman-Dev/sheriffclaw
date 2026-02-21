@@ -17,6 +17,7 @@ testpaths = ["tests"]
 
 
 [project.scripts]
+sheriff = "services.sheriff_ctl.ctl:main_sheriff"
 sheriff-ctl = "services.sheriff_ctl.__main__:main"
 
 sheriff-gateway = "services.sheriff_gateway.__main__:main"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from datetime import datetime, timezone
 
 from shared.identity import principal_id_for_channel
@@ -19,6 +20,27 @@ class SheriffGatewayService:
         self.requests = ProcClient("sheriff-requests")
         self.tg_gate = ProcClient("sheriff-tg-gate")
         self.sessions: dict[str, str] = {}
+
+    def _debug_mode_enabled(self) -> bool:
+        p = gw_root() / "state" / "debug_mode.json"
+        if not p.exists():
+            return False
+        try:
+            obj = json.loads(p.read_text(encoding="utf-8"))
+            return bool(obj.get("enabled", False))
+        except Exception:
+            return False
+
+    def _pop_debug_message(self) -> dict:
+        p = gw_root() / "state" / "debug.agent.jsonl"
+        if not p.exists():
+            raise RuntimeError("debug.agent.jsonl missing")
+        lines = [ln for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        if not lines:
+            raise RuntimeError("debug.agent.jsonl is empty")
+        first = lines[0]
+        p.write_text(("\n".join(lines[1:]) + ("\n" if len(lines) > 1 else "")), encoding="utf-8")
+        return json.loads(first)
 
     async def handle_user_message(self, payload, emit_event, req_id):
         channel = payload.get("channel", "cli")
@@ -67,6 +89,13 @@ class SheriffGatewayService:
                 api_key = key.get("result", {}).get("api_key") or ""
         except Exception:
             pass
+
+        if self._debug_mode_enabled():
+            msg = self._pop_debug_message()
+            out_text = msg.get("text") or msg.get("content") or json.dumps(msg, ensure_ascii=False)
+            await emit_event("assistant.final", {"text": out_text})
+            append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": out_text})
+            return {"status": "debug", "session_handle": session}
 
         stream, final = await self.ai.request(
             "agent.session.user_message",

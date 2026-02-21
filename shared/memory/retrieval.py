@@ -192,3 +192,16 @@ def retrieve_topics(
     ranked = [topic for topic, _ in sorted(scored.values(), key=lambda x: x[1], reverse=True)]
     return RetrievalResult(topics=ranked, deep_used=True,
                            trigger_reasons=reasons + (["low-confidence"] if low_conf else []))
+
+
+def render_topic_md(topic: dict[str, Any]) -> str:
+    lines = [f"### {topic.get('name', 'Untitled Topic')}"]
+    if topic.get("one_liner"):
+        lines.append(f"- Summary: {topic['one_liner']}")
+    aliases = topic.get("aliases", [])
+    if aliases:
+        lines.append(f"- Aliases: {', '.join(aliases)}")
+    t = topic.get("time", {})
+    if t.get("first_seen_at") or t.get("last_seen_at"):
+        lines.append(f"- Time: first_seen={t.get('first_seen_at','')}, last_seen={t.get('last_seen_at','')}")
+    return "\n".join(lines)

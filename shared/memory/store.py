@@ -1,22 +1,23 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from shared.memory.types import Topic, TopicEdge, TopicTime
+from shared.memory.types import EdgeType, Topic, TopicEdge, TopicTime
 
 
 def normalize_alias(text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", text.lower())).strip()
 
 
-def _parse_iso(s: str | None) -> datetime | None:
-    if not s:
+def _parse_iso(ts: str | None) -> datetime | None:
+    if not ts:
         return None
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone.utc)
     except ValueError:
         return None
 
@@ -24,8 +25,8 @@ def _parse_iso(s: str | None) -> datetime | None:
 class TopicStore:
     def __init__(self, db_path: Path):
         self.db_path = db_path
-        self.edges_path = db_path.parent / f"{db_path.stem}_edges.json"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.edges_path = self.db_path.with_name("_edges.json")
 
     def _load(self) -> list[dict]:
         if not self.db_path.exists():
@@ -45,9 +46,14 @@ class TopicStore:
 
     def create(self, topic: Topic) -> dict:
         topics = self._load()
-        topics.append(topic.to_dict())
+        data = topic.to_dict()
+        data.setdefault("stats", {})
+        data["stats"].setdefault("utility_score", 0.0)
+        data["stats"].setdefault("touch_count", 0)
+        data["stats"].setdefault("last_utility_update_at", "")
+        topics.append(data)
         self._save(topics)
-        return topic.to_dict()
+        return data
 
     def get(self, topic_id: str) -> dict | None:
         for topic in self._load():
@@ -71,11 +77,10 @@ class TopicStore:
         if len(new_topics) == len(topics):
             return False
         self._save(new_topics)
-
+        # remove incident edges
         edges = self._load_edges()
-        new_edges = [e for e in edges if e.get("from_topic_id") != topic_id and e.get("to_topic_id") != topic_id]
-        self._save_edges(new_edges)
-
+        edges = [e for e in edges if e.get("from_topic_id") != topic_id and e.get("to_topic_id") != topic_id]
+        self._save_edges(edges)
         return True
 
     def list_topics(self) -> list[dict]:
@@ -103,7 +108,7 @@ class TopicStore:
                 topic["aliases"] = merged_aliases
                 topic["one_liner"] = one_liner or topic.get("one_liner", "")
                 topic.setdefault("time", {})["last_seen_at"] = now_iso
-                stats = topic.setdefault("stats", {"utility_score": 0.0, "touch_count": 0})
+                stats = topic.setdefault("stats", {"utility_score": 0.0, "touch_count": 0, "last_utility_update_at": ""})
                 stats["touch_count"] = int(stats.get("touch_count", 0)) + 1
                 topics[idx] = topic
                 self._save(topics)
@@ -116,64 +121,160 @@ class TopicStore:
             one_liner=one_liner,
             aliases=sorted(set(aliases)),
             time=TopicTime(first_seen_at=now_iso, last_seen_at=now_iso, notable_events=[]),
-            stats={"utility_score": 1.0, "touch_count": 1},
+            stats={"utility_score": 1.0, "touch_count": 1, "last_utility_update_at": now_iso},
         ).to_dict()
         topics.append(topic)
         self._save(topics)
         return topic
 
-    def link_topics(self, from_id: str, to_id: str, edge_type: str, weight_delta: float, now_iso: str) -> None:
-        if not from_id or not to_id or from_id == to_id:
-            return
-
+    # Edge CRUD
+    def upsert_edge(
+        self,
+        from_topic_id: str,
+        to_topic_id: str,
+        edge_type: EdgeType | str,
+        weight: float,
+        last_updated_at: str,
+    ) -> dict:
+        et = edge_type.value if isinstance(edge_type, EdgeType) else str(edge_type)
         edges = self._load_edges()
-        for edge in edges:
-            if edge.get("from_topic_id") == from_id and edge.get("to_topic_id") == to_id and edge.get("edge_type") == edge_type:
-                edge["weight"] = edge.get("weight", 0.0) + weight_delta
-                edge["last_updated_at"] = now_iso
+        for i, e in enumerate(edges):
+            if (
+                e.get("from_topic_id") == from_topic_id
+                and e.get("to_topic_id") == to_topic_id
+                and e.get("edge_type") == et
+            ):
+                e["weight"] = float(weight)
+                e["last_updated_at"] = last_updated_at
+                edges[i] = e
                 self._save_edges(edges)
-                return
+                return e
 
-        new_edge = TopicEdge(
-            from_topic_id=from_id,
-            to_topic_id=to_id,
-            edge_type=edge_type,
-            weight=weight_delta,
-            last_updated_at=now_iso,
+        edge = TopicEdge(
+            schema_version=1,
+            from_topic_id=from_topic_id,
+            to_topic_id=to_topic_id,
+            edge_type=EdgeType(et),
+            weight=float(weight),
+            last_updated_at=last_updated_at,
         )
-        edges.append(new_edge.to_dict())
+        data = {
+            "schema_version": edge.schema_version,
+            "from_topic_id": edge.from_topic_id,
+            "to_topic_id": edge.to_topic_id,
+            "edge_type": edge.edge_type.value,
+            "weight": edge.weight,
+            "last_updated_at": edge.last_updated_at,
+        }
+        edges.append(data)
         self._save_edges(edges)
+        return data
 
-    def get_adjacent_topics(self, topic_id: str) -> list[str]:
+    def list_edges(self) -> list[dict]:
+        return self._load_edges()
+
+    # Compatibility alias used by runtime/tests
+    def link_topics(self, from_topic_id: str, to_topic_id: str, edge_type: EdgeType | str, weight: float, now_iso: str) -> dict:
+        return self.upsert_edge(from_topic_id, to_topic_id, edge_type, weight, now_iso)
+
+    def get_neighbors(self, topic_id: str, edge_type: EdgeType | str | None = None) -> list[dict]:
+        et = None
+        if edge_type is not None:
+            et = edge_type.value if isinstance(edge_type, EdgeType) else str(edge_type)
+
+        out = []
+        for e in self._load_edges():
+            if e.get("from_topic_id") != topic_id:
+                continue
+            if et and e.get("edge_type") != et:
+                continue
+            out.append(e)
+        return out
+
+    def get_adjacent_topics(self, topic_id: str, min_weight: float = 0.0) -> list[str]:
+        adjacent: set[str] = set()
+        for e in self._load_edges():
+            w = float(e.get("weight", 0.0))
+            if w < min_weight:
+                continue
+            if e.get("from_topic_id") == topic_id:
+                adjacent.add(str(e.get("to_topic_id")))
+            elif e.get("to_topic_id") == topic_id:
+                adjacent.add(str(e.get("from_topic_id")))
+        return sorted(adjacent)
+
+    def delete_edge(self, from_topic_id: str, to_topic_id: str, edge_type: EdgeType | str) -> bool:
+        et = edge_type.value if isinstance(edge_type, EdgeType) else str(edge_type)
         edges = self._load_edges()
-        adjacent = set()
-        for edge in edges:
-            if edge.get("from_topic_id") == topic_id:
-                adjacent.add(edge.get("to_topic_id"))
-            elif edge.get("to_topic_id") == topic_id:
-                adjacent.add(edge.get("from_topic_id"))
-        return list(adjacent)
+        new_edges = [
+            e
+            for e in edges
+            if not (
+                e.get("from_topic_id") == from_topic_id
+                and e.get("to_topic_id") == to_topic_id
+                and e.get("edge_type") == et
+            )
+        ]
+        if len(new_edges) == len(edges):
+            return False
+        self._save_edges(new_edges)
+        return True
 
-    def apply_decay(self, now_iso: str) -> None:
-        now = _parse_iso(now_iso)
-        if not now:
-            return
-
+    # Utility math (store-layer only)
+    def update_utility(self, topic_id: str, delta: float, now_iso: str, decay_per_day: float = 0.98) -> dict | None:
         topics = self._load()
+        now_dt = _parse_iso(now_iso)
+        if now_dt is None:
+            raise ValueError("now_iso must be valid ISO-8601")
+
+        for i, t in enumerate(topics):
+            if t.get("topic_id") != topic_id:
+                continue
+
+            stats = t.setdefault("stats", {})
+            current = float(stats.get("utility_score", 0.0))
+            last_ts = stats.get("last_utility_update_at") or t.get("time", {}).get("last_seen_at")
+            last_dt = _parse_iso(last_ts)
+
+            decayed = current
+            if last_dt is not None and now_dt >= last_dt:
+                days = (now_dt - last_dt).total_seconds() / 86400.0
+                decayed = current * (decay_per_day ** days)
+
+            updated = decayed + float(delta)
+            stats["utility_score"] = updated
+            stats["last_utility_update_at"] = now_iso
+            t["stats"] = stats
+            topics[i] = t
+            self._save(topics)
+            return t
+        return None
+
+    def apply_decay(self, now_iso: str, decay_per_day: float = 0.98) -> None:
+        topics = self._load()
+        now_dt = _parse_iso(now_iso)
+        if now_dt is None:
+            raise ValueError("now_iso must be valid ISO-8601")
+
         changed = False
-        for topic in topics:
-            last_seen = _parse_iso(topic.get("time", {}).get("last_seen_at"))
-            if last_seen:
-                days_since = max(0.0, (now - last_seen).total_seconds() / 86400.0)
-                if days_since > 1.0:
-                    stats = topic.setdefault("stats", {"utility_score": 0.0, "touch_count": 0})
-                    old_util = stats.get("utility_score", 0.0)
-                    if old_util > 0.1:
-                        # decay old topics by time since last_seen (0.98 per day)
-                        stats["utility_score"] = old_util * (0.98 ** days_since)
-                        # sync last seen so we don't double decay heavily if called repeatedly
-                        topic.setdefault("time", {})["last_seen_at"] = now_iso
-                        changed = True
+        for i, t in enumerate(topics):
+            stats = t.setdefault("stats", {})
+            current = float(stats.get("utility_score", 0.0))
+            last_ts = stats.get("last_utility_update_at") or t.get("time", {}).get("last_seen_at")
+            last_dt = _parse_iso(last_ts)
+            if last_dt is None or now_dt < last_dt:
+                continue
+            days = (now_dt - last_dt).total_seconds() / 86400.0
+            decayed = current * (decay_per_day ** days)
+            stats["utility_score"] = decayed
+            stats["last_utility_update_at"] = now_iso
+            t["stats"] = stats
+            topics[i] = t
+            changed = True
 
         if changed:
             self._save(topics)
+
+    @staticmethod
+    def decay_utility_value(current_utility: float, elapsed_days: float, decay_per_day: float = 0.98) -> float:
+        return float(current_utility) * (decay_per_day ** max(0.0, float(elapsed_days)))

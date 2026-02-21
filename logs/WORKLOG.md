@@ -202,3 +202,18 @@
 - Test verification:
   - full suite green: 68 passed, 0 failed.
 - Conclusion: claimed graph/utility work is not present in current branch; no unit-test fixes required now.
+## 2026-02-20 23:13 EST
+- Implemented Chunk A only (data model + store):
+  - Added versioned `TopicEdge` schema and `EdgeType` enum.
+  - Added edge persistence in `_edges.json` alongside topics JSON.
+  - Added edge CRUD APIs (upsert/list/neighbors/delete) + `link_topics` compatibility alias.
+  - Added utility fields defaults in topic stats: `utility_score`, `last_utility_update_at`.
+  - Added store-layer utility math: `update_utility`, `apply_decay`, and pure `decay_utility_value`.
+- Added deterministic unit tests for Chunk A:
+  - edge round-trip
+  - neighbor lookup/type filter
+  - utility bump+decay math with fixed timestamps
+- Reconciled externally-added graph tests with Chunk A scope:
+  - co-activation test updated to assert no auto-linking yet (runtime behavior intentionally deferred to Chunk B).
+- Validation:
+  - full test suite passes: 74 passed.

@@ -1,6 +1,28 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from enum import Enum
+
+
+class EdgeType(str, Enum):
+    RELATES_TO = "RELATES_TO"
+    DEPENDS_ON = "DEPENDS_ON"
+    PART_OF = "PART_OF"
+
+
+@dataclass
+class TopicEdge:
+    schema_version: int
+    from_topic_id: str
+    to_topic_id: str
+    edge_type: EdgeType
+    weight: float
+    last_updated_at: str
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["edge_type"] = self.edge_type.value
+        return data
 
 
 @dataclass
@@ -38,25 +60,13 @@ class Topic:
     aliases: list[str] = field(default_factory=list)
     time: TopicTime | None = None
     links: dict = field(default_factory=lambda: {"related_topic_ids": [], "skill_refs": [], "artifact_refs": []})
-    stats: dict = field(default_factory=lambda: {"utility_score": 0.0, "touch_count": 0})
+    stats: dict = field(default_factory=lambda: {"utility_score": 0.0, "touch_count": 0, "last_utility_update_at": ""})
 
     def to_dict(self) -> dict:
         data = asdict(self)
         if self.time is not None:
             data["time"] = asdict(self.time)
         return data
-
-
-@dataclass
-class TopicEdge:
-    from_topic_id: str
-    to_topic_id: str
-    edge_type: str
-    weight: float
-    last_updated_at: str
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
 @dataclass

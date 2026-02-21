@@ -6,6 +6,7 @@ from shared.memory.retrieval import retrieve_topics, render_topic_md, sync_seman
 from shared.memory.config import RetrievalConfig
 from shared.memory.skill_routing import SkillManifest, SkillManifestLoader, search_skills, route_skills
 from shared.memory.phase4_runtime import Phase4RuntimeConfig, RuntimeStores, ModelAdapter, MockCodexAdapter, run_turn
+from shared.memory.types import TopicEdge, EdgeType
 
 __all__ = [
     "TopicStore",
@@ -28,4 +29,6 @@ __all__ = [
     "ModelAdapter",
     "MockCodexAdapter",
     "run_turn",
+    "TopicEdge",
+    "EdgeType",
 ]

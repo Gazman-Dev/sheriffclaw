@@ -79,7 +79,7 @@ def test_graph_linkage_and_expansion(tmp_path):
     assert "B" in retrieved_ids # Pulled in via 1-hop graph expansion
 
 
-def test_sleep_co_activation_creates_links(tmp_path):
+def test_sleep_co_activation_does_not_auto_link_in_chunk_a(tmp_path):
     store = TopicStore(tmp_path / "topics.json")
     embedder = DeterministicHashEmbeddingProvider(dim=64)
     index = HnswlibSemanticIndex(tmp_path / "semantic", dim=embedder.dim)
@@ -104,6 +104,6 @@ def test_sleep_co_activation_creates_links(tmp_path):
 
     sleep(conv, _now(), store, keep_tail_turns=0, embedding_provider=embedder, semantic_index=index)
 
-    # Sleep should have linked them via co-activation
+    # Chunk A scope: no automatic co-activation linking yet
     adj = store.get_adjacent_topics("srv")
-    assert "db" in adj
+    assert "db" not in adj

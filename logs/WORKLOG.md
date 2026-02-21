@@ -313,3 +313,10 @@
 - Improved auth login flow UX:
   - URL includes embedded code and browser auto-open remains best-effort.
   - Esc remains cancellation key in prior device flow logic, but browser OAuth is default path.
+## 2026-02-21 01:49 EST
+- Fixed additional onboarding issues:
+  - moved Telegram unlock-policy question to after both bot activations complete.
+  - activation flow now polls Telegram Bot API updates directly, generates/sends activation code to every unbound DM sender, and waits for pasted code.
+  - onboarding no longer asks for both bot tokens up front; asks AI token -> activate -> asks Sheriff token -> activate.
+  - updated auth type label to `chatgpt_browser_oauth` and wording to browser login.
+  - Ctrl-C in activation prompt remains graceful (no traceback).

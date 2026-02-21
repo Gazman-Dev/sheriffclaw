@@ -160,7 +160,8 @@ class SecretsState:
     def create_activation_code(self, bot_role: str, user_id: str) -> str:
         ident = self._ensure_identity_shape()
         pending = ident["pending_activation"].setdefault(bot_role, {})
-        code = "".join(random.choice(string.ascii_lowercase) for _ in range(5))
+        alphabet = string.ascii_uppercase + string.digits
+        code = "".join(random.choice(alphabet) for _ in range(6))
         pending[code] = str(user_id)
         self._persist()
         return code

@@ -13,6 +13,8 @@ import time
 import warnings
 from pathlib import Path
 
+# requests is imported lazily in onboarding activation flow to avoid noisy startup warnings.
+
 from shared.paths import gw_root, llm_root
 from shared.proc_rpc import ProcClient
 
@@ -186,7 +188,7 @@ def cmd_onboard(args):
                 break
 
             if choice == "2":
-                print("Starting ChatGPT subscription device login...")
+                print("Starting ChatGPT subscription browser login...")
                 from shared.llm.device_auth import run_browser_oauth_login
                 try:
                     tokens = run_browser_oauth_login(timeout_seconds=900)
@@ -196,7 +198,7 @@ def cmd_onboard(args):
                 llm_prov = "openai-codex-chatgpt"
                 llm_key = ""
                 llm_auth = {
-                    "type": "chatgpt_subscription_device_code",
+                    "type": "chatgpt_browser_oauth",
                     "access_token": tokens.access_token,
                     "refresh_token": tokens.refresh_token,
                     "id_token": tokens.id_token,
@@ -222,27 +224,85 @@ def cmd_onboard(args):
     gate_bot = args.gate_bot_token
 
     allow_tg = False
-    if args.allow_telegram:
-        allow_tg = True
-    elif args.deny_telegram:
-        allow_tg = False
-    else:
-        ans = input("Allow sending master password via Telegram to unlock? [y/N]: ").strip().lower()
-        allow_tg = ans in ("y", "yes")
 
-    print(f"\nConfiguration:\nProvider: {llm_prov}\nChannel: telegram\nTelegram Unlock: {allow_tg}\nSaving...")
+    async def _telegram_activate_bot(cli: ProcClient, role: str, token: str, timeout_sec: int = 300) -> bool:
+        import requests
 
-    master_policy = gw_root() / "state" / "master_policy.json"
-    master_policy.parent.mkdir(parents=True, exist_ok=True)
-    master_policy.write_text(json.dumps({"allow_telegram_master_password": allow_tg}), encoding="utf-8")
+        print(f"\n{role.upper()} bot activation:")
+        print("1) Open Telegram and send any message to the bot.")
+        print("2) The bot will reply with an activation code.")
+        print("3) Paste that code here.")
 
-    async def _wait_activation(cli: ProcClient, role: str, timeout_sec: int = 300) -> bool:
+        offset = 0
+        sent_codes: dict[str, str] = {}
         start = time.time()
+
         while time.time() - start < timeout_sec:
+            # Already activated?
             _, st = await cli.request("secrets.activation.status", {"bot_role": role})
             if st.get("result", {}).get("user_id"):
                 return True
-            await asyncio.sleep(2)
+
+            try:
+                resp = requests.get(
+                    f"https://api.telegram.org/bot{token}/getUpdates",
+                    params={"timeout": 20, "allowed_updates": '["message"]', "offset": offset},
+                    timeout=30,
+                )
+                data = resp.json()
+                updates = data.get("result", []) if isinstance(data, dict) else []
+            except Exception:
+                updates = []
+
+            for upd in updates:
+                update_id = int(upd.get("update_id", 0))
+                offset = max(offset, update_id + 1)
+                msg = upd.get("message") or {}
+                from_user = msg.get("from") or {}
+                chat = msg.get("chat") or {}
+                user_id = str(from_user.get("id") or "")
+                chat_id = chat.get("id")
+                if not user_id or chat_id is None:
+                    continue
+
+                _, bound = await cli.request("secrets.activation.status", {"bot_role": role})
+                bound_uid = bound.get("result", {}).get("user_id")
+                if bound_uid and str(bound_uid) == user_id:
+                    continue
+
+                code = sent_codes.get(user_id)
+                if not code:
+                    _, c = await cli.request("secrets.activation.create", {"bot_role": role, "user_id": user_id})
+                    code = c.get("result", {}).get("code")
+                    if not code:
+                        continue
+                    sent_codes[user_id] = code
+
+                text = f"Your activation code is: {code}\nReply: activate {code}"
+                try:
+                    requests.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
+                        timeout=15,
+                    )
+                except Exception:
+                    pass
+
+            if sent_codes:
+                try:
+                    code_in = input(f"Enter {role} activation code: ").strip().upper()
+                except KeyboardInterrupt:
+                    return False
+                if not code_in:
+                    continue
+                _, claim = await cli.request("secrets.activation.claim", {"bot_role": role, "code": code_in})
+                if claim.get("result", {}).get("ok"):
+                    return True
+                print("Invalid code, try again.")
+            else:
+                print("Waiting for a Telegram DM to the bot...")
+                await asyncio.sleep(2)
+
         return False
 
     async def _run():
@@ -263,7 +323,7 @@ def cmd_onboard(args):
                 "llm_api_key": llm_key,
                 "llm_bot_token": llm_bot,
                 "gate_bot_token": "",
-                "allow_telegram_master_password": allow_tg,
+                "allow_telegram_master_password": False,
             },
         )
         await cli.request("secrets.unlock", {"master_password": mp})
@@ -272,16 +332,14 @@ def cmd_onboard(args):
 
         interactive = sys.stdin.isatty()
 
-        if llm_bot and interactive:
-            print("\nAI bot activation:")
-            print("- Send any message to the AI bot in Telegram.")
-            print("- If you are unlinked, the bot replies with activation code.")
-            print("- Reply to bot with: activate <code>")
-            ok = await _wait_activation(cli, "llm")
-            if ok:
-                print("AI bot activated.")
-            else:
-                print("AI bot activation timed out.")
+        if llm_bot:
+            await cli.request("secrets.set_llm_bot_token", {"token": llm_bot})
+            if interactive:
+                ok = await _telegram_activate_bot(cli, "llm", llm_bot)
+                if ok:
+                    print("AI bot activated.")
+                else:
+                    print("AI bot activation timed out/cancelled.")
 
         gate_tok = gate_bot
         if gate_tok is None:
@@ -290,18 +348,28 @@ def cmd_onboard(args):
         if gate_tok:
             await cli.request("secrets.set_gate_bot_token", {"token": gate_tok})
             if interactive:
-                print("\nSheriff bot activation:")
-                print("- Send any message to the Sheriff bot in Telegram.")
-                print("- If you are unlinked, the bot replies with activation code.")
-                print("- Reply to bot with: activate <code>")
-                ok = await _wait_activation(cli, "sheriff")
+                ok = await _telegram_activate_bot(cli, "sheriff", gate_tok)
                 if ok:
                     print("Sheriff bot activated.")
                 else:
-                    print("Sheriff bot activation timed out.")
+                    print("Sheriff bot activation timed out/cancelled.")
 
         if (llm_bot or gate_tok) and not interactive:
             print("Skipping activation wait in non-interactive mode.")
+
+        # Ask unlock policy only after activation phase
+        nonlocal allow_tg
+        if args.allow_telegram:
+            allow_tg = True
+        elif args.deny_telegram:
+            allow_tg = False
+        else:
+            ans = input("Allow sending master password via Telegram to unlock? [y/N]: ").strip().lower()
+            allow_tg = ans in ("y", "yes")
+
+        master_policy = gw_root() / "state" / "master_policy.json"
+        master_policy.parent.mkdir(parents=True, exist_ok=True)
+        master_policy.write_text(json.dumps({"allow_telegram_master_password": allow_tg}), encoding="utf-8")
 
     try:
         asyncio.run(_run())

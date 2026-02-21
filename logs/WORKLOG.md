@@ -289,3 +289,10 @@
   - refreshes access token when expired using refresh_token and persists updated auth.
   - routes subscription auth calls via ChatGPT backend codex endpoint provider.
 - Test status: full suite 80 passed.
+## 2026-02-21 01:14 EST
+- Addressed onboarding auth flow crash and UX polish from user repro:
+  - device-code polling now handles pending/error responses without traceback; 403 no longer crashes onboarding loop.
+  - login URL now includes embedded code query param and attempts browser auto-open.
+  - cancel key changed from Enter to Esc during polling.
+  - moved device-auth import to lazy import path so warning filter is installed first.
+- Added warning suppression gate in CLI (`SHERIFF_DEBUG` enables warnings; default hides NotOpenSSLWarning).

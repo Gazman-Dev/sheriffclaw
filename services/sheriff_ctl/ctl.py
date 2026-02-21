@@ -10,11 +10,19 @@ import signal
 import subprocess
 import sys
 import time
+import warnings
 from pathlib import Path
 
-from shared.llm.device_auth import DeviceAuthNotEnabled, run_device_code_login
 from shared.paths import gw_root, llm_root
 from shared.proc_rpc import ProcClient
+
+if os.getenv("SHERIFF_DEBUG", "0") not in {"1", "true", "yes"}:
+    try:
+        from urllib3.exceptions import NotOpenSSLWarning
+
+        warnings.filterwarnings("ignore", category=NotOpenSSLWarning)
+    except Exception:
+        pass
 
 GW_ORDER = [
     "sheriff-secrets",
@@ -179,6 +187,7 @@ def cmd_onboard(args):
 
             if choice == "2":
                 print("Starting ChatGPT subscription device login...")
+                from shared.llm.device_auth import DeviceAuthNotEnabled, run_device_code_login
                 try:
                     tokens = run_device_code_login(timeout_seconds=900)
                 except DeviceAuthNotEnabled as e:

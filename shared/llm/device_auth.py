@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import select
 import sys
 import time
+import webbrowser
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import quote_plus
 
 import requests
 
@@ -40,6 +43,22 @@ def _expires_at_from_response(data: dict[str, Any]) -> str | None:
     return None
 
 
+def _pending_poll_response(resp: requests.Response) -> bool:
+    if resp.status_code in (202, 204):
+        return True
+    if resp.status_code in (400, 401, 403):
+        try:
+            data = resp.json()
+        except Exception:
+            data = {}
+        err = str(data.get("error") or data.get("code") or "").lower()
+        msg = str(data.get("message") or "").lower()
+        pending_markers = ["authorization_pending", "pending", "slow_down", "not yet"]
+        if any(m in err or m in msg for m in pending_markers):
+            return True
+    return False
+
+
 def run_device_code_login(timeout_seconds: int = 900) -> DeviceAuthTokens:
     r = requests.post(
         f"{API_BASE}/deviceauth/usercode",
@@ -55,38 +74,79 @@ def run_device_code_login(timeout_seconds: int = 900) -> DeviceAuthTokens:
     user_code = data["user_code"]
     interval = int(data.get("interval") or 5)
 
-    print(f"Open this URL: {VERIFY_URL}")
-    print(f"Enter this code: {user_code}")
-    print("Press Enter to cancel waiting.")
+    full_url = f"{VERIFY_URL}?code={quote_plus(user_code)}"
+    print(f"Open this URL: {full_url}")
+    print(f"Code (already embedded in URL): {user_code}")
+    try:
+        opened = webbrowser.open(full_url)
+        if opened:
+            print("Opened browser automatically.")
+        else:
+            print("Could not auto-open browser. Please open the URL manually.")
+    except Exception:
+        print("Could not auto-open browser. Please open the URL manually.")
+
+    print("Press Esc to cancel waiting.")
 
     start = time.time()
     authorization_code = None
     code_verifier = None
 
-    while time.time() - start < timeout_seconds:
-        if sys.stdin.isatty():
-            readable, _, _ = select.select([sys.stdin], [], [], 0)
-            if readable:
-                line = sys.stdin.readline()
-                if line.strip() == "":
-                    raise RuntimeError("device auth cancelled by user")
+    fd = None
+    old_term = None
+    if sys.stdin.isatty():
+        try:
+            import termios
+            import tty
 
-        p = requests.post(
-            f"{API_BASE}/deviceauth/token",
-            headers={"Content-Type": "application/json"},
-            json={"device_auth_id": device_auth_id, "user_code": user_code},
-            timeout=30,
-        )
-        if p.status_code in (202, 204, 400):
+            fd = sys.stdin.fileno()
+            old_term = termios.tcgetattr(fd)
+            tty.setcbreak(fd)
+        except Exception:
+            fd = None
+            old_term = None
+
+    try:
+        while time.time() - start < timeout_seconds:
+            if fd is not None:
+                readable, _, _ = select.select([fd], [], [], 0)
+                if readable:
+                    ch = os.read(fd, 1)
+                    if ch == b"\x1b":
+                        raise RuntimeError("device auth cancelled by user")
+
+            p = requests.post(
+                f"{API_BASE}/deviceauth/token",
+                headers={"Content-Type": "application/json"},
+                json={"device_auth_id": device_auth_id, "user_code": user_code},
+                timeout=30,
+            )
+            if _pending_poll_response(p):
+                time.sleep(interval)
+                continue
+            if p.status_code == 404:
+                raise DeviceAuthNotEnabled("device code auth not enabled for this account/workspace")
+            if p.status_code >= 400:
+                try:
+                    detail = p.json()
+                except Exception:
+                    detail = p.text
+                raise RuntimeError(f"device auth token polling failed: {p.status_code} {detail}")
+
+            pd = p.json()
+            authorization_code = pd.get("authorization_code")
+            code_verifier = pd.get("code_verifier")
+            if authorization_code and code_verifier:
+                break
             time.sleep(interval)
-            continue
-        p.raise_for_status()
-        pd = p.json()
-        authorization_code = pd.get("authorization_code")
-        code_verifier = pd.get("code_verifier")
-        if authorization_code and code_verifier:
-            break
-        time.sleep(interval)
+    finally:
+        if fd is not None and old_term is not None:
+            try:
+                import termios
+
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_term)
+            except Exception:
+                pass
 
     if not authorization_code or not code_verifier:
         raise RuntimeError("device auth timed out")

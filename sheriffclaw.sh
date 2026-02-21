@@ -19,6 +19,10 @@ log() { echo -e "${GREEN}[+] $*${NC}"; }
 warn() { echo -e "${YELLOW}[!] $*${NC}"; }
 err() { echo -e "${RED}[!] $*${NC}"; }
 
+lower() {
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
 is_linux() { [ "$(uname -s)" = "Linux" ]; }
 is_macos() { [ "$(uname -s)" = "Darwin" ]; }
 
@@ -181,7 +185,8 @@ run_onboarding_if_needed() {
             else
                 read -r -p "Reinstall from scratch (wipe ALL Sheriff/Agent data)? [y/N]: " REINSTALL_ANS < /dev/tty
             fi
-            if [[ "${REINSTALL_ANS,,}" == "y" || "${REINSTALL_ANS,,}" == "yes" ]]; then
+            REINSTALL_ANS_LC="$(lower "$REINSTALL_ANS")"
+            if [[ "$REINSTALL_ANS_LC" == "y" || "$REINSTALL_ANS_LC" == "yes" ]]; then
                 "$VENV_DIR/bin/sheriff-ctl" reinstall < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" reinstall
             fi
         fi
@@ -190,7 +195,8 @@ run_onboarding_if_needed() {
             if ! "$VENV_DIR/bin/sheriff-ctl" onboarding; then
                 echo -e "${YELLOW}Onboarding exited.${NC}"
                 read -r -p "Do aggressive reinstall now? (wipe all data) [y/N]: " RI
-                if [[ "${RI,,}" == "y" || "${RI,,}" == "yes" ]]; then
+                RI_LC="$(lower "$RI")"
+                if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
                     "$VENV_DIR/bin/sheriff-ctl" reinstall
                 fi
                 return 1
@@ -199,7 +205,8 @@ run_onboarding_if_needed() {
             if ! "$VENV_DIR/bin/sheriff-ctl" onboarding < /dev/tty > /dev/tty 2>&1; then
                 echo -e "${YELLOW}Onboarding exited.${NC}"
                 read -r -p "Do aggressive reinstall now? (wipe all data) [y/N]: " RI < /dev/tty
-                if [[ "${RI,,}" == "y" || "${RI,,}" == "yes" ]]; then
+                RI_LC="$(lower "$RI")"
+                if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
                     "$VENV_DIR/bin/sheriff-ctl" reinstall < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" reinstall
                 fi
                 return 1

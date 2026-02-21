@@ -29,6 +29,15 @@ docker run --rm -t \
     ./install_sheriffclaw.sh
 
     "$SHERIFF_INSTALL_DIR/venv/bin/sheriff" --help >/dev/null
+
+    ONE_OUT="$(mktemp)"
+    "$SHERIFF_INSTALL_DIR/venv/bin/sheriff" "hello from docker e2e" > "$ONE_OUT"
+    grep -Eq "\[AGENT\]|\[TOOL\]" "$ONE_OUT"
+
+    SLASH_OUT="$(mktemp)"
+    "$SHERIFF_INSTALL_DIR/venv/bin/sheriff" "/status" > "$SLASH_OUT"
+    grep -q "\[SHERIFF\]" "$SLASH_OUT"
+
     "$SHERIFF_INSTALL_DIR/venv/bin/sheriff-ctl" factory-reset --yes >/dev/null
 
     [ ! -e "$SHERIFF_INSTALL_DIR/gw" ] && [ ! -e "$SHERIFF_INSTALL_DIR/llm" ]

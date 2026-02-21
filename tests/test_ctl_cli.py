@@ -19,3 +19,10 @@ def test_reinstall_command_parses():
     parser = build_parser()
     args = parser.parse_args(["reinstall"])
     assert args.cmd == "reinstall"
+    assert args.yes is False
+
+
+def test_reinstall_yes_parses():
+    parser = build_parser()
+    args = parser.parse_args(["reinstall", "--yes"])
+    assert args.yes is True

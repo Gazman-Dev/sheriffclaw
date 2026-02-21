@@ -238,3 +238,13 @@
   - Added `sheriff-ctl reinstall` command to aggressively wipe Sheriff/Agent state (`gw` + `llm`).
 - Verified reinstall command end-to-end in isolated `SHERIFFCLAW_ROOT` temp directory.
 - Added parser tests for onboarding alias + reinstall command.
+## 2026-02-20 23:50 EST
+- Fixed onboarding behavior for `curl | bash` installs:
+  - if stdin is piped but `/dev/tty` exists, installer now runs onboarding interactively via `/dev/tty`.
+  - second-install reinstall prompt also uses `/dev/tty` in piped mode.
+- Updated reinstall UX:
+  - `sheriff-ctl reinstall` now asks two yes/no confirmations.
+  - added `--yes` for automation/non-interactive tests.
+- Verified:
+  - parser tests updated and passing
+  - onboarding+reinstall flow validated in isolated root with `--yes` path

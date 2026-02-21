@@ -123,6 +123,17 @@ def _wipe_all_state() -> None:
 
 
 def cmd_reinstall(args):
+    if not args.yes:
+        print("This will delete ALL Sheriff/Agent data: vault, chats, skills state, logs, and runtime data.")
+        ans1 = input("Proceed with reinstall? [y/N]: ").strip().lower()
+        if ans1 not in ("y", "yes"):
+            print("Reinstall cancelled.")
+            return
+        ans2 = input("Are you sure? This cannot be undone. [y/N]: ").strip().lower()
+        if ans2 not in ("y", "yes"):
+            print("Reinstall cancelled.")
+            return
+
     print("Reinstalling SheriffClaw state (aggressive wipe)...")
     for svc in reversed(ALL):
         _stop_service(svc)
@@ -332,6 +343,7 @@ def build_parser() -> argparse.ArgumentParser:
         ob.set_defaults(func=cmd_onboard)
 
     reinstall = sub.add_parser("reinstall")
+    reinstall.add_argument("--yes", action="store_true", help="Skip confirmation prompts")
     reinstall.set_defaults(func=cmd_reinstall)
 
     sp = sub.add_parser("skill")

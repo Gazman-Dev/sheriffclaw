@@ -163,13 +163,9 @@ run_onboarding_if_needed() {
         existing_install=1
     fi
 
-    if [ "$existing_install" = "1" ] && [ -t 0 ] && [ "${SHERIFF_NON_INTERACTIVE:-0}" != "1" ]; then
-        echo -e "${YELLOW}Existing installation detected.${NC}"
-        read -r -p "Reinstall from scratch (wipe ALL Sheriff/Agent data)? [y/N]: " REINSTALL_ANS
-        if [[ "${REINSTALL_ANS,,}" == "y" || "${REINSTALL_ANS,,}" == "yes" ]]; then
-            "$VENV_DIR/bin/sheriff-ctl" reinstall
-            existing_install=0
-        fi
+    local interactive=0
+    if [ "${SHERIFF_NON_INTERACTIVE:-0}" != "1" ] && { [ -t 0 ] || [ -r /dev/tty ]; }; then
+        interactive=1
     fi
 
     echo -e "${BLUE}=========================================${NC}"
@@ -177,35 +173,59 @@ run_onboarding_if_needed() {
     echo -e "${BLUE}=========================================${NC}"
     echo ""
 
-    if [ -t 0 ] && [ -z "${SHERIFF_MASTER_PASSWORD:-}" ] && [ "${SHERIFF_NON_INTERACTIVE:-0}" != "1" ]; then
-        if ! "$VENV_DIR/bin/sheriff-ctl" onboarding; then
-            echo -e "${YELLOW}Onboarding exited.${NC}"
-            read -r -p "Do aggressive reinstall now? (wipe all data) [y/N]: " RI
-            if [[ "${RI,,}" == "y" || "${RI,,}" == "yes" ]]; then
-                "$VENV_DIR/bin/sheriff-ctl" reinstall
+    if [ "$interactive" = "1" ]; then
+        if [ "$existing_install" = "1" ]; then
+            echo -e "${YELLOW}Existing installation detected.${NC}"
+            if [ -t 0 ]; then
+                read -r -p "Reinstall from scratch (wipe ALL Sheriff/Agent data)? [y/N]: " REINSTALL_ANS
+            else
+                read -r -p "Reinstall from scratch (wipe ALL Sheriff/Agent data)? [y/N]: " REINSTALL_ANS < /dev/tty
             fi
-            return 1
-        fi
-    else
-        MP="${SHERIFF_MASTER_PASSWORD:-local-dev-master-password}"
-        LLM_PROVIDER="${SHERIFF_LLM_PROVIDER:-stub}"
-        LLM_API_KEY="${SHERIFF_LLM_API_KEY:-}"
-        LLM_BOT_TOKEN="${SHERIFF_LLM_BOT_TOKEN:-}"
-        GATE_BOT_TOKEN="${SHERIFF_GATE_BOT_TOKEN:-}"
-
-        TELEGRAM_FLAG="--deny-telegram"
-        if [ "${SHERIFF_ALLOW_TELEGRAM_UNLOCK:-0}" = "1" ]; then
-            TELEGRAM_FLAG="--allow-telegram"
+            if [[ "${REINSTALL_ANS,,}" == "y" || "${REINSTALL_ANS,,}" == "yes" ]]; then
+                "$VENV_DIR/bin/sheriff-ctl" reinstall < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" reinstall
+            fi
         fi
 
-        "$VENV_DIR/bin/sheriff-ctl" onboarding \
-            --master-password "$MP" \
-            --llm-provider "$LLM_PROVIDER" \
-            --llm-api-key "$LLM_API_KEY" \
-            --llm-bot-token "$LLM_BOT_TOKEN" \
-            --gate-bot-token "$GATE_BOT_TOKEN" \
-            $TELEGRAM_FLAG
+        if [ -t 0 ]; then
+            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding; then
+                echo -e "${YELLOW}Onboarding exited.${NC}"
+                read -r -p "Do aggressive reinstall now? (wipe all data) [y/N]: " RI
+                if [[ "${RI,,}" == "y" || "${RI,,}" == "yes" ]]; then
+                    "$VENV_DIR/bin/sheriff-ctl" reinstall
+                fi
+                return 1
+            fi
+        else
+            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding < /dev/tty > /dev/tty 2>&1; then
+                echo -e "${YELLOW}Onboarding exited.${NC}"
+                read -r -p "Do aggressive reinstall now? (wipe all data) [y/N]: " RI < /dev/tty
+                if [[ "${RI,,}" == "y" || "${RI,,}" == "yes" ]]; then
+                    "$VENV_DIR/bin/sheriff-ctl" reinstall < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" reinstall
+                fi
+                return 1
+            fi
+        fi
+        return 0
     fi
+
+    MP="${SHERIFF_MASTER_PASSWORD:-local-dev-master-password}"
+    LLM_PROVIDER="${SHERIFF_LLM_PROVIDER:-stub}"
+    LLM_API_KEY="${SHERIFF_LLM_API_KEY:-}"
+    LLM_BOT_TOKEN="${SHERIFF_LLM_BOT_TOKEN:-}"
+    GATE_BOT_TOKEN="${SHERIFF_GATE_BOT_TOKEN:-}"
+
+    TELEGRAM_FLAG="--deny-telegram"
+    if [ "${SHERIFF_ALLOW_TELEGRAM_UNLOCK:-0}" = "1" ]; then
+        TELEGRAM_FLAG="--allow-telegram"
+    fi
+
+    "$VENV_DIR/bin/sheriff-ctl" onboarding \
+        --master-password "$MP" \
+        --llm-provider "$LLM_PROVIDER" \
+        --llm-api-key "$LLM_API_KEY" \
+        --llm-bot-token "$LLM_BOT_TOKEN" \
+        --gate-bot-token "$GATE_BOT_TOKEN" \
+        $TELEGRAM_FLAG
 }
 
 echo -e "${BLUE}=========================================${NC}"

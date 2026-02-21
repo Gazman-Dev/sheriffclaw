@@ -110,11 +110,12 @@ def _topic_tools(topic_store) -> dict[str, Callable[[dict], dict]]:
 
     def t_link(args: dict) -> dict:
         topic_store.link_topics(
-            from_id=args.get("from_topic_id", ""),
-            to_id=args.get("to_topic_id", ""),
-            edge_type=args.get("type", "RELATES_TO"),
-            weight_delta=float(args.get("weight_delta", 1.0)),
+            from_topic_id=args.get("from_topic_id", ""),
+            to_topic_id=args.get("to_topic_id", ""),
+            edge_type=args.get("edge_type", "RELATES_TO"),
+            weight=float(args.get("weight", args.get("weight_delta", 1.0))),
             now_iso=_now_iso(None),
+            mode=args.get("mode", "add"),
         )
         return {"status": "linked"}
 
@@ -183,7 +184,7 @@ def _tool_schemas() -> list[dict]:
         {"type": "function", "name": "topics.search", "description": "Search topics", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "k": {"type": "integer"}}, "required": ["query"]}},
         {"type": "function", "name": "topics.get", "description": "Get topics by ids", "parameters": {"type": "object", "properties": {"topic_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["topic_ids"]}},
         {"type": "function", "name": "topics.upsert", "description": "Upsert topic", "parameters": {"type": "object", "properties": {"name": {"type": "string"}, "one_liner": {"type": "string"}, "aliases": {"type": "array", "items": {"type": "string"}}}, "required": ["name", "aliases"]}},
-        {"type": "function", "name": "topics.link", "description": "Link two topics", "parameters": {"type": "object", "properties": {"from_topic_id": {"type": "string"}, "to_topic_id": {"type": "string"}, "type": {"type": "string"}, "weight_delta": {"type": "number"}}, "required": ["from_topic_id", "to_topic_id"]}},
+        {"type": "function", "name": "topics.link", "description": "Link two topics", "parameters": {"type": "object", "properties": {"from_topic_id": {"type": "string"}, "to_topic_id": {"type": "string"}, "edge_type": {"type": "string", "enum": ["RELATES_TO", "DEPENDS_ON", "PART_OF"]}, "weight": {"type": "number"}, "mode": {"type": "string", "enum": ["set", "add"]}}, "required": ["from_topic_id", "to_topic_id"]}},
         {"type": "function", "name": "memory.sleep", "description": "Compact memory", "parameters": {"type": "object", "properties": {"conversation_buffer": {"type": "array"}, "now": {"type": "string"}, "keep_tail_turns": {"type": "integer"}}, "required": ["conversation_buffer"]}},
         {"type": "function", "name": "memory.wake", "description": "Wake and retrieve", "parameters": {"type": "object", "properties": {"wake_packet": {"type": "object"}, "user_msg": {"type": "string"}, "now": {"type": "string"}}, "required": ["wake_packet", "user_msg"]}},
         {"type": "function", "name": "skills.search", "description": "Search skills", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},

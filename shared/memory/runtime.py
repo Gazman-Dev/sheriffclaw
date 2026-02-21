@@ -74,7 +74,10 @@ def sleep(
     # Apply global time decay to existing utility scores before we evaluate usage
     topic_store.apply_decay(now_iso)
 
-    if len(conversation_buffer) <= keep_tail_turns:
+    if keep_tail_turns == 0:
+        tail = []
+        compacted = conversation_buffer[:]
+    elif len(conversation_buffer) <= keep_tail_turns:
         tail = conversation_buffer[:]
         compacted = []
     else:
@@ -82,54 +85,51 @@ def sleep(
         compacted = conversation_buffer[:-keep_tail_turns]
 
     aliases = _extract_aliases(compacted)
-    top_topic_ids: list[str] = []
+    touched_topic_ids: list[str] = []
 
-    if aliases:
-        best_tid = None
+    # Touch topics per alias candidate (create or merge by alias overlap)
+    for alias in aliases:
+        topic = topic_store.upsert_by_alias_overlap(
+            name=alias.title(),
+            one_liner=_build_one_liner(compacted),
+            aliases=[alias],
+            now_iso=now_iso,
+        )
+        tid = topic.get("topic_id")
+        if tid and tid not in touched_topic_ids:
+            touched_topic_ids.append(tid)
 
-        if embedding_provider and semantic_index:
-            candidate_name = aliases[0]
-            alias_hits = topic_store.search_by_alias(candidate_name, k=3)
-            sem_hits = semantic_index.search(embedding_provider.embed(candidate_name), k=3)
+    # Utility bump hooks (simple chunk-B rules)
+    compact_text = " ".join(str(m.get("content", "")) for m in compacted).lower()
+    correction_signal = any(x in compact_text for x in ["you are wrong", "incorrect", "that's wrong", "correction"])
+    skill_success_signal = any(
+        m.get("role") == "tool" and ("\"ok\": true" in str(m.get("content", "")).lower() or "status\": \"success\"" in str(m.get("content", "")).lower())
+        for m in compacted
+    )
 
-            # Topic Match Score Calculation (Threshold: >= 4.0 merge)
-            scores: dict[str, float] = {}
-            for hit in alias_hits:
-                scores[hit["topic_id"]] = scores.get(hit["topic_id"], 0.0) + 3.0
-            for tid, sim in sem_hits:
-                scores[tid] = scores.get(tid, 0.0) + (sim * 3.0)
+    for tid in touched_topic_ids:
+        topic_store.update_utility(tid, delta=1.0, now_iso=now_iso)
+        if correction_signal:
+            topic_store.update_utility(tid, delta=3.0, now_iso=now_iso)
+        if skill_success_signal:
+            topic_store.update_utility(tid, delta=2.0, now_iso=now_iso)
 
-            if scores:
-                best_tid, best_score = max(scores.items(), key=lambda x: x[1])
-                if best_score < 4.0:
-                    best_tid = None
+    # Co-activation linking: pairwise RELATES_TO edge bump
+    if len(touched_topic_ids) > 1:
+        for i in range(len(touched_topic_ids)):
+            for j in range(i + 1, len(touched_topic_ids)):
+                topic_store.link_topics(
+                    touched_topic_ids[i],
+                    touched_topic_ids[j],
+                    "RELATES_TO",
+                    0.5,
+                    now_iso,
+                    mode="add",
+                    bidirectional_relates=True,
+                    max_weight=5.0,
+                )
 
-        if best_tid:
-            topic = topic_store.get(best_tid)
-            if topic:
-                topic.setdefault("stats", {"utility_score": 0.0, "touch_count": 0})
-                topic["stats"]["utility_score"] += 2.0  # boost utility due to mention/merge
-                topic["stats"]["touch_count"] += 1
-                topic.setdefault("time", {})["last_seen_at"] = now_iso
-
-                merged_aliases = sorted(set(topic.get("aliases", []) + aliases))
-                topic["aliases"] = merged_aliases
-                topic_store.update(best_tid, topic)
-                top_topic_ids.append(best_tid)
-        else:
-            topic = topic_store.upsert_by_alias_overlap(
-                name=aliases[0].title(),
-                one_liner=_build_one_liner(compacted),
-                aliases=aliases,
-                now_iso=now_iso,
-            )
-            top_topic_ids.append(topic["topic_id"])
-
-        # Graph edge updates (Co-activation creates RELATES_TO edge)
-        if len(top_topic_ids) > 1:
-            for i in range(len(top_topic_ids)):
-                for j in range(i + 1, len(top_topic_ids)):
-                    topic_store.link_topics(top_topic_ids[i], top_topic_ids[j], "RELATES_TO", 0.5, now_iso)
+    top_topic_ids: list[str] = touched_topic_ids[:]
 
     packet = WakePacket(
         schema_version=1,

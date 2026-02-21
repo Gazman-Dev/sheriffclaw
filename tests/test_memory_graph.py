@@ -39,6 +39,34 @@ def test_topic_decay_over_time(tmp_path):
     assert updated["stats"]["utility_score"] > 9.0
 
 
+def test_sleep_updates_utility_with_decay(tmp_path):
+    store = TopicStore(tmp_path / "topics.json")
+    embedder = DeterministicHashEmbeddingProvider(dim=64)
+    index = HnswlibSemanticIndex(tmp_path / "semantic", dim=embedder.dim)
+    index.load()
+
+    old = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    store.create(Topic(
+        schema_version=1,
+        topic_id="u1",
+        name="Server",
+        one_liner="server ops",
+        aliases=["server"],
+        time=TopicTime(first_seen_at=old, last_seen_at=old, notable_events=[]),
+        stats={"utility_score": 10.0, "touch_count": 1, "last_utility_update_at": old},
+    ))
+
+    sync_semantic_index(store, embedder, index)
+    conv = [{"role": "user", "content": "server server server incident"}]
+    now = _now()
+    sleep(conv, now, store, keep_tail_turns=0, embedding_provider=embedder, semantic_index=index)
+
+    updated = store.get("u1")
+    assert updated is not None
+    # Decay (~10*0.98^2) then +touch bump
+    assert updated["stats"]["utility_score"] > 9.5
+
+
 def test_graph_linkage_and_expansion(tmp_path):
     store = TopicStore(tmp_path / "topics.json")
     embedder = DeterministicHashEmbeddingProvider(dim=64)
@@ -79,7 +107,7 @@ def test_graph_linkage_and_expansion(tmp_path):
     assert "B" in retrieved_ids # Pulled in via 1-hop graph expansion
 
 
-def test_sleep_co_activation_does_not_auto_link_in_chunk_a(tmp_path):
+def test_sleep_co_activation_creates_links(tmp_path):
     store = TopicStore(tmp_path / "topics.json")
     embedder = DeterministicHashEmbeddingProvider(dim=64)
     index = HnswlibSemanticIndex(tmp_path / "semantic", dim=embedder.dim)
@@ -104,6 +132,6 @@ def test_sleep_co_activation_does_not_auto_link_in_chunk_a(tmp_path):
 
     sleep(conv, _now(), store, keep_tail_turns=0, embedding_provider=embedder, semantic_index=index)
 
-    # Chunk A scope: no automatic co-activation linking yet
+    # Co-activation linking should connect touched topics
     adj = store.get_adjacent_topics("srv")
-    assert "db" not in adj
+    assert "db" in adj

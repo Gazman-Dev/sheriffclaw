@@ -135,6 +135,8 @@ class TopicStore:
         edge_type: EdgeType | str,
         weight: float,
         last_updated_at: str,
+        mode: str = "set",
+        max_weight: float = 5.0,
     ) -> dict:
         et = edge_type.value if isinstance(edge_type, EdgeType) else str(edge_type)
         edges = self._load_edges()
@@ -144,7 +146,12 @@ class TopicStore:
                 and e.get("to_topic_id") == to_topic_id
                 and e.get("edge_type") == et
             ):
-                e["weight"] = float(weight)
+                cur = float(e.get("weight", 0.0))
+                if mode == "add":
+                    new_weight = min(max_weight, cur + float(weight))
+                else:
+                    new_weight = float(weight)
+                e["weight"] = new_weight
                 e["last_updated_at"] = last_updated_at
                 edges[i] = e
                 self._save_edges(edges)
@@ -173,9 +180,23 @@ class TopicStore:
     def list_edges(self) -> list[dict]:
         return self._load_edges()
 
-    # Compatibility alias used by runtime/tests
-    def link_topics(self, from_topic_id: str, to_topic_id: str, edge_type: EdgeType | str, weight: float, now_iso: str) -> dict:
-        return self.upsert_edge(from_topic_id, to_topic_id, edge_type, weight, now_iso)
+    # Compatibility + higher-level linker used by runtime/tools
+    def link_topics(
+        self,
+        from_topic_id: str,
+        to_topic_id: str,
+        edge_type: EdgeType | str,
+        weight: float,
+        now_iso: str,
+        mode: str = "add",
+        bidirectional_relates: bool = True,
+        max_weight: float = 5.0,
+    ) -> dict:
+        et = edge_type.value if isinstance(edge_type, EdgeType) else str(edge_type)
+        primary = self.upsert_edge(from_topic_id, to_topic_id, et, weight, now_iso, mode=mode, max_weight=max_weight)
+        if bidirectional_relates and et == EdgeType.RELATES_TO.value:
+            self.upsert_edge(to_topic_id, from_topic_id, et, weight, now_iso, mode=mode, max_weight=max_weight)
+        return primary
 
     def get_neighbors(self, topic_id: str, edge_type: EdgeType | str | None = None) -> list[dict]:
         et = None

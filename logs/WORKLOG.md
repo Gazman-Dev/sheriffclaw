@@ -217,3 +217,15 @@
   - co-activation test updated to assert no auto-linking yet (runtime behavior intentionally deferred to Chunk B).
 - Validation:
   - full test suite passes: 74 passed.
+## 2026-02-20 23:22 EST
+- Started Chunk B (runtime + retrieval graph integration).
+- Implemented sleep co-activation linking:
+  - touched topics are alias-upsert topics from compacted slice
+  - pairwise RELATES_TO edge bump (+0.5, cap 5.0), bidirectional via link_topics
+- Implemented deep retrieval 1-hop expansion:
+  - expand neighbors from top-N deep-ranked nodes with min-weight threshold
+  - add neighbor bonus in ranking
+- Added `topics.link` tool compatibility in phase4 runtime with explicit schema (`edge_type`, `weight`, `mode`).
+- Added utility bump hook in sleep (+1 per touched topic, optional +3 correction signal, +2 skill-success signal) and decay application once per sleep.
+- Added/updated tests and demo for graph expansion effect.
+- Validation: full suite 75 passed.

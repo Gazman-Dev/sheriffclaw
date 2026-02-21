@@ -15,3 +15,7 @@ class RetrievalConfig:
 
     low_conf_semantic_threshold: float = 0.35
     low_conf_margin: float = 0.05
+
+    deep_expand_top_n: int = 5
+    deep_expand_min_weight: float = 0.5
+    deep_neighbor_bonus: float = 0.12

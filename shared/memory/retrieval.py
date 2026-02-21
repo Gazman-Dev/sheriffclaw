@@ -173,11 +173,11 @@ def retrieve_topics(
         final_score = ((sem_score + alias_boost) * (1 + ub * 0.05)) + rec + tm
         scored[tid] = (t, max(scored.get(tid, (t, -1e9))[1], final_score))
 
-    # Graph expansion (1 hop)
+    # Graph expansion (1 hop, deep retrieval only)
     expanded_ids = set()
-    top_tids = [tid for tid, _ in sorted(scored.items(), key=lambda x: x[1][1], reverse=True)[:5]]
+    top_tids = [tid for tid, _ in sorted(scored.items(), key=lambda x: x[1][1], reverse=True)[: cfg.deep_expand_top_n]]
     for tid in top_tids:
-        expanded_ids.update(topic_store.get_adjacent_topics(tid))
+        expanded_ids.update(topic_store.get_adjacent_topics(tid, min_weight=cfg.deep_expand_min_weight))
 
     for etid in expanded_ids:
         if etid not in scored and etid in topic_map:
@@ -185,8 +185,7 @@ def retrieve_topics(
             rec = _recency_boost(t.get("time", {}).get("last_seen_at"), now_utc)
             tm = _time_boost(t.get("time", {}).get("last_seen_at"), start, end, cfg.time_window_boost)
             ub = t.get("stats", {}).get("utility_score", 0.0)
-            # Base relevance for expanded graph node is lower (0.5 max)
-            score = (0.5 * (1 + ub * 0.05)) + rec + tm
+            score = cfg.deep_neighbor_bonus + (0.5 * (1 + ub * 0.05)) + rec + tm
             scored[etid] = (t, score)
 
     ranked = [topic for topic, _ in sorted(scored.values(), key=lambda x: x[1], reverse=True)]

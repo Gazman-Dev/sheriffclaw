@@ -115,3 +115,11 @@
   - `docs/WIKI_ROLES.md` (LLM vs Sheriff responsibilities + trust boundary)
   - `docs/WIKI_USAGE.md` (installation, config, runtime usage, testing, troubleshooting)
 - Added README wiki links section for discoverability.
+## 2026-02-20 14:24 EST
+- Moved wiki docs from main repo into GitHub wiki repo (`sheriffclaw.wiki`).
+- Organized wiki pages:
+  - Home
+  - Roles-LLM-vs-Sheriff
+  - How-to-Use-SheriffClaw
+- Updated main README wiki links to GitHub wiki URLs.
+- Removed duplicated docs from main repo (`docs/WIKI_ROLES.md`, `docs/WIKI_USAGE.md`).

@@ -146,21 +146,34 @@ def cmd_onboard(args):
 
     mp = args.master_password
     if mp is None:
-        while not mp:
-            mp = getpass.getpass("Set Master Password: ")
+        while True:
+            a = getpass.getpass("Set Master Password: ")
+            b = getpass.getpass("Confirm Master Password: ")
+            if a and a == b:
+                mp = a
+                break
+            print("Passwords do not match. Please try again.")
 
     llm_prov = args.llm_provider
+    llm_key = args.llm_api_key
     if llm_prov is None:
         print("\nChoose your LLM:")
-        print("1) OpenAI Codex (recommended)")
-        print("2) Local stub (testing only)")
-        choice = input("Select [1/2] (default 1): ").strip() or "1"
-        llm_prov = "openai-codex" if choice == "1" else "stub"
+        print("1) OpenAI Codex (API key)")
+        print("2) OpenAI Codex (auth token)")
+        print("3) Local stub (testing only)")
+        choice = input("Select [1/2/3] (default 1): ").strip() or "1"
+        if choice == "2":
+            llm_prov = "openai-codex-auth"
+        elif choice == "3":
+            llm_prov = "stub"
+        else:
+            llm_prov = "openai-codex"
 
-    llm_key = args.llm_api_key
     if llm_key is None:
         if llm_prov == "openai-codex":
             llm_key = getpass.getpass("OpenAI API Key: ").strip()
+        elif llm_prov == "openai-codex-auth":
+            llm_key = getpass.getpass("OpenAI Auth Token: ").strip()
         else:
             llm_key = ""
 
@@ -170,11 +183,11 @@ def cmd_onboard(args):
 
     llm_bot = args.llm_bot_token
     if llm_bot is None:
-        llm_bot = input("Telegram bot token for AI bot (from BotFather): ").strip()
+        llm_bot = input("Telegram AI bot token (BotFather): ").strip()
 
     gate_bot = args.gate_bot_token
     if gate_bot is None:
-        gate_bot = input("Telegram bot token for Sheriff bot (from BotFather): ").strip()
+        gate_bot = input("Telegram Sheriff bot token (BotFather): ").strip()
 
     allow_tg = False
     if args.allow_telegram:
@@ -213,6 +226,36 @@ def cmd_onboard(args):
             },
         )
         await cli.request("secrets.unlock", {"master_password": mp})
+
+        # Activation flow: AI bot first, then Sheriff bot
+        interactive_codes = sys.stdin.isatty()
+
+        if llm_bot and interactive_codes:
+            print("\nAI bot activation:")
+            print("1) Send any message to the AI bot in Telegram.")
+            print("2) Bot should return a 5-letter activation code.")
+            while True:
+                code = input("Enter AI bot activation code: ").strip().lower()
+                _, claimed = await cli.request("secrets.activation.claim", {"bot_role": "llm", "code": code})
+                if claimed.get("result", {}).get("ok"):
+                    print("AI bot activated.")
+                    break
+                print("Invalid code, try again.")
+
+        if gate_bot and interactive_codes:
+            print("\nSheriff bot activation:")
+            print("1) Send any message to the Sheriff bot in Telegram.")
+            print("2) Bot should return a 5-letter activation code.")
+            while True:
+                code = input("Enter Sheriff bot activation code: ").strip().lower()
+                _, claimed = await cli.request("secrets.activation.claim", {"bot_role": "sheriff", "code": code})
+                if claimed.get("result", {}).get("ok"):
+                    print("Sheriff bot activated.")
+                    break
+                print("Invalid code, try again.")
+
+        if (llm_bot or gate_bot) and not interactive_codes:
+            print("Skipping activation code prompts in non-interactive mode.")
 
     asyncio.run(_run())
     print("Onboarding complete. Secrets initialized and unlocked.")

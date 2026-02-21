@@ -248,3 +248,18 @@
 - Verified:
   - parser tests updated and passing
   - onboarding+reinstall flow validated in isolated root with `--yes` path
+## 2026-02-21 00:36 EST
+- Added cache busting into `install.sh` itself by appending `?ts=$(date +%s)` to fetched installer URL.
+- Improved onboarding password UX:
+  - master password now requires confirmation; mismatch retries.
+- Added Codex auth method options in onboarding:
+  - OpenAI Codex (API key)
+  - OpenAI Codex (auth token)
+  - stub
+- Added Telegram activation infrastructure and onboarding flow:
+  - identity now stores pending activation codes and bot bindings (`llm`, `sheriff`).
+  - activation code API added to secrets service (`create/claim/status`).
+  - ai/sheriff telegram services now return activation_required with 5-letter code for unknown users and accept `activate <code>`.
+  - onboarding prompts activation in order: AI bot first, then Sheriff bot.
+- Non-interactive onboarding now skips activation prompts safely.
+- Full test suite green: 79 passed.

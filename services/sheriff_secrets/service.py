@@ -63,6 +63,17 @@ class SheriffSecretsService:
         self.state.save_identity(payload)
         return {"status": "saved"}
 
+    async def activation_create(self, payload, emit_event, req_id):
+        code = self.state.create_activation_code(payload["bot_role"], str(payload["user_id"]))
+        return {"code": code}
+
+    async def activation_claim(self, payload, emit_event, req_id):
+        user_id = self.state.activate_with_code(payload["bot_role"], payload["code"])
+        return {"ok": bool(user_id), "user_id": user_id}
+
+    async def activation_status(self, payload, emit_event, req_id):
+        return {"user_id": self.state.get_bound_user(payload["bot_role"]) }
+
     def ops(self):
         return {
             "secrets.initialize": self.initialize,
@@ -81,4 +92,7 @@ class SheriffSecretsService:
             "secrets.ensure_handle": self.ensure_handle,
             "secrets.identity.get": self.identity_get,
             "secrets.identity.save": self.identity_save,
+            "secrets.activation.create": self.activation_create,
+            "secrets.activation.claim": self.activation_claim,
+            "secrets.activation.status": self.activation_status,
         }

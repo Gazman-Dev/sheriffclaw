@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import secrets
 import threading
 import time
@@ -139,8 +140,13 @@ def run_browser_oauth_login(timeout_seconds: int = 900) -> DeviceAuthTokens:
     thread.start()
 
     print(f"Open this URL: {auth_url}")
-    print("If running on remote host, forward callback port:")
-    print("  ssh -L 1455:localhost:1455 user@remote")
+    is_remote = bool(os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_CLIENT") or os.environ.get("CODESPACES"))
+    if is_remote:
+        print("Detected remote environment. Use SSH port forwarding for callback:")
+        print("  ssh -L 1455:localhost:1455 user@remote")
+    else:
+        print("If browser and CLI are on different machines, use SSH forwarding:")
+        print("  ssh -L 1455:localhost:1455 user@remote")
 
     try:
         opened = webbrowser.open(auth_url)

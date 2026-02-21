@@ -125,9 +125,19 @@ class SecretsState:
         self._require()
         return self._state.get("llm_bot_token", "")
 
+    def set_llm_bot_token(self, token: str) -> None:
+        self._require()
+        self._state["llm_bot_token"] = token
+        self._persist()
+
     def get_gate_bot_token(self) -> str:
         self._require()
         return self._state.get("gate_bot_token", "")
+
+    def set_gate_bot_token(self, token: str) -> None:
+        self._require()
+        self._state["gate_bot_token"] = token
+        self._persist()
 
     def get_identity(self) -> dict:
         self._require()

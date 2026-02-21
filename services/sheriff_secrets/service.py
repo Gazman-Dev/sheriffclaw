@@ -64,8 +64,16 @@ class SheriffSecretsService:
     async def get_llm_bot_token(self, payload, emit_event, req_id):
         return {"token": self.state.get_llm_bot_token()}
 
+    async def set_llm_bot_token(self, payload, emit_event, req_id):
+        self.state.set_llm_bot_token(payload.get("token", ""))
+        return {"status": "saved"}
+
     async def get_gate_bot_token(self, payload, emit_event, req_id):
         return {"token": self.state.get_gate_bot_token()}
+
+    async def set_gate_bot_token(self, payload, emit_event, req_id):
+        self.state.set_gate_bot_token(payload.get("token", ""))
+        return {"status": "saved"}
 
     async def identity_get(self, payload, emit_event, req_id):
         return self.state.get_identity()
@@ -93,7 +101,9 @@ class SheriffSecretsService:
             "secrets.lock": self.lock,
             "secrets.is_unlocked": self.is_unlocked,
             "secrets.get_llm_bot_token": self.get_llm_bot_token,
+            "secrets.set_llm_bot_token": self.set_llm_bot_token,
             "secrets.get_gate_bot_token": self.get_gate_bot_token,
+            "secrets.set_gate_bot_token": self.set_gate_bot_token,
             "secrets.get_llm_provider": self.get_llm_provider,
             "secrets.get_llm_api_key": self.get_llm_api_key,
             "secrets.set_llm_provider": self.set_llm_provider,

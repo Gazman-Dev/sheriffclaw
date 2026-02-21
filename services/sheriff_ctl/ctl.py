@@ -220,8 +220,6 @@ def cmd_onboard(args):
         llm_bot = input("Telegram AI bot token (BotFather): ").strip()
 
     gate_bot = args.gate_bot_token
-    if gate_bot is None:
-        gate_bot = input("Telegram Sheriff bot token (BotFather): ").strip()
 
     allow_tg = False
     if args.allow_telegram:
@@ -237,6 +235,15 @@ def cmd_onboard(args):
     master_policy = gw_root() / "state" / "master_policy.json"
     master_policy.parent.mkdir(parents=True, exist_ok=True)
     master_policy.write_text(json.dumps({"allow_telegram_master_password": allow_tg}), encoding="utf-8")
+
+    async def _wait_activation(cli: ProcClient, role: str, timeout_sec: int = 300) -> bool:
+        start = time.time()
+        while time.time() - start < timeout_sec:
+            _, st = await cli.request("secrets.activation.status", {"bot_role": role})
+            if st.get("result", {}).get("user_id"):
+                return True
+            await asyncio.sleep(2)
+        return False
 
     async def _run():
         cli = ProcClient("sheriff-secrets")
@@ -255,7 +262,7 @@ def cmd_onboard(args):
                 "llm_provider": llm_prov,
                 "llm_api_key": llm_key,
                 "llm_bot_token": llm_bot,
-                "gate_bot_token": gate_bot,
+                "gate_bot_token": "",
                 "allow_telegram_master_password": allow_tg,
             },
         )
@@ -263,37 +270,44 @@ def cmd_onboard(args):
         if llm_auth:
             await cli.request("secrets.set_llm_auth", {"auth": llm_auth})
 
-        # Activation flow: AI bot first, then Sheriff bot
-        interactive_codes = sys.stdin.isatty()
+        interactive = sys.stdin.isatty()
 
-        if llm_bot and interactive_codes:
+        if llm_bot and interactive:
             print("\nAI bot activation:")
-            print("1) Send any message to the AI bot in Telegram.")
-            print("2) Bot should return a 5-letter activation code.")
-            while True:
-                code = input("Enter AI bot activation code: ").strip().lower()
-                _, claimed = await cli.request("secrets.activation.claim", {"bot_role": "llm", "code": code})
-                if claimed.get("result", {}).get("ok"):
-                    print("AI bot activated.")
-                    break
-                print("Invalid code, try again.")
+            print("- Send any message to the AI bot in Telegram.")
+            print("- If you are unlinked, the bot replies with activation code.")
+            print("- Reply to bot with: activate <code>")
+            ok = await _wait_activation(cli, "llm")
+            if ok:
+                print("AI bot activated.")
+            else:
+                print("AI bot activation timed out.")
 
-        if gate_bot and interactive_codes:
-            print("\nSheriff bot activation:")
-            print("1) Send any message to the Sheriff bot in Telegram.")
-            print("2) Bot should return a 5-letter activation code.")
-            while True:
-                code = input("Enter Sheriff bot activation code: ").strip().lower()
-                _, claimed = await cli.request("secrets.activation.claim", {"bot_role": "sheriff", "code": code})
-                if claimed.get("result", {}).get("ok"):
+        gate_tok = gate_bot
+        if gate_tok is None:
+            gate_tok = input("Telegram Sheriff bot token (BotFather): ").strip()
+
+        if gate_tok:
+            await cli.request("secrets.set_gate_bot_token", {"token": gate_tok})
+            if interactive:
+                print("\nSheriff bot activation:")
+                print("- Send any message to the Sheriff bot in Telegram.")
+                print("- If you are unlinked, the bot replies with activation code.")
+                print("- Reply to bot with: activate <code>")
+                ok = await _wait_activation(cli, "sheriff")
+                if ok:
                     print("Sheriff bot activated.")
-                    break
-                print("Invalid code, try again.")
+                else:
+                    print("Sheriff bot activation timed out.")
 
-        if (llm_bot or gate_bot) and not interactive_codes:
-            print("Skipping activation code prompts in non-interactive mode.")
+        if (llm_bot or gate_tok) and not interactive:
+            print("Skipping activation wait in non-interactive mode.")
 
-    asyncio.run(_run())
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        print("\nOnboarding cancelled.")
+        return
     print("Onboarding complete. Secrets initialized and unlocked.")
 
 

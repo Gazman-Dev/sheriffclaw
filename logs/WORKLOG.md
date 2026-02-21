@@ -305,3 +305,11 @@
   - stores token expiry derived from id_token exp
 - Keeps refresh_token grant path for subsequent token refresh.
 - Full test suite still green: 80 passed.
+## 2026-02-21 01:35 EST
+- Fixed onboarding UX/flow bugs from latest user repro:
+  - AI bot token is now requested and activated first; only then asks for Sheriff token and activates it.
+  - activation now relies on bot listener + status polling (no manual code typing in CLI).
+  - onboarding Ctrl-C now exits gracefully without traceback.
+- Improved auth login flow UX:
+  - URL includes embedded code and browser auto-open remains best-effort.
+  - Esc remains cancellation key in prior device flow logic, but browser OAuth is default path.

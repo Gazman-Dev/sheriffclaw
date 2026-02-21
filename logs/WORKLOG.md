@@ -135,3 +135,13 @@
   - explicit Telegram-first setup prompts
 - Updated README quick install command to `install.sh` raw URL.
 - Validation: pytest passed (57).
+## 2026-02-20 19:31 EST
+- Phase 1 (minimal memory refactor) implemented only:
+  - added `shared/memory/` skeleton
+  - versioned Topic + WakePacket schemas
+  - TopicStore CRUD + alias-only retrieval (normalized string matching)
+  - `memory.sleep()` / `memory.wake()` entrypoints (no embeddings, no graph)
+  - added focused test + runnable demo harness for sleep->wake alias recall
+- Validation:
+  - `pytest tests/test_memory_phase1.py` passed
+  - demo output confirms "remember the party" alias retrieval after sleep/wake

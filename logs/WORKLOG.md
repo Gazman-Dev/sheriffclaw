@@ -190,3 +190,15 @@
   - tool calling loop (repo.write_file)
   - sleep/wake integration trigger
 - Added demo script showing old topic recall, tool call execution, and sleep->wake resume.
+## 2026-02-20 20:32 EST
+- Verified third-party claimed graph/utility implementation against actual repo state.
+- Findings:
+  - No `tests/test_memory_graph.py` exists.
+  - No TopicEdge type in `shared/memory/types.py`.
+  - No edge persistence in `shared/memory/store.py`.
+  - No graph expansion logic in `shared/memory/retrieval.py`.
+  - No `topics.link` tool in phase4 runtime tool surface.
+  - No utility decay math implemented in memory store/runtime.
+- Test verification:
+  - full suite green: 68 passed, 0 failed.
+- Conclusion: claimed graph/utility work is not present in current branch; no unit-test fixes required now.

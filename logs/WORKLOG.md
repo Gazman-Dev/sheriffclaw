@@ -145,3 +145,12 @@
 - Validation:
   - `pytest tests/test_memory_phase1.py` passed
   - demo output confirms "remember the party" alias retrieval after sleep/wake
+## 2026-02-20 19:38 EST
+- Applied Phase 1 follow-up fixes:
+  - tightened alias extraction to user-text only with stopwords/glue filtering and token validity checks
+  - added typed shapes for NumberEntry and NotableEvent in memory schema
+  - documented stable sleep() return keys in docstring
+  - added regression tests:
+    - glue-word query (`noted`) returns no topic
+    - recency tie-break for shared alias returns most recent topic
+- Validation: `pytest tests/test_memory_phase1.py` => 3 passed

@@ -33,6 +33,28 @@ _STOPWORDS = {
     "after",
     "before",
     "while",
+    "then",
+    "them",
+    "also",
+    "very",
+}
+
+_GLUE_WORDS = {
+    "noted",
+    "turn",
+    "prepare",
+    "planning",
+    "details",
+    "item",
+    "list",
+    "about",
+    "thing",
+    "stuff",
+    "okay",
+    "great",
+    "thanks",
+    "thank",
+    "please",
 }
 
 
@@ -40,11 +62,28 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _is_alias_token(token: str) -> bool:
+    t = token.strip().lower()
+    return (
+        len(t) >= 4
+        and any(ch.isalpha() for ch in t)
+        and t not in _STOPWORDS
+        and t not in _GLUE_WORDS
+    )
+
+
 def _extract_aliases(messages: list[dict]) -> list[str]:
-    text = " ".join(str(m.get("content", "")) for m in messages)
-    words = [w for w in re.findall(r"[a-zA-Z]{4,}", text.lower()) if w not in _STOPWORDS]
-    top = [w for w, _ in Counter(words).most_common(8)]
-    return top
+    user_text = " ".join(str(m.get("content", "")) for m in messages if m.get("role") == "user")
+    raw_tokens = [t.lower() for t in re.findall(r"[a-zA-Z][a-zA-Z0-9_-]{2,}", user_text)]
+    tokens = [t for t in raw_tokens if _is_alias_token(t)]
+
+    # noun-phrase-ish heuristic: adjacent valid tokens become 2-word aliases
+    phrases: list[str] = []
+    for i in range(len(tokens) - 1):
+        phrases.append(f"{tokens[i]} {tokens[i+1]}")
+
+    ranked = [a for a, _ in Counter(tokens + phrases).most_common(12)]
+    return ranked
 
 
 def _build_one_liner(messages: list[dict]) -> str:
@@ -61,6 +100,15 @@ def sleep(
     topic_store: TopicStore,
     keep_tail_turns: int = 10,
 ) -> dict:
+    """Compact conversation and emit stable sleep result.
+
+    Returns:
+        {
+            "wake_packet": dict,
+            "trimmed_conversation": list[dict],
+            "topics_updated": int,
+        }
+    """
     now_iso = now or _now_iso()
     if keep_tail_turns < 0:
         keep_tail_turns = 0

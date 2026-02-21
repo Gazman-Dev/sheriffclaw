@@ -4,10 +4,26 @@ from dataclasses import asdict, dataclass, field
 
 
 @dataclass
+class NumberEntry:
+    key: str
+    value: int | float
+    unit: str | None = None
+    at: str = ""
+    source: str | None = None
+    confidence: float | None = None
+
+
+@dataclass
+class NotableEvent:
+    at: str
+    event: str
+
+
+@dataclass
 class TopicTime:
     first_seen_at: str
     last_seen_at: str
-    notable_events: list[dict] = field(default_factory=list)
+    notable_events: list[NotableEvent] = field(default_factory=list)
 
 
 @dataclass
@@ -17,7 +33,7 @@ class Topic:
     name: str
     one_liner: str
     facts: list[str] = field(default_factory=list)
-    numbers: list[dict] = field(default_factory=list)
+    numbers: list[NumberEntry] = field(default_factory=list)
     open_loops: list[str] = field(default_factory=list)
     aliases: list[str] = field(default_factory=list)
     time: TopicTime | None = None

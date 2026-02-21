@@ -154,3 +154,14 @@
     - glue-word query (`noted`) returns no topic
     - recency tie-break for shared alias returns most recent topic
 - Validation: `pytest tests/test_memory_phase1.py` => 3 passed
+## 2026-02-20 19:50 EST
+- Implemented Phase 2 (without graph/skills/responses wiring):
+  - EmbeddingProvider interface + deterministic local embedding provider
+  - SemanticIndex interface + HnswlibSemanticIndex with disk persistence (index.bin + meta.json)
+  - retrieval module with light/deep retrieval, trigger detection, low-confidence trigger, and UTC time windows (yesterday/last week/before sleep)
+  - topic markdown renderer for prompt injection (`render_topic_md`)
+  - semantic index sync helper for Topic JSON source of truth
+- Added Phase 2 tests and demo script.
+- Validation:
+  - `pytest tests/test_memory_phase1.py tests/test_memory_phase2.py` => 5 passed
+  - demo confirms alias miss + semantic recall and before-sleep boost behavior.

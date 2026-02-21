@@ -93,6 +93,13 @@ class SheriffSecretsService:
     async def activation_status(self, payload, emit_event, req_id):
         return {"user_id": self.state.get_bound_user(payload["bot_role"]) }
 
+    async def telegram_webhook_get(self, payload, emit_event, req_id):
+        return {"config": self.state.get_telegram_webhook_config()}
+
+    async def telegram_webhook_set(self, payload, emit_event, req_id):
+        self.state.set_telegram_webhook_config(payload.get("config", {}))
+        return {"status": "saved"}
+
     def ops(self):
         return {
             "secrets.initialize": self.initialize,
@@ -119,4 +126,6 @@ class SheriffSecretsService:
             "secrets.activation.create": self.activation_create,
             "secrets.activation.claim": self.activation_claim,
             "secrets.activation.status": self.activation_status,
+            "secrets.telegram_webhook.get": self.telegram_webhook_get,
+            "secrets.telegram_webhook.set": self.telegram_webhook_set,
         }

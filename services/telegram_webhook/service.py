@@ -6,11 +6,9 @@ import ssl
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 
 import requests
 
-from shared.paths import gw_root
 from shared.proc_rpc import ProcClient
 
 
@@ -21,12 +19,13 @@ class TelegramWebhookService:
         self.ai_gate = ProcClient("ai-tg-llm")
         self.sheriff_gate = ProcClient("sheriff-tg-gate")
         self.cli_gate = ProcClient("sheriff-cli-gate")
-        self.cfg_path = gw_root() / "state" / "telegram_webhook.json"
-        self.cfg_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _load_or_init_cfg(self) -> dict:
-        if self.cfg_path.exists():
-            return json.loads(self.cfg_path.read_text(encoding="utf-8"))
+    async def _load_or_init_cfg(self) -> dict:
+        _, got = await self.secrets.request("secrets.telegram_webhook.get", {})
+        cfg = got.get("result", {}).get("config")
+        if isinstance(cfg, dict) and cfg:
+            return cfg
+
         cfg = {
             "port": random.randint(20000, 60000),
             "llm_path": f"/telegram/{uuid.uuid4().hex}/llm",
@@ -34,7 +33,7 @@ class TelegramWebhookService:
             "llm_secret": uuid.uuid4().hex,
             "sheriff_secret": uuid.uuid4().hex,
         }
-        self.cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        await self.secrets.request("secrets.telegram_webhook.set", {"config": cfg})
         return cfg
 
     async def _handle_ai_message(self, token: str, user_id: str, chat_id: int, text: str):
@@ -94,8 +93,7 @@ class TelegramWebhookService:
             pass
 
     async def run_forever(self):
-        cfg = self._load_or_init_cfg()
-        base_url = (Path(".").resolve(),)
+        cfg = await self._load_or_init_cfg()
         public_base = __import__("os").environ.get("SHERIFF_WEBHOOK_PUBLIC_BASE", "").strip()
         cert = __import__("os").environ.get("SHERIFF_WEBHOOK_CERT", "").strip()
         key = __import__("os").environ.get("SHERIFF_WEBHOOK_KEY", "").strip()

@@ -339,3 +339,11 @@
   - sets Telegram webhook with secret tokens and message-only updates
 - Switched managed runtime service from polling listener to webhook daemon (`telegram-webhook`).
 - Added start UX guard: when services are already running, `sheriff-ctl start` prompts user to stop/restart (y/n).
+## 2026-02-21 10:55 EST
+- Refactored secrets vault storage to SQLite-backed encrypted key/value DB:
+  - all config and secrets now stored via encrypted key/value rows in sqlite file
+  - key lookup via deterministic key_hash for efficient fetch; encrypted key/value payloads preserved
+  - added legacy migration path from old single encrypted blob file
+- Moved Telegram webhook config persistence into secrets DB (`secrets.telegram_webhook.get/set`) and removed local JSON file dependency.
+- Updated activation code length to 6 alphanumeric to align with pairing-like UX.
+- Verified with full test suite: 80 passed.

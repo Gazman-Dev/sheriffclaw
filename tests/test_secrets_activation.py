@@ -7,7 +7,7 @@ def test_activation_code_flow(tmp_path):
     assert st.unlock("mp")
 
     code = st.create_activation_code("llm", "123")
-    assert len(code) == 5
+    assert len(code) == 6
     assert st.activate_with_code("llm", "wrong") is None
     uid = st.activate_with_code("llm", code)
     assert uid == "123"

@@ -123,19 +123,30 @@ def cmd_onboard(args):
 
     llm_prov = args.llm_provider
     if llm_prov is None:
-        llm_prov = input("LLM Provider (stub/openai/anthropic) [stub]: ").strip() or "stub"
+        print("\nChoose your LLM:")
+        print("1) OpenAI Codex (recommended)")
+        print("2) Local stub (testing only)")
+        choice = input("Select [1/2] (default 1): ").strip() or "1"
+        llm_prov = "openai-codex" if choice == "1" else "stub"
 
     llm_key = args.llm_api_key
     if llm_key is None:
-        llm_key = getpass.getpass(f"API Key for {llm_prov} (enter to skip): ").strip()
+        if llm_prov == "openai-codex":
+            llm_key = getpass.getpass("OpenAI API Key: ").strip()
+        else:
+            llm_key = ""
+
+    channel = "telegram"
+    print("\nChannel setup:")
+    print("- Telegram is currently the supported channel")
 
     llm_bot = args.llm_bot_token
     if llm_bot is None:
-        llm_bot = input("Telegram Bot Token for LLM (enter to skip): ").strip()
+        llm_bot = input("Telegram bot token for AI bot (from BotFather): ").strip()
 
     gate_bot = args.gate_bot_token
     if gate_bot is None:
-        gate_bot = input("Telegram Bot Token for Gate (enter to skip): ").strip()
+        gate_bot = input("Telegram bot token for Sheriff bot (from BotFather): ").strip()
 
     allow_tg = False
     if args.allow_telegram:
@@ -146,7 +157,7 @@ def cmd_onboard(args):
         ans = input("Allow sending master password via Telegram to unlock? [y/N]: ").strip().lower()
         allow_tg = ans in ("y", "yes")
 
-    print(f"\nConfiguration:\nProvider: {llm_prov}\nTelegram Unlock: {allow_tg}\nSaving...")
+    print(f"\nConfiguration:\nProvider: {llm_prov}\nChannel: telegram\nTelegram Unlock: {allow_tg}\nSaving...")
 
     master_policy = gw_root() / "state" / "master_policy.json"
     master_policy.parent.mkdir(parents=True, exist_ok=True)

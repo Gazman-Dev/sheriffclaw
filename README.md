@@ -11,7 +11,7 @@ Sheriff Claw is a security layer that sits between your AI agent and your sensit
 Copy and paste this one line into your terminal and hit Enter:
 
 ```bash
-curl -sL https://github.com/Gazman-Dev/sheriffclaw/raw/main/install_sheriffclaw.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Gazman-Dev/sheriffclaw/main/install.sh | bash
 ```
 
 _This script downloads Sheriff Claw, installs it, and guides you through the setup._

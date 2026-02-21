@@ -123,3 +123,15 @@
   - How-to-Use-SheriffClaw
 - Updated main README wiki links to GitHub wiki URLs.
 - Removed duplicated docs from main repo (`docs/WIKI_ROLES.md`, `docs/WIKI_USAGE.md`).
+## 2026-02-20 14:42 EST
+- Simplified wiki for non-technical audience:
+  - one-line curl|bash install
+  - happy-path onboarding language
+  - minimized terminal usage guidance
+- Added bootstrap installer entrypoint `install.sh` for curl usage.
+- Updated onboarding prompts in `sheriff-ctl onboard` to be friendlier and flow-oriented:
+  - choose LLM with simple menu
+  - set OpenAI key when needed
+  - explicit Telegram-first setup prompts
+- Updated README quick install command to `install.sh` raw URL.
+- Validation: pytest passed (57).

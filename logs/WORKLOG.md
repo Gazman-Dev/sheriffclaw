@@ -229,3 +229,12 @@
 - Added utility bump hook in sleep (+1 per touched topic, optional +3 correction signal, +2 skill-success signal) and decay application once per sleep.
 - Added/updated tests and demo for graph expansion effect.
 - Validation: full suite 75 passed.
+## 2026-02-20 23:43 EST
+- Implemented reinstall-focused onboarding UX updates per request:
+  - Removed SHERIFF_FORCE_ONBOARD-based skip behavior from installer.
+  - On second install detection (existing vault), installer now prompts for aggressive reinstall.
+  - If onboarding exits in interactive mode, installer now offers aggressive reinstall prompt.
+  - Added `sheriff-ctl onboarding` alias command.
+  - Added `sheriff-ctl reinstall` command to aggressively wipe Sheriff/Agent state (`gw` + `llm`).
+- Verified reinstall command end-to-end in isolated `SHERIFFCLAW_ROOT` temp directory.
+- Added parser tests for onboarding alias + reinstall command.

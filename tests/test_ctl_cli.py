@@ -7,3 +7,15 @@ def test_configure_llm_command_parses():
     assert args.provider == "openai-codex"
     assert args.api_key == "sk-123"
     assert args.master_password == "mp"
+
+
+def test_onboarding_alias_parses():
+    parser = build_parser()
+    args = parser.parse_args(["onboarding", "--master-password", "x"])
+    assert args.master_password == "x"
+
+
+def test_reinstall_command_parses():
+    parser = build_parser()
+    args = parser.parse_args(["reinstall"])
+    assert args.cmd == "reinstall"

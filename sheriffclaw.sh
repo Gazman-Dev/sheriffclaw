@@ -158,9 +158,18 @@ run_onboarding_if_needed() {
     local master_file="$INSTALL_DIR/gw/state/master.json"
     local secrets_file="$INSTALL_DIR/gw/state/secrets.enc"
 
-    if [ "${SHERIFF_FORCE_ONBOARD:-0}" != "1" ] && [ -f "$master_file" ] && [ -f "$secrets_file" ]; then
-        log "Existing initialized vault detected. Skipping onboarding (set SHERIFF_FORCE_ONBOARD=1 to override)."
-        return
+    local existing_install=0
+    if [ -f "$master_file" ] && [ -f "$secrets_file" ]; then
+        existing_install=1
+    fi
+
+    if [ "$existing_install" = "1" ] && [ -t 0 ] && [ "${SHERIFF_NON_INTERACTIVE:-0}" != "1" ]; then
+        echo -e "${YELLOW}Existing installation detected.${NC}"
+        read -r -p "Reinstall from scratch (wipe ALL Sheriff/Agent data)? [y/N]: " REINSTALL_ANS
+        if [[ "${REINSTALL_ANS,,}" == "y" || "${REINSTALL_ANS,,}" == "yes" ]]; then
+            "$VENV_DIR/bin/sheriff-ctl" reinstall
+            existing_install=0
+        fi
     fi
 
     echo -e "${BLUE}=========================================${NC}"
@@ -169,7 +178,14 @@ run_onboarding_if_needed() {
     echo ""
 
     if [ -t 0 ] && [ -z "${SHERIFF_MASTER_PASSWORD:-}" ] && [ "${SHERIFF_NON_INTERACTIVE:-0}" != "1" ]; then
-        "$VENV_DIR/bin/sheriff-ctl" onboard
+        if ! "$VENV_DIR/bin/sheriff-ctl" onboarding; then
+            echo -e "${YELLOW}Onboarding exited.${NC}"
+            read -r -p "Do aggressive reinstall now? (wipe all data) [y/N]: " RI
+            if [[ "${RI,,}" == "y" || "${RI,,}" == "yes" ]]; then
+                "$VENV_DIR/bin/sheriff-ctl" reinstall
+            fi
+            return 1
+        fi
     else
         MP="${SHERIFF_MASTER_PASSWORD:-local-dev-master-password}"
         LLM_PROVIDER="${SHERIFF_LLM_PROVIDER:-stub}"
@@ -182,7 +198,7 @@ run_onboarding_if_needed() {
             TELEGRAM_FLAG="--allow-telegram"
         fi
 
-        "$VENV_DIR/bin/sheriff-ctl" onboard \
+        "$VENV_DIR/bin/sheriff-ctl" onboarding \
             --master-password "$MP" \
             --llm-provider "$LLM_PROVIDER" \
             --llm-api-key "$LLM_API_KEY" \

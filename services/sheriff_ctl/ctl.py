@@ -5,6 +5,7 @@ import asyncio
 import getpass
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -111,6 +112,22 @@ def cmd_logs(args):
         print(out.read_text(encoding="utf-8"))
     if err.exists():
         print(err.read_text(encoding="utf-8"))
+
+
+def _wipe_all_state() -> None:
+    base = gw_root().parent
+    for name in ("gw", "llm"):
+        target = base / name
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+
+
+def cmd_reinstall(args):
+    print("Reinstalling SheriffClaw state (aggressive wipe)...")
+    for svc in reversed(ALL):
+        _stop_service(svc)
+    _wipe_all_state()
+    print("Reinstall complete. All Sheriff/Agent state removed.")
 
 
 def cmd_onboard(args):
@@ -300,18 +317,22 @@ def build_parser() -> argparse.ArgumentParser:
     lg.add_argument("service", choices=ALL)
     lg.set_defaults(func=cmd_logs)
 
-    ob = sub.add_parser("onboard")
-    ob.add_argument("--master-password", default=None)
-    ob.add_argument("--llm-provider", default=None)
-    ob.add_argument("--llm-api-key", default=None)
-    ob.add_argument("--llm-bot-token", default=None)
-    ob.add_argument("--gate-bot-token", default=None)
+    for onboard_name in ("onboard", "onboarding"):
+        ob = sub.add_parser(onboard_name)
+        ob.add_argument("--master-password", default=None)
+        ob.add_argument("--llm-provider", default=None)
+        ob.add_argument("--llm-api-key", default=None)
+        ob.add_argument("--llm-bot-token", default=None)
+        ob.add_argument("--gate-bot-token", default=None)
 
-    tg_group = ob.add_mutually_exclusive_group()
-    tg_group.add_argument("--allow-telegram", action="store_true", help="Non-interactive: Allow telegram unlock")
-    tg_group.add_argument("--deny-telegram", action="store_true", help="Non-interactive: Deny telegram unlock")
+        tg_group = ob.add_mutually_exclusive_group()
+        tg_group.add_argument("--allow-telegram", action="store_true", help="Non-interactive: Allow telegram unlock")
+        tg_group.add_argument("--deny-telegram", action="store_true", help="Non-interactive: Deny telegram unlock")
 
-    ob.set_defaults(func=cmd_onboard)
+        ob.set_defaults(func=cmd_onboard)
+
+    reinstall = sub.add_parser("reinstall")
+    reinstall.set_defaults(func=cmd_reinstall)
 
     sp = sub.add_parser("skill")
     sp.add_argument("name")

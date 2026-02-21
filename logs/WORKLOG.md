@@ -320,3 +320,13 @@
   - onboarding no longer asks for both bot tokens up front; asks AI token -> activate -> asks Sheriff token -> activate.
   - updated auth type label to `chatgpt_browser_oauth` and wording to browser login.
   - Ctrl-C in activation prompt remains graceful (no traceback).
+## 2026-02-21 02:00 EST
+- Implemented continuous Telegram listener daemon (`telegram-listener`):
+  - polls getUpdates for AI and Sheriff bot tokens continuously
+  - persists offsets to avoid reprocessing
+  - handles activation replies for unbound users
+  - forwards bound AI messages to gateway and sends assistant replies back to Telegram
+  - routes bound Sheriff slash commands through sheriff-cli-gate and replies in Telegram
+- Added process lifecycle integration:
+  - included `telegram-listener` in managed services start/stop/status
+  - added duplicate-start protection in service starter (alive PID check)

@@ -30,6 +30,7 @@ sheriff-cli-gate = "services.sheriff_cli_gate.__main__:main"
 
 ai-worker = "services.ai_worker.__main__:main"
 ai-tg-llm = "services.ai_tg_llm.__main__:main"
+telegram-listener = "services.telegram_listener.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["shared*", "services*", "skills*"]

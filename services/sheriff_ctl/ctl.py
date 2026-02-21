@@ -36,7 +36,7 @@ GW_ORDER = [
     "sheriff-tg-gate",
     "sheriff-cli-gate",
 ]
-LLM_ORDER = ["ai-worker", "ai-tg-llm"]
+LLM_ORDER = ["ai-worker", "ai-tg-llm", "telegram-listener"]
 ALL = [*GW_ORDER, *LLM_ORDER]
 
 
@@ -59,6 +59,9 @@ def _resolve_service_binary(service: str) -> str:
 
 
 def _start_service(service: str) -> None:
+    pid = _read_pid(service)
+    if pid and _alive(pid):
+        return
     out_path, err_path = _log_paths(service)
     out = out_path.open("a", encoding="utf-8")
     err = err_path.open("a", encoding="utf-8")

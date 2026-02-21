@@ -58,8 +58,8 @@ Here is exactly how you can let the AI manage your accounts without ever giving 
 
 ## 📚 Wiki Docs
 
-- [LLM vs Sheriff Roles](docs/WIKI_ROLES.md)
-- [System Usage Guide](docs/WIKI_USAGE.md)
+- [LLM vs Sheriff Roles](https://github.com/Gazman-Dev/sheriffclaw/wiki/Roles:-LLM-vs-Sheriff)
+- [System Usage Guide](https://github.com/Gazman-Dev/sheriffclaw/wiki/How-to-Use-SheriffClaw)
 
 ## 🖥️ Terminal Channel (new)
 

@@ -24,7 +24,7 @@ docker run --rm -t \
     pip install -U pip
     pip install ".[dev]"
     pytest -q
-    chmod +x scripts/e2e_cli_simulation.sh scripts/e2e_installation_check.sh scripts/e2e_reinstall_idempotency.sh
+    chmod +x scripts/e2e_cli_simulation.sh scripts/e2e_installation_check.sh scripts/e2e_reinstall_idempotency.sh scripts/e2e_fresh_install_docker.sh
     ./scripts/e2e_cli_simulation.sh
     SHERIFF_MASTER_PASSWORD=masterpass SHERIFF_LLM_PROVIDER=stub SHERIFF_NON_INTERACTIVE=1 ./scripts/e2e_installation_check.sh
     ./scripts/e2e_reinstall_idempotency.sh

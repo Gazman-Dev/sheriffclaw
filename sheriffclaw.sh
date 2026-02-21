@@ -151,6 +151,10 @@ setup_alias() {
     fi
 
     if [ -n "$shell_cfg" ]; then
+        if ! grep -q "alias sheriff=\|$VENV_DIR/bin/sheriff" "$shell_cfg"; then
+            echo "alias sheriff='$VENV_DIR/bin/sheriff'" >> "$shell_cfg"
+            log "Added alias 'sheriff' to $shell_cfg"
+        fi
         if ! grep -q "alias sheriff-ctl=\|$VENV_DIR/bin/sheriff-ctl" "$shell_cfg"; then
             echo "alias sheriff-ctl='$VENV_DIR/bin/sheriff-ctl'" >> "$shell_cfg"
             log "Added alias 'sheriff-ctl' to $shell_cfg"
@@ -181,33 +185,33 @@ run_onboarding_if_needed() {
         if [ "$existing_install" = "1" ]; then
             echo -e "${YELLOW}Existing installation detected.${NC}"
             if [ -t 0 ]; then
-                read -r -p "Reinstall from scratch (wipe ALL Sheriff/Agent data)? [y/N]: " REINSTALL_ANS
+                read -r -p "Factory reset from scratch (wipe ALL Sheriff/Agent data)? [y/N]: " REINSTALL_ANS
             else
-                read -r -p "Reinstall from scratch (wipe ALL Sheriff/Agent data)? [y/N]: " REINSTALL_ANS < /dev/tty
+                read -r -p "Factory reset from scratch (wipe ALL Sheriff/Agent data)? [y/N]: " REINSTALL_ANS < /dev/tty
             fi
             REINSTALL_ANS_LC="$(lower "$REINSTALL_ANS")"
             if [[ "$REINSTALL_ANS_LC" == "y" || "$REINSTALL_ANS_LC" == "yes" ]]; then
-                "$VENV_DIR/bin/sheriff-ctl" reinstall < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" reinstall
+                "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" factory-reset
             fi
         fi
 
         if [ -t 0 ]; then
             if ! "$VENV_DIR/bin/sheriff-ctl" onboarding; then
                 echo -e "${YELLOW}Onboarding exited.${NC}"
-                read -r -p "Do aggressive reinstall now? (wipe all data) [y/N]: " RI
+                read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI
                 RI_LC="$(lower "$RI")"
                 if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
-                    "$VENV_DIR/bin/sheriff-ctl" reinstall
+                    "$VENV_DIR/bin/sheriff-ctl" factory-reset
                 fi
                 return 1
             fi
         else
             if ! "$VENV_DIR/bin/sheriff-ctl" onboarding < /dev/tty > /dev/tty 2>&1; then
                 echo -e "${YELLOW}Onboarding exited.${NC}"
-                read -r -p "Do aggressive reinstall now? (wipe all data) [y/N]: " RI < /dev/tty
+                read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI < /dev/tty
                 RI_LC="$(lower "$RI")"
                 if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
-                    "$VENV_DIR/bin/sheriff-ctl" reinstall < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" reinstall
+                    "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" factory-reset
                 fi
                 return 1
             fi
@@ -259,6 +263,7 @@ echo ""
 echo -e "${GREEN}=========================================${NC}"
 echo -e "${GREEN}       Installation Complete!            ${NC}"
 echo -e "${GREEN}=========================================${NC}"
-echo "Use 'sheriff-ctl chat' to start interacting immediately."
+echo "Use 'sheriff' to send a one-shot message or open menu/onboarding."
+echo "Use 'sheriff-ctl chat' for terminal chat mode."
 echo "Use '/status' inside chat for on-demand health checks."
-echo "Restart your terminal to use the 'sheriff-ctl' command directly."
+echo "Restart your terminal to use 'sheriff' and 'sheriff-ctl' directly."

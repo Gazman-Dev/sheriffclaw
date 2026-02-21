@@ -1,4 +1,5 @@
 import json
+import types
 
 from services.sheriff_ctl import ctl
 
@@ -33,3 +34,13 @@ def test_cmd_debug_updates_state(tmp_path, monkeypatch):
     monkeypatch.setattr("services.sheriff_ctl.ctl.gw_root", lambda: tmp_path)
     ctl.cmd_debug(type("A", (), {"value": "on"})())
     assert ctl._read_debug_mode() is True
+
+
+def test_wait_extra_until_uses_remaining_sleep(monkeypatch):
+    monkeypatch.setattr("services.sheriff_ctl.ctl.sys.stdin", types.SimpleNamespace(isatty=lambda: False))
+    monkeypatch.setattr("services.sheriff_ctl.ctl.time.time", lambda: 100.0)
+    captured = {"sleep": None}
+    monkeypatch.setattr("services.sheriff_ctl.ctl.time.sleep", lambda s: captured.__setitem__("sleep", s))
+
+    ctl._wait_extra_or_esc_until(106.5)
+    assert abs(captured["sleep"] - 6.5) < 1e-6

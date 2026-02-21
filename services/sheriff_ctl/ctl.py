@@ -174,7 +174,7 @@ def _wipe_all_state() -> None:
             shutil.rmtree(target, ignore_errors=True)
 
 
-def cmd_reinstall(args):
+def cmd_factory_reset(args):
     if not args.yes:
         print("This will delete ALL Sheriff/Agent data: vault, chats, skills state, logs, and runtime data.")
         ans1 = input("Proceed with factory reset? [y/N]: ").strip().lower()
@@ -515,18 +515,19 @@ def cmd_debug(args):
     print(f"Debug mode {'ON' if enabled else 'OFF'}")
 
 
-def _wait_extra_or_esc(seconds: int = 10) -> None:
+def _wait_extra_or_esc_until(deadline_ts: float) -> None:
+    remaining = max(0.0, deadline_ts - time.time())
     if not sys.stdin.isatty():
-        time.sleep(seconds)
+        time.sleep(remaining)
         return
 
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
-    end_at = time.time() + seconds
     try:
         tty.setcbreak(fd)
-        while time.time() < end_at:
-            r, _, _ = select.select([fd], [], [], 0.2)
+        while time.time() < deadline_ts:
+            timeout = min(0.2, max(0.0, deadline_ts - time.time()))
+            r, _, _ = select.select([fd], [], [], timeout)
             if not r:
                 continue
             ch = os.read(fd, 1)
@@ -580,7 +581,7 @@ def cmd_entry(args):
             cmd_update(argparse.Namespace())
             return
         if choice in {"factory reset", "factory-reset"}:
-            cmd_reinstall(argparse.Namespace(yes=False))
+            cmd_factory_reset(argparse.Namespace(yes=False))
             return
         print("Unknown choice.")
 
@@ -649,31 +650,37 @@ def cmd_chat(args):
     principal = args.principal
     model_ref = args.model_ref
 
-    async def _send_bot(gateway: ProcClient, text: str):
+    async def _send_bot(gateway: ProcClient, text: str) -> float:
         stream, final = await gateway.request(
             "gateway.handle_user_message",
             {"channel": "cli", "principal_external_id": principal, "text": text, "model_ref": model_ref},
             stream_events=True,
         )
         bot_printed = False
+        last_activity = time.time()
         async for frame in stream:
             event = frame.get("event")
             payload = frame.get("payload", {})
             if event == "assistant.delta":
                 print(f"[AGENT] {payload.get('text', '')}")
                 bot_printed = True
+                last_activity = time.time()
             elif event == "assistant.final" and not bot_printed:
                 print(f"[AGENT] {payload.get('text', '')}")
                 bot_printed = True
+                last_activity = time.time()
             elif event == "tool.result":
                 print(f"[TOOL] {json.dumps(payload, ensure_ascii=False)}")
+                last_activity = time.time()
         await final
+        return last_activity
 
-    async def _send_sheriff(cli_gate: ProcClient, text: str):
+    async def _send_sheriff(cli_gate: ProcClient, text: str) -> float:
         _, res = await cli_gate.request("cli.handle_message", {"text": text})
         msg = res.get("result", {}).get("message", "")
         kind = res.get("result", {}).get("kind", "sheriff").upper()
         print(f"[{kind}] {msg}")
+        return time.time()
 
     async def _run():
         gateway = ProcClient("sheriff-gateway")
@@ -682,11 +689,11 @@ def cmd_chat(args):
         one_shot = getattr(args, "one_shot", None)
         if one_shot is not None:
             if one_shot.startswith("/"):
-                await _send_sheriff(cli_gate, one_shot)
+                last_activity = await _send_sheriff(cli_gate, one_shot)
             else:
-                await _send_bot(gateway, one_shot)
-            print("(waiting up to 10s for additional responses; press Esc to cancel)")
-            await asyncio.to_thread(_wait_extra_or_esc, 10)
+                last_activity = await _send_bot(gateway, one_shot)
+            print("(waiting 10s after last response; press Esc to cancel)")
+            await asyncio.to_thread(_wait_extra_or_esc_until, last_activity + 10)
             return
 
         print("SheriffClaw terminal chat")
@@ -740,7 +747,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     fr = sub.add_parser("factory-reset")
     fr.add_argument("--yes", action="store_true", help="Skip confirmation prompts")
-    fr.set_defaults(func=cmd_reinstall)
+    fr.set_defaults(func=cmd_factory_reset)
 
     dbg = sub.add_parser("debug")
     dbg.add_argument("value", choices=["on", "off"])

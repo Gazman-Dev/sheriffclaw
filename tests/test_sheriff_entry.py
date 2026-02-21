@@ -139,13 +139,13 @@ def test_cmd_entry_menu_update(monkeypatch):
 def test_cmd_entry_menu_factory_reset(monkeypatch):
     monkeypatch.setattr(ctl, "_is_onboarded", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "factory reset")
-    called = {"reinstall": 0}
+    called = {"factory_reset": 0}
 
-    def fake_reinstall(args):
-        called["reinstall"] += 1
+    def fake_factory_reset(args):
+        called["factory_reset"] += 1
         assert args.yes is False
 
-    monkeypatch.setattr(ctl, "cmd_reinstall", fake_reinstall)
+    monkeypatch.setattr(ctl, "cmd_factory_reset", fake_factory_reset)
 
     ctl.cmd_entry(argparse.Namespace(message=[]))
-    assert called["reinstall"] == 1
+    assert called["factory_reset"] == 1

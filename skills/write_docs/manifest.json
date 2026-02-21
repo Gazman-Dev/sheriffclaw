@@ -1,0 +1,8 @@
+{
+  "skill_id": "write_docs",
+  "name": "Write Docs",
+  "description": "Generate or update documentation and wiki pages for the repository.",
+  "tags": ["docs", "documentation", "wiki", "readme"],
+  "requires_tools": ["repo.read_file", "repo.write_file"],
+  "default_reasoning_effort": "medium"
+}

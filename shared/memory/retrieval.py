@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from shared.memory.config import RetrievalConfig
 from shared.memory.embedding import EmbeddingProvider
 from shared.memory.semantic_index import SemanticIndex
-from shared.memory.store import TopicStore, normalize_alias
+from shared.memory.store import TopicStore
 
 
 DEEP_TRIGGER_TERMS = {
@@ -20,8 +21,6 @@ DEEP_TRIGGER_TERMS = {
     "new thing",
 }
 
-LOW_CONFIDENCE_SEMANTIC_THRESHOLD = 0.35
-LOW_CONFIDENCE_MARGIN = 0.05
 
 
 @dataclass
@@ -73,8 +72,8 @@ def _recency_boost(last_seen_iso: str | None, now_utc: datetime) -> float:
     return max(0.0, 0.2 - min(age_hours / (24 * 7), 0.2))
 
 
-def _time_boost(last_seen_iso: str | None, start: datetime | None, end: datetime | None) -> float:
-    return 0.3 if _in_window(_parse_iso(last_seen_iso), start, end) else 0.0
+def _time_boost(last_seen_iso: str | None, start: datetime | None, end: datetime | None, boost: float) -> float:
+    return boost if _in_window(_parse_iso(last_seen_iso), start, end) else 0.0
 
 
 def _dedupe_by_topic_id(items: list[dict]) -> list[dict]:
@@ -94,7 +93,7 @@ def _build_topic_map(store: TopicStore) -> dict[str, dict]:
 
 
 def _semantic_search(index: SemanticIndex, embedder: EmbeddingProvider, query: str, k: int) -> list[tuple[str, float]]:
-    qv = embedder.embed(query)
+    qv = embedder.embed_batch([query])[0]
     return index.search(qv, k=k)
 
 
@@ -104,12 +103,11 @@ def _trigger_reasons(query: str) -> list[str]:
 
 
 def sync_semantic_index(topic_store: TopicStore, embedding_provider: EmbeddingProvider, semantic_index: SemanticIndex) -> None:
-    for topic in topic_store.list_topics():
-        tid = topic.get("topic_id")
-        if not tid:
-            continue
-        text = topic.get("one_liner") or topic.get("name") or ""
-        semantic_index.upsert(tid, embedding_provider.embed(text))
+    topics = [t for t in topic_store.list_topics() if t.get("topic_id")]
+    texts = [(t.get("one_liner") or t.get("name") or "") for t in topics]
+    vectors = embedding_provider.embed_batch(texts)
+    for t, v in zip(topics, vectors):
+        semantic_index.upsert(t["topic_id"], v)
 
 
 def retrieve_topics(
@@ -120,12 +118,14 @@ def retrieve_topics(
     embedding_provider: EmbeddingProvider,
     semantic_index: SemanticIndex,
     force_deep: bool = False,
+    config: RetrievalConfig | None = None,
 ) -> RetrievalResult:
+    cfg = config or RetrievalConfig()
     now_utc = _parse_iso(now_iso) or datetime.now(timezone.utc)
 
     # Light retrieval (always)
-    alias_hits = topic_store.search_by_alias(query, k=5)
-    semantic_hits = _semantic_search(semantic_index, embedding_provider, query, k=5)
+    alias_hits = topic_store.search_by_alias(query, k=cfg.light_alias_k)
+    semantic_hits = _semantic_search(semantic_index, embedding_provider, query, k=cfg.light_semantic_k)
 
     topic_map = _build_topic_map(topic_store)
     semantic_topics = [{**topic_map[tid], "_semantic_score": score} for tid, score in semantic_hits if tid in topic_map]
@@ -136,15 +136,15 @@ def retrieve_topics(
     reasons = _trigger_reasons(query)
     top_score = semantic_hits[0][1] if semantic_hits else 0.0
     second_score = semantic_hits[1][1] if len(semantic_hits) > 1 else 0.0
-    low_conf = top_score < LOW_CONFIDENCE_SEMANTIC_THRESHOLD or (top_score - second_score) < LOW_CONFIDENCE_MARGIN
+    low_conf = top_score < cfg.low_conf_semantic_threshold or (top_score - second_score) < cfg.low_conf_margin
 
     deep_needed = force_deep or bool(reasons) or low_conf
     if not deep_needed:
         return RetrievalResult(topics=merged, deep_used=False, trigger_reasons=reasons + (["low-confidence"] if low_conf else []))
 
     # Deep retrieval
-    alias_deep = topic_store.search_by_alias(query, k=20)
-    semantic_deep = _semantic_search(semantic_index, embedding_provider, query, k=20)
+    alias_deep = topic_store.search_by_alias(query, k=cfg.deep_alias_k)
+    semantic_deep = _semantic_search(semantic_index, embedding_provider, query, k=cfg.deep_semantic_k)
 
     start, end, _ = _time_window(query, now_utc, wake_packet)
     scored: dict[str, tuple[dict, float]] = {}
@@ -155,17 +155,17 @@ def retrieve_topics(
         if not tid:
             continue
         rec = _recency_boost(t.get("time", {}).get("last_seen_at"), now_utc)
-        tm = _time_boost(t.get("time", {}).get("last_seen_at"), start, end)
-        score = 0.35 + rec + tm
+        tm = _time_boost(t.get("time", {}).get("last_seen_at"), start, end, cfg.time_window_boost)
+        score = cfg.alias_boost + rec + tm
         scored[tid] = (t, max(scored.get(tid, (t, -1e9))[1], score))
 
     for tid, sem_score in semantic_deep:
         t = topic_map.get(tid)
         if not t:
             continue
-        alias_boost = 0.35 if tid in alias_ids else 0.0
+        alias_boost = cfg.alias_boost if tid in alias_ids else 0.0
         rec = _recency_boost(t.get("time", {}).get("last_seen_at"), now_utc)
-        tm = _time_boost(t.get("time", {}).get("last_seen_at"), start, end)
+        tm = _time_boost(t.get("time", {}).get("last_seen_at"), start, end, cfg.time_window_boost)
         final_score = sem_score + alias_boost + rec + tm
         scored[tid] = (t, max(scored.get(tid, (t, -1e9))[1], final_score))
 

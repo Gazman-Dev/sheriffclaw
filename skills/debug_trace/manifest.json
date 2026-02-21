@@ -1,0 +1,8 @@
+{
+  "skill_id": "debug_trace",
+  "name": "Debug Trace",
+  "description": "Analyze stack traces and error logs, then propose and apply targeted fixes.",
+  "tags": ["debug", "traceback", "stack", "error", "bug"],
+  "requires_tools": ["repo.read_file", "repo.run_tests"],
+  "default_reasoning_effort": "high"
+}

@@ -89,3 +89,38 @@ def test_before_sleep_boost(tmp_path):
 
     assert result.deep_used is True
     assert result.topics[0]["topic_id"] == "topic-old"
+
+
+def test_semantic_similarity_ordering(tmp_path):
+    store = TopicStore(tmp_path / "topics.json")
+    store.create(
+        Topic(
+            schema_version=1,
+            topic_id="t-exact",
+            name="Exact",
+            one_liner="concert stage plan",
+            aliases=["concert"],
+            time=TopicTime(first_seen_at=_now(), last_seen_at=_now(), notable_events=[]),
+        )
+    )
+    store.create(
+        Topic(
+            schema_version=1,
+            topic_id="t-far",
+            name="Far",
+            one_liner="gardening and flowers",
+            aliases=["garden"],
+            time=TopicTime(first_seen_at=_now(), last_seen_at=_now(), notable_events=[]),
+        )
+    )
+
+    embedder = DeterministicHashEmbeddingProvider(dim=64)
+    index = HnswlibSemanticIndex(tmp_path / "semantic", dim=embedder.dim)
+    index.load()
+    sync_semantic_index(store, embedder, index)
+
+    query_vec = embedder.embed("concert stage plan")
+    out = index.search(query_vec, k=2)
+    assert len(out) == 2
+    assert out[0][0] == "t-exact"
+    assert out[0][1] >= out[1][1]

@@ -10,7 +10,10 @@ class EmbeddingProvider(ABC):
     def dim(self) -> int: ...
 
     @abstractmethod
-    def embed(self, text: str) -> list[float]: ...
+    def embed_batch(self, texts: list[str]) -> list[list[float]]: ...
+
+    def embed(self, text: str) -> list[float]:
+        return self.embed_batch([text])[0]
 
 
 class DeterministicHashEmbeddingProvider(EmbeddingProvider):
@@ -23,7 +26,7 @@ class DeterministicHashEmbeddingProvider(EmbeddingProvider):
     def dim(self) -> int:
         return self._dim
 
-    def embed(self, text: str) -> list[float]:
+    def _embed_one(self, text: str) -> list[float]:
         vec = [0.0] * self._dim
         normalized = (text or "").strip().lower()
         if not normalized:
@@ -36,3 +39,6 @@ class DeterministicHashEmbeddingProvider(EmbeddingProvider):
         if norm == 0:
             return vec
         return [v / norm for v in vec]
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self._embed_one(t) for t in texts]

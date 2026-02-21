@@ -165,3 +165,17 @@
 - Validation:
   - `pytest tests/test_memory_phase1.py tests/test_memory_phase2.py` => 5 passed
   - demo confirms alias miss + semantic recall and before-sleep boost behavior.
+## 2026-02-20 20:02 EST
+- Applied approved pre-Phase3 improvements:
+  1) EmbeddingProvider now supports `embed_batch(texts)` with `embed(text)` wrapper.
+  2) Semantic score normalization clarified and enforced to [0..1] (higher better) for cosine distance conversion.
+  3) Retrieval tuning moved to `RetrievalConfig` dataclass (K values, boosts, confidence thresholds).
+- Implemented Phase 3 (no graph):
+  - skill manifest schema + loader (`shared/memory/skill_routing.py`)
+  - light skill routing always (top 1-2)
+  - deep skill search on triggers (repo-edit/tests/docs/debug/multi-step)
+  - added example manifests: `skills/write_docs/manifest.json`, `skills/debug_trace/manifest.json`
+  - added routing tests + demo harness
+- Validation:
+  - pytest (phase tests): 9 passed
+  - demo output shows docs query -> write_docs and stack trace -> debug_trace

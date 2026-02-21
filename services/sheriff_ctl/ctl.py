@@ -187,12 +187,9 @@ def cmd_onboard(args):
 
             if choice == "2":
                 print("Starting ChatGPT subscription device login...")
-                from shared.llm.device_auth import DeviceAuthNotEnabled, run_device_code_login
+                from shared.llm.device_auth import run_browser_oauth_login
                 try:
-                    tokens = run_device_code_login(timeout_seconds=900)
-                except DeviceAuthNotEnabled as e:
-                    print(f"Device login unavailable: {e}")
-                    continue
+                    tokens = run_browser_oauth_login(timeout_seconds=900)
                 except RuntimeError as e:
                     print(f"Login cancelled/failed: {e}")
                     continue

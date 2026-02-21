@@ -296,3 +296,12 @@
   - cancel key changed from Enter to Esc during polling.
   - moved device-auth import to lazy import path so warning filter is installed first.
 - Added warning suppression gate in CLI (`SHERIFF_DEBUG` enables warnings; default hides NotOpenSSLWarning).
+## 2026-02-21 01:23 EST
+- Replaced device-code auth with browser OAuth + PKCE localhost callback flow per updated spec:
+  - authorize URL uses required params (`id_token_add_organizations`, `codex_cli_simplified_flow`, scope, pkce, state)
+  - callback server on `127.0.0.1:1455/auth/callback`
+  - validates state and exchanges code at oauth token endpoint
+  - prints full URL always and tries to open browser automatically
+  - stores token expiry derived from id_token exp
+- Keeps refresh_token grant path for subsequent token refresh.
+- Full test suite still green: 80 passed.

@@ -177,20 +177,38 @@ def _wipe_all_state() -> None:
 def cmd_reinstall(args):
     if not args.yes:
         print("This will delete ALL Sheriff/Agent data: vault, chats, skills state, logs, and runtime data.")
-        ans1 = input("Proceed with reinstall? [y/N]: ").strip().lower()
+        ans1 = input("Proceed with factory reset? [y/N]: ").strip().lower()
         if ans1 not in ("y", "yes"):
-            print("Reinstall cancelled.")
+            print("Factory reset cancelled.")
             return
         ans2 = input("Are you sure? This cannot be undone. [y/N]: ").strip().lower()
         if ans2 not in ("y", "yes"):
-            print("Reinstall cancelled.")
+            print("Factory reset cancelled.")
             return
 
-    print("Reinstalling SheriffClaw state (aggressive wipe)...")
+    print("Factory reset in progress (aggressive wipe)...")
     for svc in reversed(ALL):
         _stop_service(svc)
     _wipe_all_state()
-    print("Reinstall complete. All Sheriff/Agent state removed.")
+    print("Factory reset complete. All Sheriff/Agent state removed.")
+
+
+def _verify_master_password(mp: str) -> bool:
+    async def _run() -> bool:
+        cli = ProcClient("sheriff-secrets")
+        _, res = await cli.request("secrets.verify_master_password", {"master_password": mp})
+        return bool(res.get("result", {}).get("ok"))
+
+    return asyncio.run(_run())
+
+
+def cmd_update(args):
+    repo_root = Path(__file__).resolve().parents[2]
+    installer = repo_root / "install.sh"
+    if not installer.exists():
+        print("Update script not found.")
+        return
+    subprocess.run(["bash", str(installer)], check=False)  # noqa: S603
 
 
 def cmd_onboard(args):
@@ -198,17 +216,50 @@ def cmd_onboard(args):
 
     mp = args.master_password
     if mp is None:
-        while True:
-            a = getpass.getpass("Set Master Password: ")
-            b = getpass.getpass("Confirm Master Password: ")
-            if a and a == b:
-                mp = a
-                break
-            print("Passwords do not match. Please try again.")
+        if bool(getattr(args, "keep_unchanged", False)) and _is_onboarded():
+            mp = getpass.getpass("Current Master Password (keep unchanged mode): ")
+        else:
+            while True:
+                a = getpass.getpass("Set Master Password: ")
+                b = getpass.getpass("Confirm Master Password: ")
+                if a and a == b:
+                    mp = a
+                    break
+                print("Passwords do not match. Please try again.")
 
     llm_prov = args.llm_provider
     llm_key = args.llm_api_key
     llm_auth = None
+    keep_unchanged = bool(getattr(args, "keep_unchanged", False))
+    existing: dict[str, str] = {}
+
+    if keep_unchanged and _is_onboarded():
+        async def _load_existing() -> dict[str, str]:
+            cli = ProcClient("sheriff-secrets")
+            _, ok = await cli.request("secrets.unlock", {"master_password": mp})
+            if not ok.get("result", {}).get("ok"):
+                raise RuntimeError("failed to unlock with provided master password")
+            _, p = await cli.request("secrets.get_llm_provider", {})
+            _, k = await cli.request("secrets.get_llm_api_key", {})
+            _, la = await cli.request("secrets.get_llm_auth", {})
+            _, lb = await cli.request("secrets.get_llm_bot_token", {})
+            _, gb = await cli.request("secrets.get_gate_bot_token", {})
+            return {
+                "llm_provider": p.get("result", {}).get("provider") or "",
+                "llm_api_key": k.get("result", {}).get("api_key") or "",
+                "llm_auth": la.get("result", {}).get("auth") or {},
+                "llm_bot_token": lb.get("result", {}).get("token") or "",
+                "gate_bot_token": gb.get("result", {}).get("token") or "",
+            }
+
+        try:
+            existing = asyncio.run(_load_existing())
+            policy_path = gw_root() / "state" / "master_policy.json"
+            if policy_path.exists():
+                policy = json.loads(policy_path.read_text(encoding="utf-8"))
+                existing["allow_telegram_master_password"] = bool(policy.get("allow_telegram_master_password", False))
+        except Exception as e:
+            raise RuntimeError(f"keep-unchanged requested but could not load existing config: {e}")
 
     if llm_prov is None:
         while True:
@@ -216,7 +267,23 @@ def cmd_onboard(args):
             print("1) OpenAI Codex (API key)")
             print("2) OpenAI Codex (ChatGPT subscription login)")
             print("3) Local stub (testing only)")
-            choice = input("Select [1/2/3] (default 1): ").strip() or "1"
+            default_choice = "1"
+            if keep_unchanged and existing.get("llm_provider"):
+                cur = existing.get("llm_provider")
+                if cur == "openai-codex-chatgpt":
+                    default_choice = "2"
+                elif cur == "stub":
+                    default_choice = "3"
+            if keep_unchanged and existing.get("llm_provider"):
+                choice = input("Select [1/2/3] or K to keep current provider: ").strip().lower()
+                if not choice or choice == "k":
+                    llm_prov = existing.get("llm_provider")
+                    llm_key = existing.get("llm_api_key", "")
+                    if llm_prov == "openai-codex-chatgpt":
+                        llm_auth = existing.get("llm_auth") or None
+                    break
+            else:
+                choice = input(f"Select [1/2/3] (default {default_choice}): ").strip() or default_choice
 
             if choice == "3":
                 llm_prov = "stub"
@@ -225,7 +292,11 @@ def cmd_onboard(args):
 
             if choice == "1":
                 llm_prov = "openai-codex"
-                llm_key = getpass.getpass("OpenAI API Key: ").strip()
+                if keep_unchanged and existing.get("llm_api_key"):
+                    entered = getpass.getpass("OpenAI API Key (Enter=keep unchanged): ").strip()
+                    llm_key = entered or existing.get("llm_api_key", "")
+                else:
+                    llm_key = getpass.getpass("OpenAI API Key: ").strip()
                 break
 
             if choice == "2":
@@ -250,7 +321,11 @@ def cmd_onboard(args):
 
     if llm_key is None:
         if llm_prov == "openai-codex":
-            llm_key = getpass.getpass("OpenAI API Key: ").strip()
+            if keep_unchanged and existing.get("llm_api_key"):
+                entered = getpass.getpass("OpenAI API Key (Enter=keep unchanged): ").strip()
+                llm_key = entered or existing.get("llm_api_key", "")
+            else:
+                llm_key = getpass.getpass("OpenAI API Key: ").strip()
         else:
             llm_key = ""
 
@@ -260,7 +335,10 @@ def cmd_onboard(args):
 
     llm_bot = args.llm_bot_token
     if llm_bot is None:
-        llm_bot = input("Telegram AI bot token (BotFather): ").strip()
+        if keep_unchanged and existing.get("llm_bot_token"):
+            llm_bot = input("Telegram AI bot token (Enter=keep unchanged): ").strip() or existing.get("llm_bot_token", "")
+        else:
+            llm_bot = input("Telegram AI bot token (BotFather): ").strip()
 
     gate_bot = args.gate_bot_token
 
@@ -384,7 +462,10 @@ def cmd_onboard(args):
 
         gate_tok = gate_bot
         if gate_tok is None:
-            gate_tok = input("Telegram Sheriff bot token (BotFather): ").strip()
+            if keep_unchanged and existing.get("gate_bot_token"):
+                gate_tok = input("Telegram Sheriff bot token (Enter=keep unchanged): ").strip() or existing.get("gate_bot_token", "")
+            else:
+                gate_tok = input("Telegram Sheriff bot token (BotFather): ").strip()
 
         if gate_tok:
             await cli.request("secrets.set_gate_bot_token", {"token": gate_tok})
@@ -405,8 +486,16 @@ def cmd_onboard(args):
         elif args.deny_telegram:
             allow_tg = False
         else:
-            ans = input("Allow sending master password via Telegram to unlock? [y/N]: ").strip().lower()
-            allow_tg = ans in ("y", "yes")
+            if keep_unchanged and "allow_telegram_master_password" in existing:
+                cur = "Y" if existing.get("allow_telegram_master_password") else "N"
+                ans = input(f"Allow sending master password via Telegram to unlock? [y/N] (Enter=keep {cur}): ").strip().lower()
+                if not ans:
+                    allow_tg = bool(existing.get("allow_telegram_master_password"))
+                else:
+                    allow_tg = ans in ("y", "yes")
+            else:
+                ans = input("Allow sending master password via Telegram to unlock? [y/N]: ").strip().lower()
+                allow_tg = ans in ("y", "yes")
 
         master_policy = gw_root() / "state" / "master_policy.json"
         master_policy.parent.mkdir(parents=True, exist_ok=True)
@@ -466,25 +555,29 @@ def cmd_entry(args):
         return
 
     if not _is_onboarded():
-        cmd_onboard(argparse.Namespace(master_password=None, llm_provider=None, llm_api_key=None, llm_bot_token=None, gate_bot_token=None, allow_telegram=False, deny_telegram=False))
+        cmd_onboard(argparse.Namespace(master_password=None, llm_provider=None, llm_api_key=None, llm_bot_token=None, gate_bot_token=None, allow_telegram=False, deny_telegram=False, keep_unchanged=False))
         return
 
     while True:
         choice = input("Choose: onboard | chat | restart | update | factory reset > ").strip().lower()
         if choice == "onboard":
-            cmd_onboard(argparse.Namespace(master_password=None, llm_provider=None, llm_api_key=None, llm_bot_token=None, gate_bot_token=None, allow_telegram=False, deny_telegram=False))
+            keep = input("Keep unchanged as default for prompts? [Y/n]: ").strip().lower()
+            cmd_onboard(argparse.Namespace(master_password=None, llm_provider=None, llm_api_key=None, llm_bot_token=None, gate_bot_token=None, allow_telegram=False, deny_telegram=False, keep_unchanged=(keep not in {"n", "no"})))
             return
         if choice == "chat":
             cmd_chat(argparse.Namespace(principal="local-cli", model_ref=None, one_shot=None))
             return
         if choice == "restart":
-            _ = getpass.getpass("Master password required to restart services: ")
+            mp = getpass.getpass("Master password required to restart services: ")
+            if not _verify_master_password(mp):
+                print("Invalid master password. Restart cancelled.")
+                return
             cmd_stop(argparse.Namespace())
             cmd_start(argparse.Namespace())
             print("Services restarted.")
             return
         if choice == "update":
-            print("Update flow placeholder: run install/update script for your deployment.")
+            cmd_update(argparse.Namespace())
             return
         if choice in {"factory reset", "factory-reset"}:
             cmd_reinstall(argparse.Namespace(yes=False))
@@ -637,6 +730,7 @@ def build_parser() -> argparse.ArgumentParser:
         ob.add_argument("--llm-api-key", default=None)
         ob.add_argument("--llm-bot-token", default=None)
         ob.add_argument("--gate-bot-token", default=None)
+        ob.add_argument("--keep-unchanged", action="store_true", help="When re-onboarding, Enter keeps existing values")
 
         tg_group = ob.add_mutually_exclusive_group()
         tg_group.add_argument("--allow-telegram", action="store_true", help="Non-interactive: Allow telegram unlock")

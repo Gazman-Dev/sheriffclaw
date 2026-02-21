@@ -9,7 +9,6 @@ from shared.memory.embedding import EmbeddingProvider
 from shared.memory.semantic_index import SemanticIndex
 from shared.memory.store import TopicStore
 
-
 DEEP_TRIGGER_TERMS = {
     "remember",
     "last time",
@@ -20,7 +19,6 @@ DEEP_TRIGGER_TERMS = {
     "separately",
     "new thing",
 }
-
 
 
 @dataclass
@@ -39,7 +37,8 @@ def _parse_iso(s: str | None) -> datetime | None:
         return None
 
 
-def _time_window(query: str, now_utc: datetime, wake_packet: dict | None) -> tuple[datetime | None, datetime | None, str | None]:
+def _time_window(query: str, now_utc: datetime, wake_packet: dict | None) -> tuple[
+    datetime | None, datetime | None, str | None]:
     q = query.lower()
     if "yesterday" in q:
         start = (now_utc - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -102,7 +101,8 @@ def _trigger_reasons(query: str) -> list[str]:
     return [term for term in DEEP_TRIGGER_TERMS if term in q]
 
 
-def sync_semantic_index(topic_store: TopicStore, embedding_provider: EmbeddingProvider, semantic_index: SemanticIndex) -> None:
+def sync_semantic_index(topic_store: TopicStore, embedding_provider: EmbeddingProvider,
+                        semantic_index: SemanticIndex) -> None:
     topics = [t for t in topic_store.list_topics() if t.get("topic_id")]
     texts = [(t.get("one_liner") or t.get("name") or "") for t in topics]
     vectors = embedding_provider.embed_batch(texts)
@@ -111,14 +111,14 @@ def sync_semantic_index(topic_store: TopicStore, embedding_provider: EmbeddingPr
 
 
 def retrieve_topics(
-    query: str,
-    now_iso: str,
-    wake_packet: dict | None,
-    topic_store: TopicStore,
-    embedding_provider: EmbeddingProvider,
-    semantic_index: SemanticIndex,
-    force_deep: bool = False,
-    config: RetrievalConfig | None = None,
+        query: str,
+        now_iso: str,
+        wake_packet: dict | None,
+        topic_store: TopicStore,
+        embedding_provider: EmbeddingProvider,
+        semantic_index: SemanticIndex,
+        force_deep: bool = False,
+        config: RetrievalConfig | None = None,
 ) -> RetrievalResult:
     cfg = config or RetrievalConfig()
     now_utc = _parse_iso(now_iso) or datetime.now(timezone.utc)
@@ -140,7 +140,8 @@ def retrieve_topics(
 
     deep_needed = force_deep or bool(reasons) or low_conf
     if not deep_needed:
-        return RetrievalResult(topics=merged, deep_used=False, trigger_reasons=reasons + (["low-confidence"] if low_conf else []))
+        return RetrievalResult(topics=merged, deep_used=False,
+                               trigger_reasons=reasons + (["low-confidence"] if low_conf else []))
 
     # Deep retrieval
     alias_deep = topic_store.search_by_alias(query, k=cfg.deep_alias_k)
@@ -156,7 +157,8 @@ def retrieve_topics(
             continue
         rec = _recency_boost(t.get("time", {}).get("last_seen_at"), now_utc)
         tm = _time_boost(t.get("time", {}).get("last_seen_at"), start, end, cfg.time_window_boost)
-        score = cfg.alias_boost + rec + tm
+        ub = t.get("stats", {}).get("utility_score", 0.0)
+        score = (cfg.alias_boost * (1 + ub * 0.05)) + rec + tm
         scored[tid] = (t, max(scored.get(tid, (t, -1e9))[1], score))
 
     for tid, sem_score in semantic_deep:
@@ -166,31 +168,27 @@ def retrieve_topics(
         alias_boost = cfg.alias_boost if tid in alias_ids else 0.0
         rec = _recency_boost(t.get("time", {}).get("last_seen_at"), now_utc)
         tm = _time_boost(t.get("time", {}).get("last_seen_at"), start, end, cfg.time_window_boost)
-        final_score = sem_score + alias_boost + rec + tm
+        ub = t.get("stats", {}).get("utility_score", 0.0)
+
+        final_score = ((sem_score + alias_boost) * (1 + ub * 0.05)) + rec + tm
         scored[tid] = (t, max(scored.get(tid, (t, -1e9))[1], final_score))
 
+    # Graph expansion (1 hop)
+    expanded_ids = set()
+    top_tids = [tid for tid, _ in sorted(scored.items(), key=lambda x: x[1][1], reverse=True)[:5]]
+    for tid in top_tids:
+        expanded_ids.update(topic_store.get_adjacent_topics(tid))
+
+    for etid in expanded_ids:
+        if etid not in scored and etid in topic_map:
+            t = topic_map[etid]
+            rec = _recency_boost(t.get("time", {}).get("last_seen_at"), now_utc)
+            tm = _time_boost(t.get("time", {}).get("last_seen_at"), start, end, cfg.time_window_boost)
+            ub = t.get("stats", {}).get("utility_score", 0.0)
+            # Base relevance for expanded graph node is lower (0.5 max)
+            score = (0.5 * (1 + ub * 0.05)) + rec + tm
+            scored[etid] = (t, score)
+
     ranked = [topic for topic, _ in sorted(scored.values(), key=lambda x: x[1], reverse=True)]
-    return RetrievalResult(topics=ranked, deep_used=True, trigger_reasons=reasons + (["low-confidence"] if low_conf else []))
-
-
-def render_topic_md(topic: dict[str, Any]) -> str:
-    lines = [f"### {topic.get('name', 'Untitled Topic')}"]
-    if topic.get("one_liner"):
-        lines.append(f"- Summary: {topic['one_liner']}")
-    aliases = topic.get("aliases", [])
-    if aliases:
-        lines.append(f"- Aliases: {', '.join(aliases)}")
-    t = topic.get("time", {})
-    if t.get("first_seen_at") or t.get("last_seen_at"):
-        lines.append(f"- Time: first_seen={t.get('first_seen_at','')}, last_seen={t.get('last_seen_at','')}")
-    facts = topic.get("facts", [])
-    if facts:
-        lines.append("- Facts:")
-        for f in facts[:6]:
-            lines.append(f"  - {f}")
-    loops = topic.get("open_loops", [])
-    if loops:
-        lines.append("- Open loops:")
-        for l in loops[:6]:
-            lines.append(f"  - {l}")
-    return "\n".join(lines)
+    return RetrievalResult(topics=ranked, deep_used=True,
+                           trigger_reasons=reasons + (["low-confidence"] if low_conf else []))

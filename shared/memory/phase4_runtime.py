@@ -108,10 +108,21 @@ def _topic_tools(topic_store) -> dict[str, Callable[[dict], dict]]:
         )
         return {"topic_id": t.get("topic_id")}
 
+    def t_link(args: dict) -> dict:
+        topic_store.link_topics(
+            from_id=args.get("from_topic_id", ""),
+            to_id=args.get("to_topic_id", ""),
+            edge_type=args.get("type", "RELATES_TO"),
+            weight_delta=float(args.get("weight_delta", 1.0)),
+            now_iso=_now_iso(None),
+        )
+        return {"status": "linked"}
+
     return {
         "topics.search": t_search,
         "topics.get": t_get,
         "topics.upsert": t_upsert,
+        "topics.link": t_link,
     }
 
 
@@ -122,6 +133,8 @@ def _memory_tools(stores: RuntimeStores):
             args.get("now"),
             stores.topic_store,
             keep_tail_turns=int(args.get("keep_tail_turns", 10)),
+            embedding_provider=stores.embedding_provider,
+            semantic_index=stores.semantic_index,
         )
 
     def m_wake(args: dict) -> dict:
@@ -170,6 +183,7 @@ def _tool_schemas() -> list[dict]:
         {"type": "function", "name": "topics.search", "description": "Search topics", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "k": {"type": "integer"}}, "required": ["query"]}},
         {"type": "function", "name": "topics.get", "description": "Get topics by ids", "parameters": {"type": "object", "properties": {"topic_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["topic_ids"]}},
         {"type": "function", "name": "topics.upsert", "description": "Upsert topic", "parameters": {"type": "object", "properties": {"name": {"type": "string"}, "one_liner": {"type": "string"}, "aliases": {"type": "array", "items": {"type": "string"}}}, "required": ["name", "aliases"]}},
+        {"type": "function", "name": "topics.link", "description": "Link two topics", "parameters": {"type": "object", "properties": {"from_topic_id": {"type": "string"}, "to_topic_id": {"type": "string"}, "type": {"type": "string"}, "weight_delta": {"type": "number"}}, "required": ["from_topic_id", "to_topic_id"]}},
         {"type": "function", "name": "memory.sleep", "description": "Compact memory", "parameters": {"type": "object", "properties": {"conversation_buffer": {"type": "array"}, "now": {"type": "string"}, "keep_tail_turns": {"type": "integer"}}, "required": ["conversation_buffer"]}},
         {"type": "function", "name": "memory.wake", "description": "Wake and retrieve", "parameters": {"type": "object", "properties": {"wake_packet": {"type": "object"}, "user_msg": {"type": "string"}, "now": {"type": "string"}}, "required": ["wake_packet", "user_msg"]}},
         {"type": "function", "name": "skills.search", "description": "Search skills", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
@@ -195,12 +209,12 @@ def _make_request(model: str, reasoning_effort: str, system_prompt: str, message
 
 
 def run_turn(
-    conversation_buffer: list[dict],
-    user_msg: str,
-    now: str,
-    stores: RuntimeStores,
-    config: Phase4RuntimeConfig,
-    model_adapter: ModelAdapter,
+        conversation_buffer: list[dict],
+        user_msg: str,
+        now: str,
+        stores: RuntimeStores,
+        config: Phase4RuntimeConfig,
+        model_adapter: ModelAdapter,
 ) -> dict:
     logs: dict[str, Any] = {"events": []}
     now_iso = _now_iso(now)
@@ -210,7 +224,14 @@ def run_turn(
 
     maybe_wake_packet = stores.wake_packet
     if _estimate_tokens(working_buffer) > config.token_sleep_threshold:
-        slept = sleep(working_buffer, now_iso, stores.topic_store, keep_tail_turns=10)
+        slept = sleep(
+            conversation_buffer=working_buffer,
+            now=now_iso,
+            topic_store=stores.topic_store,
+            keep_tail_turns=10,
+            embedding_provider=stores.embedding_provider,
+            semantic_index=stores.semantic_index
+        )
         maybe_wake_packet = slept["wake_packet"]
         working_buffer = slept["trimmed_conversation"]
         logs["events"].append({"type": "sleep", "topics_updated": slept["topics_updated"]})

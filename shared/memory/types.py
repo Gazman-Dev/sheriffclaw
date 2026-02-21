@@ -48,6 +48,18 @@ class Topic:
 
 
 @dataclass
+class TopicEdge:
+    from_topic_id: str
+    to_topic_id: str
+    edge_type: str
+    weight: float
+    last_updated_at: str
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class WakePacket:
     schema_version: int
     slept_at: str

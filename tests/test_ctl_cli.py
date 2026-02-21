@@ -26,3 +26,9 @@ def test_reinstall_yes_parses():
     parser = build_parser()
     args = parser.parse_args(["reinstall", "--yes"])
     assert args.yes is True
+
+
+def test_logout_llm_parses():
+    parser = build_parser()
+    args = parser.parse_args(["logout-llm", "--master-password", "x"])
+    assert args.master_password == "x"

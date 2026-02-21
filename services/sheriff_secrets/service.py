@@ -50,6 +50,17 @@ class SheriffSecretsService:
         self.state.set_llm_api_key(payload.get("api_key", ""))
         return {"status": "saved"}
 
+    async def get_llm_auth(self, payload, emit_event, req_id):
+        return {"auth": self.state.get_llm_auth()}
+
+    async def set_llm_auth(self, payload, emit_event, req_id):
+        self.state.set_llm_auth(payload.get("auth", {}))
+        return {"status": "saved"}
+
+    async def clear_llm_auth(self, payload, emit_event, req_id):
+        self.state.clear_llm_auth()
+        return {"status": "cleared"}
+
     async def get_llm_bot_token(self, payload, emit_event, req_id):
         return {"token": self.state.get_llm_bot_token()}
 
@@ -87,6 +98,9 @@ class SheriffSecretsService:
             "secrets.get_llm_api_key": self.get_llm_api_key,
             "secrets.set_llm_provider": self.set_llm_provider,
             "secrets.set_llm_api_key": self.set_llm_api_key,
+            "secrets.get_llm_auth": self.get_llm_auth,
+            "secrets.set_llm_auth": self.set_llm_auth,
+            "secrets.clear_llm_auth": self.clear_llm_auth,
             "secrets.get_secret": self.get_secret,
             "secrets.set_secret": self.set_secret,
             "secrets.ensure_handle": self.ensure_handle,

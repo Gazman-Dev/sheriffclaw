@@ -159,11 +159,11 @@ def cmd_onboard(args):
     if llm_prov is None:
         print("\nChoose your LLM:")
         print("1) OpenAI Codex (API key)")
-        print("2) OpenAI Codex (auth token)")
+        print("2) OpenAI Codex (ChatGPT auth - not yet supported in this build)")
         print("3) Local stub (testing only)")
         choice = input("Select [1/2/3] (default 1): ").strip() or "1"
         if choice == "2":
-            llm_prov = "openai-codex-auth"
+            raise RuntimeError("ChatGPT subscription auth flow is not available in this build yet. Use API key for now.")
         elif choice == "3":
             llm_prov = "stub"
         else:
@@ -172,8 +172,6 @@ def cmd_onboard(args):
     if llm_key is None:
         if llm_prov == "openai-codex":
             llm_key = getpass.getpass("OpenAI API Key: ").strip()
-        elif llm_prov == "openai-codex-auth":
-            llm_key = getpass.getpass("OpenAI Auth Token: ").strip()
         else:
             llm_key = ""
 
@@ -279,6 +277,23 @@ def cmd_call(args):
         print(json.dumps(await final, ensure_ascii=False))
 
     asyncio.run(_run())
+
+
+def cmd_logout_llm(args):
+    async def _run():
+        cli = ProcClient("sheriff-secrets")
+        _, unlocked = await cli.request("secrets.is_unlocked", {})
+        if not unlocked.get("result", {}).get("unlocked"):
+            if not args.master_password:
+                raise RuntimeError("vault is locked; pass --master-password")
+            _, res = await cli.request("secrets.unlock", {"master_password": args.master_password})
+            if not res.get("result", {}).get("ok"):
+                raise RuntimeError("failed to unlock vault with provided master password")
+        await cli.request("secrets.set_llm_api_key", {"api_key": ""})
+        await cli.request("secrets.clear_llm_auth", {})
+
+    asyncio.run(_run())
+    print("LLM auth cleared from vault.")
 
 
 def cmd_configure_llm(args):
@@ -406,6 +421,10 @@ def build_parser() -> argparse.ArgumentParser:
     cfg.add_argument("--api-key", default=None)
     cfg.add_argument("--master-password", default=None, help="Required if vault is locked")
     cfg.set_defaults(func=cmd_configure_llm)
+
+    logout = sub.add_parser("logout-llm")
+    logout.add_argument("--master-password", default=None, help="Required if vault is locked")
+    logout.set_defaults(func=cmd_logout_llm)
 
     chat = sub.add_parser("chat")
     chat.add_argument("--principal", default="local-cli")

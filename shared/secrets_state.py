@@ -27,6 +27,7 @@ class SecretsState:
             "llm_api_key": payload.get("llm_api_key", ""),
             "llm_bot_token": payload.get("llm_bot_token", ""),
             "gate_bot_token": payload.get("gate_bot_token", ""),
+            "llm_auth": {"type": None, "access_token": None, "refresh_token": None, "expires_at": None},
             "allow_telegram_master_password": bool(payload.get("allow_telegram_master_password", False)),
             "secrets": {},
             "identity": {
@@ -99,6 +100,25 @@ class SecretsState:
     def set_llm_api_key(self, api_key: str) -> None:
         self._require()
         self._state["llm_api_key"] = api_key
+        self._persist()
+
+    def get_llm_auth(self) -> dict:
+        self._require()
+        return self._state.get("llm_auth", {"type": None, "access_token": None, "refresh_token": None, "expires_at": None})
+
+    def set_llm_auth(self, auth: dict) -> None:
+        self._require()
+        self._state["llm_auth"] = {
+            "type": auth.get("type"),
+            "access_token": auth.get("access_token"),
+            "refresh_token": auth.get("refresh_token"),
+            "expires_at": auth.get("expires_at"),
+        }
+        self._persist()
+
+    def clear_llm_auth(self) -> None:
+        self._require()
+        self._state["llm_auth"] = {"type": None, "access_token": None, "refresh_token": None, "expires_at": None}
         self._persist()
 
     def get_llm_bot_token(self) -> str:

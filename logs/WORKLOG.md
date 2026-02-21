@@ -263,3 +263,12 @@
   - onboarding prompts activation in order: AI bot first, then Sheriff bot.
 - Non-interactive onboarding now skips activation prompts safely.
 - Full test suite green: 79 passed.
+## 2026-02-21 00:52 EST
+- Clarified ChatGPT subscription auth request feasibility:
+  - Removed misleading 'paste auth token' UX from onboarding.
+  - Added explicit message that ChatGPT subscription auth flow is not available in this build.
+- Added vault auth lifecycle support primitives:
+  - `llm_auth` structure in encrypted secrets state
+  - secrets ops: get/set/clear llm_auth
+  - `sheriff-ctl logout-llm` command clears stored LLM auth/api key from vault
+- Kept Codex API-key path intact and secure.

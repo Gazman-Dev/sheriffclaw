@@ -64,7 +64,7 @@ class WorkerRuntime:
         if key not in self.providers:
             if provider == "test":
                 self.providers[key] = TestProvider()
-            elif provider in {"openai-codex", "openai-codex-auth"}:
+            elif provider in {"openai-codex"}:
                 self.providers[key] = OpenAICodexProvider(api_key=api_key, base_url=base_url or "https://api.openai.com/v1")
             else:
                 self.providers[key] = StubProvider()

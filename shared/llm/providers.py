@@ -63,3 +63,43 @@ class OpenAICodexProvider:
 
     async def generate(self, messages: list[dict], model: str = "gpt-5.3-codex") -> str:
         return await asyncio.to_thread(self._generate_sync, messages, model)
+
+
+class ChatGPTSubscriptionCodexProvider:
+    def __init__(self, access_token: str, base_url: str = "https://chatgpt.com/backend-api/codex"):
+        self.access_token = access_token
+        self.base_url = base_url.rstrip("/")
+
+    @staticmethod
+    def _to_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = str(msg.get("content", ""))
+            items.append({"role": role, "content": [{"type": "input_text", "text": content}]})
+        return items
+
+    def _generate_sync(self, messages: list[dict], model: str) -> str:
+        if not self.access_token:
+            raise ValueError("missing ChatGPT subscription access token")
+        url = f"{self.base_url}/responses"
+        payload = {"model": model, "input": self._to_input(messages)}
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        resp = requests.post(url, json=payload, headers=headers, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        text = data.get("output_text")
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+        for item in data.get("output", []):
+            if item.get("type") == "message":
+                for c in item.get("content", []):
+                    if c.get("type") in {"output_text", "text"} and c.get("text"):
+                        return str(c["text"]).strip()
+        return "(empty response)"
+
+    async def generate(self, messages: list[dict], model: str = "gpt-5.3-codex") -> str:
+        return await asyncio.to_thread(self._generate_sync, messages, model)

@@ -12,6 +12,7 @@ import sys
 import time
 from pathlib import Path
 
+from shared.llm.device_auth import DeviceAuthNotEnabled, run_device_code_login
 from shared.paths import gw_root, llm_root
 from shared.proc_rpc import ProcClient
 
@@ -156,18 +157,47 @@ def cmd_onboard(args):
 
     llm_prov = args.llm_provider
     llm_key = args.llm_api_key
+    llm_auth = None
+
     if llm_prov is None:
-        print("\nChoose your LLM:")
-        print("1) OpenAI Codex (API key)")
-        print("2) OpenAI Codex (ChatGPT auth - not yet supported in this build)")
-        print("3) Local stub (testing only)")
-        choice = input("Select [1/2/3] (default 1): ").strip() or "1"
-        if choice == "2":
-            raise RuntimeError("ChatGPT subscription auth flow is not available in this build yet. Use API key for now.")
-        elif choice == "3":
-            llm_prov = "stub"
-        else:
-            llm_prov = "openai-codex"
+        while True:
+            print("\nChoose your LLM:")
+            print("1) OpenAI Codex (API key)")
+            print("2) OpenAI Codex (ChatGPT subscription login)")
+            print("3) Local stub (testing only)")
+            choice = input("Select [1/2/3] (default 1): ").strip() or "1"
+
+            if choice == "3":
+                llm_prov = "stub"
+                llm_key = ""
+                break
+
+            if choice == "1":
+                llm_prov = "openai-codex"
+                llm_key = getpass.getpass("OpenAI API Key: ").strip()
+                break
+
+            if choice == "2":
+                print("Starting ChatGPT subscription device login...")
+                try:
+                    tokens = run_device_code_login(timeout_seconds=900)
+                except DeviceAuthNotEnabled as e:
+                    print(f"Device login unavailable: {e}")
+                    continue
+                except RuntimeError as e:
+                    print(f"Login cancelled/failed: {e}")
+                    continue
+                llm_prov = "openai-codex-chatgpt"
+                llm_key = ""
+                llm_auth = {
+                    "type": "chatgpt_subscription_device_code",
+                    "access_token": tokens.access_token,
+                    "refresh_token": tokens.refresh_token,
+                    "id_token": tokens.id_token,
+                    "obtained_at": tokens.obtained_at,
+                    "expires_at": tokens.expires_at,
+                }
+                break
 
     if llm_key is None:
         if llm_prov == "openai-codex":
@@ -224,6 +254,8 @@ def cmd_onboard(args):
             },
         )
         await cli.request("secrets.unlock", {"master_password": mp})
+        if llm_auth:
+            await cli.request("secrets.set_llm_auth", {"auth": llm_auth})
 
         # Activation flow: AI bot first, then Sheriff bot
         interactive_codes = sys.stdin.isatty()

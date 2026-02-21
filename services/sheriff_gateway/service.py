@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import inspect
+from datetime import datetime, timezone
 
 from shared.identity import principal_id_for_channel
+from shared.llm.device_auth import refresh_access_token
 from shared.paths import gw_root
 from shared.proc_rpc import ProcClient
 from shared.transcript import append_jsonl
@@ -36,8 +38,33 @@ class SheriffGatewayService:
         try:
             _, prov = await self.secrets.request("secrets.get_llm_provider", {})
             provider_name = prov.get("result", {}).get("provider") or provider_name
-            _, key = await self.secrets.request("secrets.get_llm_api_key", {})
-            api_key = key.get("result", {}).get("api_key") or ""
+            if provider_name == "openai-codex-chatgpt":
+                _, auth = await self.secrets.request("secrets.get_llm_auth", {})
+                auth_obj = auth.get("result", {}).get("auth") or {}
+                api_key = auth_obj.get("access_token") or ""
+                expires_at = auth_obj.get("expires_at")
+                refresh = auth_obj.get("refresh_token")
+                if expires_at and refresh:
+                    try:
+                        exp_dt = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00")).astimezone(timezone.utc)
+                        if exp_dt <= datetime.now(timezone.utc):
+                            tok = refresh_access_token(refresh)
+                            auth_obj.update(
+                                {
+                                    "access_token": tok.access_token,
+                                    "refresh_token": tok.refresh_token,
+                                    "id_token": tok.id_token,
+                                    "obtained_at": tok.obtained_at,
+                                    "expires_at": tok.expires_at,
+                                }
+                            )
+                            await self.secrets.request("secrets.set_llm_auth", {"auth": auth_obj})
+                            api_key = auth_obj.get("access_token") or ""
+                    except Exception:
+                        pass
+            else:
+                _, key = await self.secrets.request("secrets.get_llm_api_key", {})
+                api_key = key.get("result", {}).get("api_key") or ""
         except Exception:
             pass
 

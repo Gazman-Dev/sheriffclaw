@@ -272,3 +272,20 @@
   - secrets ops: get/set/clear llm_auth
   - `sheriff-ctl logout-llm` command clears stored LLM auth/api key from vault
 - Kept Codex API-key path intact and secure.
+## 2026-02-21 01:05 EST
+- Implemented Device Code auth flow for ChatGPT subscription Codex per provided endpoints/constants:
+  - `shared/llm/device_auth.py` with usercode request, token polling, oauth exchange, refresh helper.
+  - always prints full verification URL + user code.
+  - supports Enter-to-cancel while polling (TTY).
+- Onboarding now supports:
+  - API key path
+  - ChatGPT subscription login path (device flow)
+  - retry loop to switch method if cancelled/fails.
+- Vault auth persistence:
+  - stores auth object (type/access/refresh/id token/obtained/expires) in encrypted secrets, not llm_api_key.
+  - added clear/logout command and secrets ops for get/set/clear auth.
+- Gateway/runtime integration:
+  - when provider is `openai-codex-chatgpt`, uses vault auth access token.
+  - refreshes access token when expired using refresh_token and persists updated auth.
+  - routes subscription auth calls via ChatGPT backend codex endpoint provider.
+- Test status: full suite 80 passed.

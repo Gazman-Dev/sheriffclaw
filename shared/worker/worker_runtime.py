@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from shared.llm.providers import OpenAICodexProvider, StubProvider, TestProvider
+from shared.llm.providers import ChatGPTSubscriptionCodexProvider, OpenAICodexProvider, StubProvider, TestProvider
 from shared.llm.registry import resolve_model
 from shared.skills.loader import SkillLoader
 
@@ -66,6 +66,8 @@ class WorkerRuntime:
                 self.providers[key] = TestProvider()
             elif provider in {"openai-codex"}:
                 self.providers[key] = OpenAICodexProvider(api_key=api_key, base_url=base_url or "https://api.openai.com/v1")
+            elif provider in {"openai-codex-chatgpt"}:
+                self.providers[key] = ChatGPTSubscriptionCodexProvider(access_token=api_key, base_url=base_url or "https://chatgpt.com/backend-api/codex")
             else:
                 self.providers[key] = StubProvider()
         return self.providers[key]

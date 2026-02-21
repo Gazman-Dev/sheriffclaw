@@ -738,10 +738,6 @@ def build_parser() -> argparse.ArgumentParser:
 
         ob.set_defaults(func=cmd_onboard)
 
-    reinstall = sub.add_parser("reinstall")
-    reinstall.add_argument("--yes", action="store_true", help="Skip confirmation prompts")
-    reinstall.set_defaults(func=cmd_reinstall)
-
     fr = sub.add_parser("factory-reset")
     fr.add_argument("--yes", action="store_true", help="Skip confirmation prompts")
     fr.set_defaults(func=cmd_reinstall)

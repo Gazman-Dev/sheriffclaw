@@ -27,3 +27,9 @@ def test_is_onboarded_with_sqlite_state(tmp_path, monkeypatch):
 def test_is_onboarded_false_when_no_state(tmp_path, monkeypatch):
     monkeypatch.setattr("services.sheriff_ctl.ctl.gw_root", lambda: tmp_path)
     assert ctl._is_onboarded() is False
+
+
+def test_cmd_debug_updates_state(tmp_path, monkeypatch):
+    monkeypatch.setattr("services.sheriff_ctl.ctl.gw_root", lambda: tmp_path)
+    ctl.cmd_debug(type("A", (), {"value": "on"})())
+    assert ctl._read_debug_mode() is True

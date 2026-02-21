@@ -15,17 +15,13 @@ def test_onboarding_alias_parses():
     assert args.master_password == "x"
 
 
-def test_reinstall_command_parses():
+def test_reinstall_command_removed():
     parser = build_parser()
-    args = parser.parse_args(["reinstall"])
-    assert args.cmd == "reinstall"
-    assert args.yes is False
-
-
-def test_reinstall_yes_parses():
-    parser = build_parser()
-    args = parser.parse_args(["reinstall", "--yes"])
-    assert args.yes is True
+    try:
+        parser.parse_args(["reinstall"])
+        assert False, "expected SystemExit"
+    except SystemExit:
+        pass
 
 
 def test_logout_llm_parses():

@@ -29,6 +29,28 @@ def test_main_sheriff_message_routes_to_cmd_entry(monkeypatch):
     assert called["message"] == ["hello", "world"]
 
 
+def test_cmd_entry_one_shot_message_routes_to_chat(monkeypatch):
+    called = {}
+
+    def fake_chat(args):
+        called["one_shot"] = args.one_shot
+
+    monkeypatch.setattr(ctl, "cmd_chat", fake_chat)
+    ctl.cmd_entry(argparse.Namespace(message=["hello", "there"]))
+    assert called["one_shot"] == "hello there"
+
+
+def test_cmd_entry_one_shot_slash_routes_to_chat(monkeypatch):
+    called = {}
+
+    def fake_chat(args):
+        called["one_shot"] = args.one_shot
+
+    monkeypatch.setattr(ctl, "cmd_chat", fake_chat)
+    ctl.cmd_entry(argparse.Namespace(message=["/status"]))
+    assert called["one_shot"] == "/status"
+
+
 def test_cmd_entry_not_onboarded_runs_onboard(monkeypatch):
     called = {}
     monkeypatch.setattr(ctl, "_is_onboarded", lambda: False)

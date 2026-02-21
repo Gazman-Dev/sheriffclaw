@@ -179,3 +179,14 @@
 - Validation:
   - pytest (phase tests): 9 passed
   - demo output shows docs query -> write_docs and stack trace -> debug_trace
+## 2026-02-20 20:19 EST
+- Implemented Phase 4 runtime integration entrypoint:
+  - `run_turn(conversation_buffer, user_msg, now, stores, config, model_adapter)`
+  - always-on light topic/skill retrieval each turn
+  - deep retrieval only via triggers/low-confidence (topic retrieval path)
+  - model tool-calling loop with topics/memory/skills/repo tool surface
+  - sleep policy via token estimate threshold; sleep then wake+resume within same turn
+- Added Phase 4 tests:
+  - tool calling loop (repo.write_file)
+  - sleep/wake integration trigger
+- Added demo script showing old topic recall, tool call execution, and sleep->wake resume.

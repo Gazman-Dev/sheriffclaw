@@ -66,33 +66,57 @@ class SheriffGatewayService:
 
         append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "user", "content": text})
 
+        debug_mode = self._debug_mode_enabled()
         provider_name = "stub"
         api_key = ""
         base_url = ""
-        try:
+
+        _, unlocked = await self.secrets.request("secrets.is_unlocked", {})
+        if not unlocked.get("ok") or not unlocked.get("result", {}).get("unlocked"):
+            if not debug_mode:
+                msg = "🔒 Sheriff vault is locked. Run /unlock <master_password> first."
+                await emit_event("assistant.final", {"text": msg})
+                append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
+                return {"status": "locked", "session_handle": session}
+        else:
             _, prov = await self.secrets.request("secrets.get_llm_provider", {})
-            provider_name = prov.get("result", {}).get("provider") or provider_name
-            if provider_name == "openai-codex-chatgpt":
-                _, auth = await self.secrets.request("secrets.get_llm_auth", {})
-                auth_obj = auth.get("result", {}).get("auth") or {}
-                api_key = auth_obj.get("access_token") or ""
-                expires_at = auth_obj.get("expires_at")
-                refresh = auth_obj.get("refresh_token")
-                if expires_at and refresh:
-                    try:
-                        exp_dt = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00")).astimezone(timezone.utc)
-                        if exp_dt <= datetime.now(timezone.utc):
-                            tok = refresh_access_token(refresh)
-                            auth_obj.update({"access_token": tok.access_token, "refresh_token": tok.refresh_token, "id_token": tok.id_token, "obtained_at": tok.obtained_at, "expires_at": tok.expires_at})
-                            await self.secrets.request("secrets.set_llm_auth", {"auth": auth_obj})
-                            api_key = auth_obj.get("access_token") or ""
-                    except Exception:
-                        pass
+            if not prov.get("ok"):
+                if not debug_mode:
+                    msg = "Sheriff could not read LLM provider from vault."
+                    await emit_event("assistant.final", {"text": msg})
+                    append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
+                    return {"status": "provider_error", "session_handle": session}
             else:
-                _, key = await self.secrets.request("secrets.get_llm_api_key", {})
-                api_key = key.get("result", {}).get("api_key") or ""
-        except Exception:
-            pass
+                provider_name = prov.get("result", {}).get("provider") or provider_name
+                if provider_name == "openai-codex-chatgpt":
+                    _, auth = await self.secrets.request("secrets.get_llm_auth", {})
+                    auth_obj = auth.get("result", {}).get("auth") or {}
+                    api_key = auth_obj.get("access_token") or ""
+                    expires_at = auth_obj.get("expires_at")
+                    refresh = auth_obj.get("refresh_token")
+                    if expires_at and refresh:
+                        try:
+                            exp_dt = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00")).astimezone(timezone.utc)
+                            if exp_dt <= datetime.now(timezone.utc):
+                                tok = refresh_access_token(refresh)
+                                auth_obj.update({"access_token": tok.access_token, "refresh_token": tok.refresh_token, "id_token": tok.id_token, "obtained_at": tok.obtained_at, "expires_at": tok.expires_at})
+                                await self.secrets.request("secrets.set_llm_auth", {"auth": auth_obj})
+                                api_key = auth_obj.get("access_token") or ""
+                        except Exception:
+                            pass
+                    if not api_key and not debug_mode:
+                        msg = "LLM auth missing/expired. Re-run onboarding login or configure-llm."
+                        await emit_event("assistant.final", {"text": msg})
+                        append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
+                        return {"status": "llm_auth_missing", "session_handle": session}
+                elif provider_name == "openai-codex":
+                    _, key = await self.secrets.request("secrets.get_llm_api_key", {})
+                    api_key = key.get("result", {}).get("api_key") or ""
+                    if not api_key and not debug_mode:
+                        msg = "OpenAI API key missing. Run: sheriff-ctl configure-llm --provider openai-codex"
+                        await emit_event("assistant.final", {"text": msg})
+                        append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
+                        return {"status": "llm_key_missing", "session_handle": session}
 
         if self._debug_mode_enabled():
             msg = self._pop_debug_message()

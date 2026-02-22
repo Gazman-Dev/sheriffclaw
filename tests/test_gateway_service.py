@@ -47,6 +47,7 @@ async def test_gateway_opens_session_and_forwards_message():
         return [], {"result": {}}
 
     svc.ai.request = AsyncMock(side_effect=mock_request)
+    svc.secrets.request = AsyncMock(return_value=([], {"ok": True, "result": {"unlocked": True, "provider": "stub", "api_key": ""}}))
 
     events = []
     async def emit(e, p): events.append((e,p))
@@ -110,6 +111,39 @@ async def test_gateway_handles_locked_secret_tool_without_crash():
 
 
 @pytest.mark.asyncio
+async def test_gateway_locked_vault_returns_error_instead_of_stub_echo():
+    svc = SheriffGatewayService()
+    svc.ai = MockProcClient("ai-worker")
+
+    async def mock_secrets_request(op, payload, stream_events=False):
+        if op == "secrets.is_unlocked":
+            return [], {"ok": True, "result": {"unlocked": False}}
+        return [], {"ok": False, "error": "secrets are locked", "result": {}}
+
+    svc.secrets.request = AsyncMock(side_effect=mock_secrets_request)
+
+    events = []
+
+    async def emit(e, p):
+        events.append((e, p))
+
+    out = await svc.handle_user_message(
+        {
+            "channel": "cli",
+            "principal_external_id": "u1",
+            "text": "hello",
+        },
+        emit,
+        "req-locked",
+    )
+
+    assert out["status"] == "locked"
+    finals = [p for e, p in events if e == "assistant.final"]
+    assert finals, "expected assistant.final message"
+    assert "vault is locked" in finals[-1]["text"].lower()
+
+
+@pytest.mark.asyncio
 async def test_gateway_routes_web_tool():
     svc = SheriffGatewayService()
     svc.ai = MockProcClient("ai-worker")
@@ -134,6 +168,7 @@ async def test_gateway_routes_web_tool():
         return [], {"result": {}}
 
     svc.ai.request = AsyncMock(side_effect=mock_ai_request)
+    svc.secrets.request = AsyncMock(return_value=([], {"ok": True, "result": {"unlocked": True, "provider": "stub", "api_key": ""}}))
 
     # Mock Web response
     svc.web.request = AsyncMock(return_value=([], {"result": {"status": 200}}))

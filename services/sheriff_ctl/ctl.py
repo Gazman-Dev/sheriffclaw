@@ -293,6 +293,25 @@ def cmd_start(args):
     for svc in ALL:
         _start_service(svc)
 
+    mp = getattr(args, "master_password", None) or os.getenv("SHERIFF_MASTER_PASSWORD", "")
+    if mp:
+        async def _unlock():
+            cli = ProcClient("sheriff-secrets")
+            for _ in range(10):
+                try:
+                    await cli.request("health", {})
+                    break
+                except Exception:
+                    await asyncio.sleep(0.2)
+            _, res = await cli.request("secrets.unlock", {"master_password": mp})
+            return bool(res.get("result", {}).get("ok"))
+
+        ok = asyncio.run(_unlock())
+        if ok:
+            print("Vault unlocked on start.")
+        else:
+            print("Warning: failed to unlock vault on start (master password rejected).")
+
 
 def cmd_stop(args):
     for svc in reversed(ALL):
@@ -903,7 +922,9 @@ def cmd_chat(args):
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="sheriff-ctl")
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("start").set_defaults(func=cmd_start)
+    st = sub.add_parser("start")
+    st.add_argument("--master-password", default=None, help="Unlock vault after start (or set SHERIFF_MASTER_PASSWORD)")
+    st.set_defaults(func=cmd_start)
     sub.add_parser("stop").set_defaults(func=cmd_stop)
     sub.add_parser("status").set_defaults(func=cmd_status)
     lg = sub.add_parser("logs")

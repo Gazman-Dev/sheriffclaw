@@ -33,7 +33,7 @@
   - prompts for master password only when needed
   - added `--force` flag
 - Added gateway proxy op `gateway.verify_master_password` and switched CLI verification to gateway path.
-- Added gateway proxy op `gateway.secrets.call` and migrated direct secrets access out of runtime services:
+- Added gateway proxy op `gateway.secrets.call` and migrated direct secrets access through gateway for:
   - `ai_tg_llm`
   - `sheriff_requests`
   - `sheriff_tg_gate`
@@ -41,9 +41,9 @@
   - `telegram_listener`
   - `telegram_webhook`
   - `sheriff_cli_gate`
+  - `sheriff_ctl`
 
 ## Remaining work
-- Finish boundary in CLI control path (`services/sheriff_ctl/ctl.py` still has direct calls to `sheriff-secrets`).
 - Replace generic `gateway.secrets.call` with narrower allowlisted ops over time (security hardening).
 - Add tests:
   - update skip when versions unchanged

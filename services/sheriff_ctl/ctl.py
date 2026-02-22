@@ -296,15 +296,15 @@ def cmd_start(args):
     mp = getattr(args, "master_password", None) or os.getenv("SHERIFF_MASTER_PASSWORD", "")
     if mp:
         async def _unlock():
-            cli = ProcClient("sheriff-secrets")
+            gw = ProcClient("sheriff-gateway")
             for _ in range(10):
                 try:
-                    await cli.request("health", {})
+                    await gw.request("health", {})
                     break
                 except Exception:
                     await asyncio.sleep(0.2)
-            _, res = await cli.request("secrets.unlock", {"master_password": mp})
-            return bool(res.get("result", {}).get("ok"))
+            res = await _gw_secrets_call("secrets.unlock", {"master_password": mp})
+            return bool(res.get("ok"))
 
         ok = asyncio.run(_unlock())
         if ok:
@@ -366,6 +366,12 @@ def _verify_master_password(mp: str) -> bool:
         return bool(res.get("result", {}).get("ok"))
 
     return asyncio.run(_run())
+
+
+async def _gw_secrets_call(op: str, payload: dict | None = None) -> dict:
+    gw = ProcClient("sheriff-gateway")
+    _, res = await gw.request("gateway.secrets.call", {"op": op, "payload": payload or {}})
+    return res.get("result", {})
 
 
 def cmd_update(args):
@@ -452,21 +458,20 @@ def cmd_onboard(args):
 
     if keep_unchanged and _is_onboarded():
         async def _load_existing() -> dict[str, str]:
-            cli = ProcClient("sheriff-secrets")
-            _, ok = await cli.request("secrets.unlock", {"master_password": mp})
-            if not ok.get("result", {}).get("ok"):
+            ok = await _gw_secrets_call("secrets.unlock", {"master_password": mp})
+            if not ok.get("ok"):
                 raise RuntimeError("failed to unlock with provided master password")
-            _, p = await cli.request("secrets.get_llm_provider", {})
-            _, k = await cli.request("secrets.get_llm_api_key", {})
-            _, la = await cli.request("secrets.get_llm_auth", {})
-            _, lb = await cli.request("secrets.get_llm_bot_token", {})
-            _, gb = await cli.request("secrets.get_gate_bot_token", {})
+            p = await _gw_secrets_call("secrets.get_llm_provider", {})
+            k = await _gw_secrets_call("secrets.get_llm_api_key", {})
+            la = await _gw_secrets_call("secrets.get_llm_auth", {})
+            lb = await _gw_secrets_call("secrets.get_llm_bot_token", {})
+            gb = await _gw_secrets_call("secrets.get_gate_bot_token", {})
             return {
-                "llm_provider": p.get("result", {}).get("provider") or "",
-                "llm_api_key": k.get("result", {}).get("api_key") or "",
-                "llm_auth": la.get("result", {}).get("auth") or {},
-                "llm_bot_token": lb.get("result", {}).get("token") or "",
-                "gate_bot_token": gb.get("result", {}).get("token") or "",
+                "llm_provider": p.get("provider") or "",
+                "llm_api_key": k.get("api_key") or "",
+                "llm_auth": la.get("auth") or {},
+                "llm_bot_token": lb.get("token") or "",
+                "gate_bot_token": gb.get("token") or "",
             }
 
         try:
@@ -561,7 +566,7 @@ def cmd_onboard(args):
 
     allow_tg = False
 
-    async def _telegram_activate_bot(cli: ProcClient, role: str, token: str, timeout_sec: int = 300) -> bool:
+    async def _telegram_activate_bot(role: str, token: str, timeout_sec: int = 300) -> bool:
         import requests
 
         print(f"\n{role.upper()} bot activation:")
@@ -575,8 +580,8 @@ def cmd_onboard(args):
 
         while time.time() - start < timeout_sec:
             # Already activated?
-            _, st = await cli.request("secrets.activation.status", {"bot_role": role})
-            if st.get("result", {}).get("user_id"):
+            st = await _gw_secrets_call("secrets.activation.status", {"bot_role": role})
+            if st.get("user_id"):
                 return True
 
             try:
@@ -601,15 +606,15 @@ def cmd_onboard(args):
                 if not user_id or chat_id is None:
                     continue
 
-                _, bound = await cli.request("secrets.activation.status", {"bot_role": role})
-                bound_uid = bound.get("result", {}).get("user_id")
+                bound = await _gw_secrets_call("secrets.activation.status", {"bot_role": role})
+                bound_uid = bound.get("user_id")
                 if bound_uid and str(bound_uid) == user_id:
                     continue
 
                 code = sent_codes.get(user_id)
                 if not code:
-                    _, c = await cli.request("secrets.activation.create", {"bot_role": role, "user_id": user_id})
-                    code = c.get("result", {}).get("code")
+                    c = await _gw_secrets_call("secrets.activation.create", {"bot_role": role, "user_id": user_id})
+                    code = c.get("code")
                     if not code:
                         continue
                     sent_codes[user_id] = code
@@ -631,8 +636,8 @@ def cmd_onboard(args):
                     return False
                 if not code_in:
                     continue
-                _, claim = await cli.request("secrets.activation.claim", {"bot_role": role, "code": code_in})
-                if claim.get("result", {}).get("ok"):
+                claim = await _gw_secrets_call("secrets.activation.claim", {"bot_role": role, "code": code_in})
+                if claim.get("ok"):
                     return True
                 print("Invalid code, try again.")
             else:
@@ -642,16 +647,16 @@ def cmd_onboard(args):
         return False
 
     async def _run():
-        cli = ProcClient("sheriff-secrets")
+        gw = ProcClient("sheriff-gateway")
         # Give services a moment to be ready if we just started them
         for _ in range(5):
             try:
-                await cli.request("health", {})
+                await gw.request("health", {})
                 break
             except Exception:
                 await asyncio.sleep(1)
 
-        await cli.request(
+        await _gw_secrets_call(
             "secrets.initialize",
             {
                 "master_password": mp,
@@ -662,16 +667,16 @@ def cmd_onboard(args):
                 "allow_telegram_master_password": False,
             },
         )
-        await cli.request("secrets.unlock", {"master_password": mp})
+        await _gw_secrets_call("secrets.unlock", {"master_password": mp})
         if llm_auth:
-            await cli.request("secrets.set_llm_auth", {"auth": llm_auth})
+            await _gw_secrets_call("secrets.set_llm_auth", {"auth": llm_auth})
 
         interactive = sys.stdin.isatty()
 
         if llm_bot:
-            await cli.request("secrets.set_llm_bot_token", {"token": llm_bot})
+            await _gw_secrets_call("secrets.set_llm_bot_token", {"token": llm_bot})
             if interactive:
-                ok = await _telegram_activate_bot(cli, "llm", llm_bot)
+                ok = await _telegram_activate_bot("llm", llm_bot)
                 if ok:
                     print("AI bot activated.")
                 else:
@@ -685,9 +690,9 @@ def cmd_onboard(args):
                 gate_tok = input("Telegram Sheriff bot token (BotFather): ").strip()
 
         if gate_tok:
-            await cli.request("secrets.set_gate_bot_token", {"token": gate_tok})
+            await _gw_secrets_call("secrets.set_gate_bot_token", {"token": gate_tok})
             if interactive:
-                ok = await _telegram_activate_bot(cli, "sheriff", gate_tok)
+                ok = await _telegram_activate_bot("sheriff", gate_tok)
                 if ok:
                     print("Sheriff bot activated.")
                 else:
@@ -828,16 +833,15 @@ def cmd_call(args):
 
 def cmd_logout_llm(args):
     async def _run():
-        cli = ProcClient("sheriff-secrets")
-        _, unlocked = await cli.request("secrets.is_unlocked", {})
-        if not unlocked.get("result", {}).get("unlocked"):
+        unlocked = await _gw_secrets_call("secrets.is_unlocked", {})
+        if not unlocked.get("unlocked"):
             if not args.master_password:
                 raise RuntimeError("vault is locked; pass --master-password")
-            _, res = await cli.request("secrets.unlock", {"master_password": args.master_password})
-            if not res.get("result", {}).get("ok"):
+            res = await _gw_secrets_call("secrets.unlock", {"master_password": args.master_password})
+            if not res.get("ok"):
                 raise RuntimeError("failed to unlock vault with provided master password")
-        await cli.request("secrets.set_llm_api_key", {"api_key": ""})
-        await cli.request("secrets.clear_llm_auth", {})
+        await _gw_secrets_call("secrets.set_llm_api_key", {"api_key": ""})
+        await _gw_secrets_call("secrets.clear_llm_auth", {})
 
     asyncio.run(_run())
     print("LLM auth cleared from vault.")
@@ -850,17 +854,16 @@ def cmd_configure_llm(args):
         api_key = getpass.getpass(f"API key for {provider}: ").strip()
 
     async def _run():
-        cli = ProcClient("sheriff-secrets")
-        _, unlocked = await cli.request("secrets.is_unlocked", {})
-        if not unlocked.get("result", {}).get("unlocked"):
+        unlocked = await _gw_secrets_call("secrets.is_unlocked", {})
+        if not unlocked.get("unlocked"):
             if not args.master_password:
                 raise RuntimeError("vault is locked; pass --master-password to configure llm")
-            _, res = await cli.request("secrets.unlock", {"master_password": args.master_password})
-            if not res.get("result", {}).get("ok"):
+            res = await _gw_secrets_call("secrets.unlock", {"master_password": args.master_password})
+            if not res.get("ok"):
                 raise RuntimeError("failed to unlock vault with provided master password")
 
-        await cli.request("secrets.set_llm_provider", {"provider": provider})
-        await cli.request("secrets.set_llm_api_key", {"api_key": api_key})
+        await _gw_secrets_call("secrets.set_llm_provider", {"provider": provider})
+        await _gw_secrets_call("secrets.set_llm_api_key", {"api_key": api_key})
 
     asyncio.run(_run())
     print(f"LLM provider configured: {provider}")

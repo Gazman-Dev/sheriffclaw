@@ -249,16 +249,18 @@ run_onboarding_if_needed() {
 
     if [ "$interactive" = "1" ]; then
         local skip_onboarding=0
+        local ENABLE_DEBUG_MODE=0
         if [ "$existing_install" = "1" ]; then
             echo -e "${YELLOW}Existing installation detected.${NC}"
             echo "Choose action:"
             echo "  1) Start onboarding"
             echo "  2) Update existing install (default)"
             echo "  3) Factory reset (wipe ALL Sheriff/Agent data), then onboarding"
+            echo "  4) Factory reset + onboarding in DEBUG mode"
             if [ -t 0 ]; then
-                read -r -p "Select [1/2/3] (default 2): " SETUP_CHOICE
+                read -r -p "Select [1/2/3/4] (default 2): " SETUP_CHOICE
             else
-                read -r -p "Select [1/2/3] (default 2): " SETUP_CHOICE < /dev/tty
+                read -r -p "Select [1/2/3/4] (default 2): " SETUP_CHOICE < /dev/tty
             fi
             SETUP_CHOICE="${SETUP_CHOICE:-2}"
 
@@ -278,6 +280,14 @@ run_onboarding_if_needed() {
                         "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || true
                     fi
                     ;;
+                4)
+                    ENABLE_DEBUG_MODE=1
+                    if [ -t 0 ]; then
+                        "$VENV_DIR/bin/sheriff-ctl" factory-reset || true
+                    else
+                        "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || true
+                    fi
+                    ;;
                 1|*)
                     ;;
             esac
@@ -287,8 +297,14 @@ run_onboarding_if_needed() {
             return 0
         fi
 
+        local ONBOARD_ARGS=()
+        if [ "${ENABLE_DEBUG_MODE:-0}" = "1" ] || [ "${SHERIFF_DEBUG_MODE:-0}" = "1" ]; then
+            ONBOARD_ARGS+=(--debug-mode)
+            warn "Debug mode requested: onboarding will enable deterministic debug mode after setup."
+        fi
+
         if [ -t 0 ]; then
-            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding; then
+            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding "${ONBOARD_ARGS[@]}"; then
                 echo -e "${YELLOW}Onboarding exited.${NC}"
                 read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI
                 RI_LC="$(lower "$RI")"
@@ -298,7 +314,7 @@ run_onboarding_if_needed() {
                 return 1
             fi
         else
-            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding < /dev/tty > /dev/tty 2>&1; then
+            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding "${ONBOARD_ARGS[@]}" < /dev/tty > /dev/tty 2>&1; then
                 echo -e "${YELLOW}Onboarding exited.${NC}"
                 read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI < /dev/tty
                 RI_LC="$(lower "$RI")"
@@ -322,13 +338,19 @@ run_onboarding_if_needed() {
         TELEGRAM_FLAG="--allow-telegram"
     fi
 
+    DEBUG_FLAG=""
+    if [ "${SHERIFF_DEBUG_MODE:-0}" = "1" ]; then
+        DEBUG_FLAG="--debug-mode"
+    fi
+
     "$VENV_DIR/bin/sheriff-ctl" onboarding \
         --master-password "$MP" \
         --llm-provider "$LLM_PROVIDER" \
         --llm-api-key "$LLM_API_KEY" \
         --llm-bot-token "$LLM_BOT_TOKEN" \
         --gate-bot-token "$GATE_BOT_TOKEN" \
-        $TELEGRAM_FLAG
+        $TELEGRAM_FLAG \
+        $DEBUG_FLAG
 }
 
 echo -e "${BLUE}=========================================${NC}"

@@ -705,7 +705,10 @@ def cmd_onboard(args):
     except KeyboardInterrupt:
         print("\nOnboarding cancelled.")
         return
-    print("Onboarding complete. Secrets initialized and unlocked.")
+
+    debug_mode = bool(getattr(args, "debug_mode", False))
+    _write_debug_mode(debug_mode)
+    print(f"Onboarding complete. Secrets initialized and unlocked. Debug mode {'ON' if debug_mode else 'OFF'}.")
 
 
 def cmd_debug(args):
@@ -951,6 +954,7 @@ def build_parser() -> argparse.ArgumentParser:
         ob.add_argument("--llm-bot-token", default=None)
         ob.add_argument("--gate-bot-token", default=None)
         ob.add_argument("--keep-unchanged", action="store_true", help="When re-onboarding, Enter keeps existing values")
+        ob.add_argument("--debug-mode", action="store_true", help="Enable deterministic debug mode after onboarding")
 
         tg_group = ob.add_mutually_exclusive_group()
         tg_group.add_argument("--allow-telegram", action="store_true", help="Non-interactive: Allow telegram unlock")

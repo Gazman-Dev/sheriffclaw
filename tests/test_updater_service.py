@@ -1,55 +1,139 @@
 import pytest
-from unittest.mock import AsyncMock
 
 from services.sheriff_updater.service import SheriffUpdaterService
 
 
 @pytest.mark.asyncio
-async def test_updater_rejects_missing_password(monkeypatch):
-    svc = SheriffUpdaterService()
-    out = await svc.run_update({}, None, "r1")
-    assert out["ok"] is False
+async def test_updater_skips_when_versions_not_increased(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "versions.json").write_text('{"agent":"1.0.0","sheriff":"1.0.0","secrets":"1.0.0"}\n', encoding="utf-8")
 
+    monkeypatch.setattr("services.sheriff_updater.service.load_applied_versions", lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"})
 
-@pytest.mark.asyncio
-async def test_updater_rejects_invalid_password(monkeypatch):
-    svc = SheriffUpdaterService()
-    svc.secrets = AsyncMock()
-    svc.secrets.request.return_value = (None, {"result": {"ok": False}})
+    saved = {}
 
-    out = await svc.run_update({"master_password": "bad", "auto_pull": False}, None, "r1")
-    assert out["ok"] is False
-    assert out["error"] == "invalid_master_password"
+    def fake_save(v):
+        saved.update(v)
 
-
-@pytest.mark.asyncio
-async def test_updater_restart_only_mode(monkeypatch):
-    svc = SheriffUpdaterService()
-    svc.secrets = AsyncMock()
-    svc.secrets.request.return_value = (None, {"result": {"ok": True}})
-
-    out = await svc.run_update({"master_password": "ok", "auto_pull": False}, None, "r1")
-    assert out["ok"] is True
-    assert out["mode"] == "restart_only"
-
-
-@pytest.mark.asyncio
-async def test_updater_full_update_mode(monkeypatch):
-    svc = SheriffUpdaterService()
-    svc.secrets = AsyncMock()
-    svc.secrets.request.return_value = (None, {"result": {"ok": True}})
+    monkeypatch.setattr("services.sheriff_updater.service.save_applied_versions", fake_save)
 
     calls = []
 
-    class P:
-        returncode = 0
-
     def fake_run(cmd, check=False):
         calls.append(cmd)
+
+        class P:
+            returncode = 0
+
         return P()
 
     monkeypatch.setattr("services.sheriff_updater.service.subprocess.run", fake_run)
 
-    out = await svc.run_update({"master_password": "ok", "auto_pull": True}, None, "r1")
+    svc = SheriffUpdaterService()
+    svc.repo_root = repo
+
+    out = await svc.run_update({"auto_pull": False}, None, "r1")
     assert out["ok"] is True
+    assert out["mode"] == "skipped"
+    assert out["reason"] == "version_not_increased"
+    assert calls == []
+    assert saved == {}
+
+
+@pytest.mark.asyncio
+async def test_updater_force_updates_even_without_version_increase(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "versions.json").write_text('{"agent":"1.0.0","sheriff":"1.0.0","secrets":"1.0.0"}\n', encoding="utf-8")
+
+    monkeypatch.setattr("services.sheriff_updater.service.load_applied_versions", lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"})
+
+    saved = {}
+
+    def fake_save(v):
+        saved.update(v)
+
+    monkeypatch.setattr("services.sheriff_updater.service.save_applied_versions", fake_save)
+
+    calls = []
+
+    def fake_run(cmd, check=False):
+        calls.append(cmd)
+
+        class P:
+            returncode = 0
+
+        return P()
+
+    monkeypatch.setattr("services.sheriff_updater.service.subprocess.run", fake_run)
+
+    svc = SheriffUpdaterService()
+    svc.repo_root = repo
+
+    out = await svc.run_update({"auto_pull": False, "force": True}, None, "r2")
+    assert out["ok"] is True
+    assert out["mode"] == "full_update"
     assert any("pip" in " ".join(c) for c in calls)
+    assert saved == {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"}
+
+
+@pytest.mark.asyncio
+async def test_updater_requires_master_password_when_secrets_version_increased(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "versions.json").write_text('{"agent":"1.0.0","sheriff":"1.0.0","secrets":"1.0.1"}\n', encoding="utf-8")
+
+    monkeypatch.setattr("services.sheriff_updater.service.load_applied_versions", lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"})
+
+    def fake_run(cmd, check=False):
+        class P:
+            returncode = 0
+
+        return P()
+
+    monkeypatch.setattr("services.sheriff_updater.service.subprocess.run", fake_run)
+
+    svc = SheriffUpdaterService()
+    svc.repo_root = repo
+
+    out = await svc.run_update({"auto_pull": False}, None, "r3")
+    assert out["ok"] is False
+    assert out["error"] == "master_password_required"
+
+
+@pytest.mark.asyncio
+async def test_updater_does_not_require_master_password_when_only_non_secrets_increased(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "versions.json").write_text('{"agent":"1.0.1","sheriff":"1.0.0","secrets":"1.0.0"}\n', encoding="utf-8")
+
+    monkeypatch.setattr("services.sheriff_updater.service.load_applied_versions", lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"})
+
+    calls = []
+
+    def fake_run(cmd, check=False):
+        calls.append(cmd)
+
+        class P:
+            returncode = 0
+
+        return P()
+
+    monkeypatch.setattr("services.sheriff_updater.service.subprocess.run", fake_run)
+
+    saved = {}
+
+    def fake_save(v):
+        saved.update(v)
+
+    monkeypatch.setattr("services.sheriff_updater.service.save_applied_versions", fake_save)
+
+    svc = SheriffUpdaterService()
+    svc.repo_root = repo
+
+    out = await svc.run_update({"auto_pull": False}, None, "r4")
+    assert out["ok"] is True
+    assert out["mode"] == "full_update"
+    assert any("pip" in " ".join(c) for c in calls)
+    assert saved == {"agent": "1.0.1", "sheriff": "1.0.0", "secrets": "1.0.0"}

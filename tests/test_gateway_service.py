@@ -243,3 +243,19 @@ async def test_gateway_routes_web_tool():
     # Check routing to web service
     assert svc.web.request.call_args[0][0] == "web.request"
     assert svc.web.request.call_args[0][1]["host"] == "example.com"
+
+@pytest.mark.asyncio
+async def test_gateway_secrets_call_rejects_non_allowlisted_op():
+    svc = SheriffGatewayService()
+    out = await svc.secrets_call({"op": "secrets.delete_everything", "payload": {}}, None, "r1")
+    assert out["ok"] is False
+    assert out["error"] == "op_not_allowed"
+
+
+@pytest.mark.asyncio
+async def test_gateway_secrets_call_allows_expected_op():
+    svc = SheriffGatewayService()
+    svc.secrets.request = AsyncMock(return_value=([], {"ok": True, "result": {"unlocked": True}}))
+    out = await svc.secrets_call({"op": "secrets.is_unlocked", "payload": {}}, None, "r2")
+    assert out["ok"] is True
+    assert out["result"]["unlocked"] is True

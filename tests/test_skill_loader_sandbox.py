@@ -28,16 +28,13 @@ def test_loader_prefers_system_skill(tmp_path):
     assert skills["demo"].source == "system"
 
 
-def test_loader_legacy_skill_py_supported(tmp_path):
+def test_loader_requires_interface_and_implementation(tmp_path):
     user = tmp_path / "skills" / "legacy"
     user.mkdir(parents=True)
-    (user / "skill.py").write_text(
-        "SKILL_NAME='legacy'\nasync def run(payload, emit_event=None):\n    return {'ok':True}\n",
-        encoding="utf-8",
-    )
+    (user / "skill.py").write_text("# ignored in new format\n", encoding="utf-8")
     loader = SkillLoader(user_root=tmp_path / "skills", system_root=tmp_path / "system_skills")
     skills = loader.load()
-    assert "legacy" in skills
+    assert "legacy" not in skills
 
 
 def test_sandboxed_path_blocks_escape(tmp_path):

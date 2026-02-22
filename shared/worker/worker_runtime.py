@@ -19,6 +19,7 @@ class WorkerRuntime:
             user_root=workspace_root / "skills",
             system_root=workspace_root / "system_skills",
         )
+        (workspace_root / "agent_workspace").mkdir(parents=True, exist_ok=True)
         self.skills = self.skill_loader.load()
         self._rpc_clients: dict[str, ProcClient] = {}
 
@@ -155,12 +156,9 @@ class WorkerRuntime:
 
         context = {
             "workspace_root": str(self.workspace_root),
+            "sandbox_root": str((self.workspace_root / "agent_workspace").resolve()),
             "skill_root": str(getattr(loaded, "root", self.workspace_root)),
             "skill_source": getattr(loaded, "source", "user"),
             "sheriff_call": self._sheriff_call,
         }
-        try:
-            return await impl.run(payload, emit_event=emit_event, context=context)
-        except TypeError:
-            # legacy compatibility
-            return await impl.run(payload, emit_event=emit_event)
+        return await impl.run(payload, emit_event=emit_event, context=context)

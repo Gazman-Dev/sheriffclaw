@@ -38,16 +38,12 @@ class SkillLoader:
                 continue
             interface_py = skill_dir / "interface.py"
             impl_py = skill_dir / "implementation.py"
-            legacy_py = skill_dir / "skill.py"
 
-            if interface_py.exists() and impl_py.exists():
-                interface_mod = self._load_module(f"skills_{source}_{skill_dir.name}_iface", interface_py)
-                impl_mod = self._load_module(f"skills_{source}_{skill_dir.name}_impl", impl_py)
-            elif source == "user" and legacy_py.exists():
-                interface_mod = type("_LegacyInterface", (), {"SKILL_NAME": skill_dir.name})
-                impl_mod = self._load_module(f"skills_{source}_{skill_dir.name}_legacy", legacy_py)
-            else:
+            if not (interface_py.exists() and impl_py.exists()):
                 continue
+
+            interface_mod = self._load_module(f"skills_{source}_{skill_dir.name}_iface", interface_py)
+            impl_mod = self._load_module(f"skills_{source}_{skill_dir.name}_impl", impl_py)
             if interface_mod is None or impl_mod is None:
                 continue
             if not hasattr(impl_mod, "run"):

@@ -46,13 +46,14 @@ async def test_worker_skill_execution(monkeypatch):
     runtime = WorkerRuntime()
 
     class MockSkill:
-        async def run(self, payload, emit_event):
-            return {"worked": True}
+        async def run(self, payload, emit_event=None, context=None):
+            return {"worked": True, "sandbox_root": context.get("sandbox_root")}
 
     monkeypatch.setattr(runtime.skill_loader, "load", lambda: {"test_skill": MockSkill()})
 
     result = await runtime.skill_run("test_skill", {}, None)
     assert result["worked"] is True
+    assert "agent_workspace" in result["sandbox_root"]
 
 
 @pytest.mark.asyncio

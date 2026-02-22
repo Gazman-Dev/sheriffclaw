@@ -359,13 +359,14 @@ def cmd_factory_reset(args):
     print("Factory reset complete. All Sheriff/Agent state removed.")
 
 
-def _verify_master_password(mp: str) -> bool:
-    async def _run() -> bool:
-        gw = ProcClient("sheriff-gateway")
-        _, res = await gw.request("gateway.verify_master_password", {"master_password": mp})
-        return bool(res.get("result", {}).get("ok"))
+async def _verify_master_password_async(mp: str) -> bool:
+    gw = ProcClient("sheriff-gateway")
+    _, res = await gw.request("gateway.verify_master_password", {"master_password": mp})
+    return bool(res.get("result", {}).get("ok"))
 
-    return asyncio.run(_run())
+
+def _verify_master_password(mp: str) -> bool:
+    return asyncio.run(_verify_master_password_async(mp))
 
 
 async def _gw_secrets_call(op: str, payload: dict | None = None) -> dict:
@@ -390,8 +391,10 @@ def cmd_update(args):
         if plan.get("needs_master_password"):
             nonlocal mp
             if not mp:
+                if not sys.stdin.isatty():
+                    return False, "Master password required for secrets update. Pass --master-password in non-interactive mode."
                 mp = getpass.getpass("Master password for update (secrets version increased): ")
-            if not _verify_master_password(mp):
+            if not await _verify_master_password_async(mp):
                 return False, "Invalid master password. Update cancelled."
 
         await gw.request("gateway.queue.control", {"pause": True, "reason": "update"})

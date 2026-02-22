@@ -34,6 +34,10 @@
   - added `--force` flag
 - Added gateway proxy op `gateway.verify_master_password` and switched CLI verification to gateway path.
 - Added gateway proxy op `gateway.secrets.call`, then hardened it with an explicit allowlist of permitted `secrets.*` operations.
+- Added updater/ctl robustness fixes discovered during E2E:
+  - updater now resolves `versions.json` from CWD fallback when running from installed package path
+  - `sheriff-ctl update` no longer crashes in non-interactive mode when master password is required; it returns a clear flag/message
+- Added E2E script: `scripts/e2e_update_versioning.sh` covering skip/force/secrets-bump-password behavior.
 - Migrated direct secrets access through gateway for:
   - `ai_tg_llm`
   - `sheriff_requests`
@@ -46,10 +50,6 @@
 
 ## Remaining work
 - Split `gateway.secrets.call` further into dedicated gateway ops per domain (optional stricter shape/validation).
-- Add tests:
-  - update skip when versions unchanged
-  - force update path
-  - secrets-version bump requires password
-  - non-secrets bump does not require password
+- Add/extend E2E coverage around `sheriff-ctl update` in CI.
 - Define operational release process for bumping only relevant component versions.
 - Consider signing/version provenance for safer update decisions.

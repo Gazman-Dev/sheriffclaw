@@ -9,7 +9,14 @@ from shared.component_versions import diff_versions, load_applied_versions, load
 
 class SheriffUpdaterService:
     def __init__(self) -> None:
-        self.repo_root = Path(__file__).resolve().parents[2]
+        file_root = Path(__file__).resolve().parents[2]
+        cwd_root = Path.cwd().resolve()
+        if (file_root / "versions.json").exists():
+            self.repo_root = file_root
+        elif (cwd_root / "versions.json").exists():
+            self.repo_root = cwd_root
+        else:
+            self.repo_root = file_root
 
     def _build_plan(self, *, force: bool = False) -> dict:
         target_versions = load_target_versions(self.repo_root)

@@ -6,6 +6,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     build-essential \
+    bubblewrap \
+    sudo \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace

@@ -80,25 +80,91 @@ ensure_system_dependencies() {
     if is_linux; then
         log "Installing dependencies via system package manager..."
         if command -v apt-get >/dev/null 2>&1; then
-            run_pkg_install git python3 python3-venv python3-pip ca-certificates curl
+            run_pkg_install git python3 python3-venv python3-pip ca-certificates curl sudo
             return 0
         fi
         if command -v dnf >/dev/null 2>&1; then
-            run_pkg_install git python3 python3-pip ca-certificates curl
+            run_pkg_install git python3 python3-pip ca-certificates curl sudo
             return 0
         fi
         if command -v yum >/dev/null 2>&1; then
-            run_pkg_install git python3 python3-pip ca-certificates curl
+            run_pkg_install git python3 python3-pip ca-certificates curl sudo
             return 0
         fi
         if command -v apk >/dev/null 2>&1; then
-            run_pkg_install git python3 py3-pip py3-virtualenv ca-certificates curl
+            run_pkg_install git python3 py3-pip py3-virtualenv ca-certificates curl sudo
             return 0
         fi
     fi
 
     err "Could not auto-install dependencies on this OS/package manager."
     exit 1
+}
+
+ensure_sandbox_dependencies() {
+    if is_macos; then
+        if ! command -v sandbox-exec >/dev/null 2>&1; then
+            err "sandbox-exec is required for strict ai-worker sandbox on macOS."
+            exit 1
+        fi
+        return 0
+    fi
+
+    if is_linux; then
+        if command -v bwrap >/dev/null 2>&1; then
+            return 0
+        fi
+        log "Installing Linux sandbox dependency (bubblewrap)..."
+        if command -v apt-get >/dev/null 2>&1; then
+            run_pkg_install bubblewrap
+            return 0
+        fi
+        if command -v dnf >/dev/null 2>&1; then
+            run_pkg_install bubblewrap
+            return 0
+        fi
+        if command -v yum >/dev/null 2>&1; then
+            run_pkg_install bubblewrap
+            return 0
+        fi
+        if command -v apk >/dev/null 2>&1; then
+            run_pkg_install bubblewrap
+            return 0
+        fi
+        err "Could not install bubblewrap on this Linux distribution."
+        exit 1
+    fi
+}
+
+setup_ai_worker_user() {
+    local user="${SHERIFF_AI_WORKER_USER:-sheriffai}"
+    local strict="${SHERIFF_SETUP_AI_WORKER_USER:-1}"
+    if [ "$strict" = "0" ]; then
+        return 0
+    fi
+
+    if ! is_linux && ! is_macos; then
+        return 0
+    fi
+
+    if id "$user" >/dev/null 2>&1; then
+        log "Using existing ai-worker user: $user"
+    else
+        log "Creating dedicated ai-worker user: $user"
+        if is_linux; then
+            if command -v useradd >/dev/null 2>&1; then
+                if [ "$(id -u)" -eq 0 ]; then
+                    useradd -m -s /usr/sbin/nologin "$user" || true
+                else
+                    sudo useradd -m -s /usr/sbin/nologin "$user" || true
+                fi
+            fi
+        elif is_macos; then
+            warn "Auto-creating users on macOS is not enabled. Create user '$user' manually if needed."
+        fi
+    fi
+
+    "$VENV_DIR/bin/sheriff-ctl" sandbox --user "$user" --deny-net || true
 }
 
 acquire_lock() {
@@ -245,9 +311,11 @@ echo -e "${BLUE}=========================================${NC}"
 
 acquire_lock
 ensure_system_dependencies
+ensure_sandbox_dependencies
 sync_source
 setup_venv_and_install
 setup_alias
+setup_ai_worker_user
 
 if [ "${SHERIFF_START_DAEMONS:-0}" = "1" ]; then
     log "Starting services..."

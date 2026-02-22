@@ -25,6 +25,17 @@ def test_service_command_linux_bwrap(monkeypatch, tmp_path):
     assert cmd[0].endswith("bwrap")
 
 
+def test_service_command_strict_missing_runtime_raises(monkeypatch):
+    monkeypatch.setattr("services.sheriff_ctl.ctl.platform.system", lambda: "Linux")
+    monkeypatch.setattr("services.sheriff_ctl.ctl.shutil.which", lambda x: None)
+    monkeypatch.setenv("SHERIFF_STRICT_SANDBOX", "1")
+    try:
+        ctl._service_command("ai-worker")
+        assert False, "expected RuntimeError"
+    except RuntimeError:
+        pass
+
+
 def test_service_command_non_ai_worker_plain(monkeypatch):
     monkeypatch.setattr("services.sheriff_ctl.ctl.platform.system", lambda: "Darwin")
     monkeypatch.setattr("services.sheriff_ctl.ctl.shutil.which", lambda x: "/usr/bin/sandbox-exec")

@@ -47,3 +47,10 @@ def test_update_parses():
     args = parser.parse_args(["update", "--master-password", "x", "--no-pull"])
     assert args.master_password == "x"
     assert args.no_pull is True
+
+
+def test_sandbox_parses():
+    parser = build_parser()
+    args = parser.parse_args(["sandbox", "--user", "agentuser", "--deny-net"])
+    assert args.user == "agentuser"
+    assert args.allow_net is False

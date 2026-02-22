@@ -95,6 +95,7 @@ def _ai_worker_sandbox_profile() -> Path:
     system_skills = workspace / "system_skills"
     skills = workspace / "skills"
     agent_ws.mkdir(parents=True, exist_ok=True)
+    net_rule = "(allow network-outbound)" if _network_allowed_for_ai_worker() else ""
     profile = f'''(version 1)
 (deny default)
 (import "system.sb")
@@ -105,7 +106,7 @@ def _ai_worker_sandbox_profile() -> Path:
 (allow file-write* (subpath "{agent_ws}"))
 (allow file-write* (subpath "{gw_root() / 'logs'}"))
 (allow file-write* (subpath "{llm_root() / 'logs'}"))
-(allow network-outbound)
+{net_rule}
 '''
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(profile, encoding="utf-8")
@@ -128,7 +129,6 @@ def _linux_sandbox_profile() -> Path:
     args = [
         "--die-with-parent",
         "--unshare-all",
-        "--share-net",
         "--ro-bind", "/usr", "/usr",
         "--ro-bind", "/bin", "/bin",
         "--ro-bind", "/lib", "/lib",
@@ -145,25 +145,91 @@ def _linux_sandbox_profile() -> Path:
         "--bind", str(logs_llm), str(logs_llm),
         "--chdir", str(workspace),
     ]
+    if _network_allowed_for_ai_worker():
+        args.insert(2, "--share-net")
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("\n".join(args), encoding="utf-8")
     return p
 
 
+def _strict_sandbox_required() -> bool:
+    v = os.environ.get("SHERIFF_STRICT_SANDBOX", "1").strip().lower()
+    return v not in {"0", "false", "no"}
+
+
+def _ai_worker_user() -> str:
+    env_user = os.environ.get("SHERIFF_AI_WORKER_USER", "").strip()
+    if env_user:
+        return env_user
+    p = gw_root() / "state" / "ai_worker_user.txt"
+    if p.exists():
+        return p.read_text(encoding="utf-8").strip()
+    return ""
+
+
+def _network_allowed_for_ai_worker() -> bool:
+    p = gw_root() / "state" / "ai_worker_allow_net.txt"
+    if p.exists():
+        v = p.read_text(encoding="utf-8").strip().lower()
+        return v in {"1", "true", "yes"}
+    v = os.environ.get("SHERIFF_AI_WORKER_ALLOW_NET", "1").strip().lower()
+    return v not in {"0", "false", "no"}
+
+
+def _set_ai_worker_user(user: str | None) -> None:
+    p = gw_root() / "state" / "ai_worker_user.txt"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if user:
+        p.write_text(user.strip(), encoding="utf-8")
+    else:
+        p.unlink(missing_ok=True)
+
+
+def _set_ai_worker_allow_net(allow: bool) -> None:
+    p = gw_root() / "state" / "ai_worker_allow_net.txt"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("1" if allow else "0", encoding="utf-8")
+
+
+def cmd_sandbox(args):
+    if args.user is not None:
+        _set_ai_worker_user(args.user if args.user else None)
+    if args.allow_net is not None:
+        _set_ai_worker_allow_net(bool(args.allow_net))
+
+    current_user = _ai_worker_user()
+    print(f"ai-worker user: {current_user or '(current user)'}")
+    print(f"ai-worker network: {'allowed' if _network_allowed_for_ai_worker() else 'disabled'}")
+
+
 def _service_command(service: str) -> list[str]:
     base = [_resolve_service_binary(service)]
     if service == "ai-worker":
+        sandboxed = None
         if platform.system() == "Darwin":
             sb = shutil.which("sandbox-exec")
             if sb:
                 profile = _ai_worker_sandbox_profile()
-                return [sb, "-f", str(profile), *base]
-        if platform.system() == "Linux":
+                sandboxed = [sb, "-f", str(profile), *base]
+        elif platform.system() == "Linux":
             bwrap = shutil.which("bwrap")
             if bwrap:
                 profile = _linux_sandbox_profile()
                 args = [ln.strip() for ln in profile.read_text(encoding="utf-8").splitlines() if ln.strip()]
-                return [bwrap, *args, *base]
+                sandboxed = [bwrap, *args, *base]
+
+        if sandboxed is None:
+            if _strict_sandbox_required():
+                raise RuntimeError("strict sandbox enabled: ai-worker sandbox runtime missing (need sandbox-exec or bwrap)")
+            sandboxed = base
+
+        user = _ai_worker_user()
+        if user and platform.system() in {"Darwin", "Linux"}:
+            sudo = shutil.which("sudo")
+            if sudo:
+                sandboxed = [sudo, "-n", "-u", user, *sandboxed]
+
+        return sandboxed
     return base
 
 
@@ -883,6 +949,12 @@ def build_parser() -> argparse.ArgumentParser:
     upd.add_argument("--master-password", default=None)
     upd.add_argument("--no-pull", action="store_true", help="Skip git pull and only reinstall current source")
     upd.set_defaults(func=cmd_update)
+
+    sbox = sub.add_parser("sandbox")
+    sbox.add_argument("--user", default=None, help="Run ai-worker as this OS user (empty to clear)")
+    sbox.add_argument("--allow-net", action="store_true", default=None)
+    sbox.add_argument("--deny-net", action="store_false", dest="allow_net")
+    sbox.set_defaults(func=cmd_sandbox)
 
     cfg = sub.add_parser("configure-llm")
     cfg.add_argument("--provider", default="openai-codex")

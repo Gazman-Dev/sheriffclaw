@@ -206,6 +206,11 @@ class SheriffGatewayService:
         pending = sum(len(v) for v in self._queue.values())
         return {"paused": self._queue_paused, "pause_reason": self._queue_pause_reason, "processing": len(self._processing), "pending": pending}
 
+    async def verify_master_password(self, payload, emit_event, req_id):
+        master_password = payload.get("master_password") or ""
+        _, res = await self.secrets.request("secrets.verify_master_password", {"master_password": master_password})
+        return {"ok": bool(res.get("result", {}).get("ok"))}
+
     async def notify_request_resolved(self, payload, emit_event, req_id):
         if not self.sessions:
             return {"status": "no_session"}
@@ -227,4 +232,5 @@ class SheriffGatewayService:
             "gateway.notify_request_resolved": self.notify_request_resolved,
             "gateway.queue.control": self.queue_control,
             "gateway.queue.status": self.queue_status,
+            "gateway.verify_master_password": self.verify_master_password,
         }

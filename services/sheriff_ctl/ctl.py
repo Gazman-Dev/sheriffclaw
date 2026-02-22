@@ -361,29 +361,33 @@ def cmd_factory_reset(args):
 
 def _verify_master_password(mp: str) -> bool:
     async def _run() -> bool:
-        cli = ProcClient("sheriff-secrets")
-        _, res = await cli.request("secrets.verify_master_password", {"master_password": mp})
+        gw = ProcClient("sheriff-gateway")
+        _, res = await gw.request("gateway.verify_master_password", {"master_password": mp})
         return bool(res.get("result", {}).get("ok"))
 
     return asyncio.run(_run())
 
 
 def cmd_update(args):
-    mp = getattr(args, "master_password", None)
-    if not mp:
-        mp = getpass.getpass("Master password for update: ")
-
-    if not _verify_master_password(mp):
-        print("Invalid master password. Update cancelled.")
-        return
-
     _start_service("sheriff-secrets")
     _start_service("sheriff-gateway")
     _start_service("sheriff-updater")
 
-    async def _run_update() -> bool:
+    mp = getattr(args, "master_password", None)
+
+    async def _run_update() -> tuple[bool, str]:
         gw = ProcClient("sheriff-gateway")
         updater = ProcClient("sheriff-updater")
+
+        _, plan_res = await updater.request("updater.plan", {"force": bool(getattr(args, "force", False))})
+        plan = plan_res.get("result", {})
+        if plan.get("needs_master_password"):
+            nonlocal mp
+            if not mp:
+                mp = getpass.getpass("Master password for update (secrets version increased): ")
+            if not _verify_master_password(mp):
+                return False, "Invalid master password. Update cancelled."
+
         await gw.request("gateway.queue.control", {"pause": True, "reason": "update"})
         try:
             # wait for in-flight agent work to finish
@@ -395,13 +399,27 @@ def cmd_update(args):
                 import asyncio as _a
                 await _a.sleep(0.5)
 
-            _, res = await updater.request("updater.run", {"master_password": mp, "auto_pull": not getattr(args, "no_pull", False)})
-            return bool(res.get("result", {}).get("ok"))
+            _, res = await updater.request(
+                "updater.run",
+                {
+                    "master_password": mp,
+                    "auto_pull": not getattr(args, "no_pull", False),
+                    "force": bool(getattr(args, "force", False)),
+                },
+            )
+            result = res.get("result", {})
+            if result.get("ok") and result.get("mode") == "skipped":
+                return True, "No component version increased; update skipped. Use --force to reinstall anyway."
+            return bool(result.get("ok")), ""
         finally:
             await gw.request("gateway.queue.control", {"pause": False})
 
-    ok = asyncio.run(_run_update())
+    ok, note = asyncio.run(_run_update())
+    if note:
+        print(note)
     if ok:
+        if "skipped" in note.lower():
+            return
         print("Restarting services after update...")
         cmd_stop(argparse.Namespace())
         cmd_start(argparse.Namespace())
@@ -985,6 +1003,7 @@ def build_parser() -> argparse.ArgumentParser:
     upd = sub.add_parser("update")
     upd.add_argument("--master-password", default=None)
     upd.add_argument("--no-pull", action="store_true", help="Skip git pull and only reinstall current source")
+    upd.add_argument("--force", action="store_true", help="Force reinstall even if component versions did not increase")
     upd.set_defaults(func=cmd_update)
 
     sbox = sub.add_parser("sandbox")

@@ -144,6 +144,59 @@ async def test_gateway_locked_vault_returns_error_instead_of_stub_echo():
 
 
 @pytest.mark.asyncio
+async def test_gateway_unlocks_with_supplied_master_password():
+    svc = SheriffGatewayService()
+    svc.ai = MockProcClient("ai-worker")
+
+    async def ai_stream():
+        yield {"event": "assistant.delta", "payload": {"text": "hi"}}
+
+    async def mock_ai_request(op, payload, stream_events=False):
+        if op == "agent.session.open":
+            return [], {"result": {"session_handle": "sess-1"}}
+        if op == "agent.session.user_message":
+            return ai_stream(), AsyncMock()
+        return [], {"result": {}}
+
+    svc.ai.request = AsyncMock(side_effect=mock_ai_request)
+
+    state = {"unlocked": False}
+
+    async def mock_secrets_request(op, payload, stream_events=False):
+        if op == "secrets.is_unlocked":
+            return [], {"ok": True, "result": {"unlocked": state["unlocked"]}}
+        if op == "secrets.unlock":
+            state["unlocked"] = payload.get("master_password") == "pw"
+            return [], {"ok": True, "result": {"ok": state["unlocked"]}}
+        if op == "secrets.get_llm_provider":
+            return [], {"ok": True, "result": {"provider": "stub"}}
+        if op == "secrets.get_llm_api_key":
+            return [], {"ok": True, "result": {"api_key": ""}}
+        return [], {"ok": True, "result": {}}
+
+    svc.secrets.request = AsyncMock(side_effect=mock_secrets_request)
+
+    events = []
+
+    async def emit(e, p):
+        events.append((e, p))
+
+    out = await svc.handle_user_message(
+        {
+            "channel": "cli",
+            "principal_external_id": "u1",
+            "text": "hello",
+            "master_password": "pw",
+        },
+        emit,
+        "req-unlock",
+    )
+
+    assert out["status"] == "done"
+    assert ("assistant.delta", {"text": "hi"}) in events
+
+
+@pytest.mark.asyncio
 async def test_gateway_routes_web_tool():
     svc = SheriffGatewayService()
     svc.ai = MockProcClient("ai-worker")

@@ -848,11 +848,15 @@ def cmd_configure_llm(args):
 def cmd_chat(args):
     principal = args.principal
     model_ref = args.model_ref
+    chat_master_password = None
 
     async def _send_bot(gateway: ProcClient, text: str) -> float:
+        payload = {"channel": "cli", "principal_external_id": principal, "text": text, "model_ref": model_ref}
+        if chat_master_password:
+            payload["master_password"] = chat_master_password
         stream, final = await gateway.request(
             "gateway.handle_user_message",
-            {"channel": "cli", "principal_external_id": principal, "text": text, "model_ref": model_ref},
+            payload,
             stream_events=True,
         )
         bot_printed = False
@@ -882,6 +886,7 @@ def cmd_chat(args):
         return time.time()
 
     async def _run():
+        nonlocal chat_master_password
         # Keep stateful chat stable by ensuring core daemons are running.
         core = ["sheriff-secrets", "sheriff-requests", "sheriff-gateway", "sheriff-cli-gate", "ai-worker"]
         for svc in core:
@@ -917,6 +922,8 @@ def cmd_chat(args):
                 print("bye")
                 return
             if text.startswith("/"):
+                if text.lower().startswith("/unlock "):
+                    chat_master_password = text.split(" ", 1)[1].strip() or None
                 await _send_sheriff(cli_gate, text)
             else:
                 await _send_bot(gateway, text)

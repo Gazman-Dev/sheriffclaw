@@ -882,6 +882,11 @@ def cmd_chat(args):
         return time.time()
 
     async def _run():
+        # Keep stateful chat stable by ensuring core daemons are running.
+        core = ["sheriff-secrets", "sheriff-requests", "sheriff-gateway", "sheriff-cli-gate", "ai-worker"]
+        for svc in core:
+            _start_service(svc)
+
         gateway = ProcClient("sheriff-gateway")
         cli_gate = ProcClient("sheriff-cli-gate")
 

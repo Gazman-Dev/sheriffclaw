@@ -238,7 +238,7 @@ run_onboarding_if_needed() {
     fi
 
     local interactive=0
-    if [ "${SHERIFF_NON_INTERACTIVE:-0}" != "1" ] && { [ -t 0 ] || [ -r /dev/tty ]; }; then
+    if [ "${SHERIFF_NON_INTERACTIVE:-0}" != "1" ] && { [ -t 0 ] || tty -s; }; then
         interactive=1
     fi
 

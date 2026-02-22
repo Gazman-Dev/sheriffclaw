@@ -5,6 +5,7 @@ import asyncio
 import getpass
 import json
 import os
+import platform
 import shutil
 import signal
 import subprocess
@@ -87,6 +88,40 @@ def _resolve_service_binary(service: str) -> str:
     return str(venv_bin) if venv_bin.exists() else service
 
 
+def _ai_worker_sandbox_profile() -> Path:
+    p = gw_root() / "state" / "ai_worker.sb"
+    workspace = gw_root().parent
+    agent_ws = workspace / "agent_workspace"
+    system_skills = workspace / "system_skills"
+    skills = workspace / "skills"
+    agent_ws.mkdir(parents=True, exist_ok=True)
+    profile = f'''(version 1)
+(deny default)
+(import "system.sb")
+(allow process*)
+(allow file-read* (subpath "{workspace}"))
+(allow file-read* (subpath "{system_skills}"))
+(allow file-read* (subpath "{skills}"))
+(allow file-write* (subpath "{agent_ws}"))
+(allow file-write* (subpath "{gw_root() / 'logs'}"))
+(allow file-write* (subpath "{llm_root() / 'logs'}"))
+(allow network-outbound)
+'''
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(profile, encoding="utf-8")
+    return p
+
+
+def _service_command(service: str) -> list[str]:
+    base = [_resolve_service_binary(service)]
+    if service == "ai-worker" and platform.system() == "Darwin":
+        sb = shutil.which("sandbox-exec")
+        if sb:
+            profile = _ai_worker_sandbox_profile()
+            return [sb, "-f", str(profile), *base]
+    return base
+
+
 def _start_service(service: str) -> None:
     pid = _read_pid(service)
     if pid and _alive(pid):
@@ -94,7 +129,7 @@ def _start_service(service: str) -> None:
     out_path, err_path = _log_paths(service)
     out = out_path.open("a", encoding="utf-8")
     err = err_path.open("a", encoding="utf-8")
-    proc = subprocess.Popen([_resolve_service_binary(service)], stdout=out, stderr=err)  # noqa: S603
+    proc = subprocess.Popen(_service_command(service), stdout=out, stderr=err)  # noqa: S603
     _pid_path(service).write_text(str(proc.pid), encoding="utf-8")
 
 

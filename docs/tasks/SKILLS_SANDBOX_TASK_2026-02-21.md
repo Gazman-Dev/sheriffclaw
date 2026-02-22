@@ -9,4 +9,5 @@ Source: user request.
 - [x] Remove legacy `skill.py` fallback (new style only)
 - [x] Add worker path sandbox helper for payload paths
 - [x] Wire sheriff-call helper into skills context
-- [ ] OS-level runtime sandboxing (separate user/container) (future)
+- [x] Add platform sandbox wrapper for ai-worker process launch (Darwin `sandbox-exec`)
+- [ ] OS-level runtime sandboxing (separate user/container/jail) (future hardening)

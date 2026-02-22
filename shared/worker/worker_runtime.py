@@ -12,7 +12,12 @@ class WorkerRuntime:
     def __init__(self):
         self.sessions: dict[str, list[dict]] = {}
         self.providers: dict[str, object] = {}
-        self.skill_loader = SkillLoader(Path.cwd() / "skills")
+        workspace_root = Path.cwd()
+        self.workspace_root = workspace_root
+        self.skill_loader = SkillLoader(
+            user_root=workspace_root / "skills",
+            system_root=workspace_root / "system_skills",
+        )
         self.skills = self.skill_loader.load()
 
     @staticmethod
@@ -115,9 +120,30 @@ class WorkerRuntime:
         self.skills = self.skill_loader.load()
         return sorted(self.skills.keys())
 
+    @staticmethod
+    def _sandboxed_path(base: Path, raw: str) -> Path:
+        p = (base / raw).resolve()
+        if not str(p).startswith(str(base.resolve())):
+            raise ValueError("path outside sandbox")
+        return p
+
     async def skill_run(self, name: str, payload: dict, emit_event) -> dict:
         self.skills = self.skill_loader.load()
-        module = self.skills.get(name)
-        if not module:
+        loaded = self.skills.get(name)
+        if not loaded:
             raise ValueError(f"unknown skill: {name}")
-        return await module.run(payload, emit_event=emit_event)
+
+        impl = loaded.implementation_module
+        if "path" in payload and isinstance(payload["path"], str):
+            payload = {**payload, "path": str(self._sandboxed_path(self.workspace_root, payload["path"]))}
+
+        context = {
+            "workspace_root": str(self.workspace_root),
+            "skill_root": str(loaded.root),
+            "skill_source": loaded.source,
+        }
+        try:
+            return await impl.run(payload, emit_event=emit_event, context=context)
+        except TypeError:
+            # legacy compatibility
+            return await impl.run(payload, emit_event=emit_event)

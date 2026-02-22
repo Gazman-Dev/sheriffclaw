@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import inspect
 import json
+import uuid
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 
 from shared.identity import principal_id_for_channel
@@ -20,6 +22,11 @@ class SheriffGatewayService:
         self.requests = ProcClient("sheriff-requests")
         self.tg_gate = ProcClient("sheriff-tg-gate")
         self.sessions: dict[str, str] = {}
+        self._queue = defaultdict(deque)
+        self._processing = set()
+        self._queue_cond = None
+        self._queue_paused = False
+        self._queue_pause_reason = ""
 
     def _debug_mode_enabled(self) -> bool:
         p = gw_root() / "state" / "debug_mode.json"
@@ -42,9 +49,14 @@ class SheriffGatewayService:
         p.write_text(("\n".join(lines[1:]) + ("\n" if len(lines) > 1 else "")), encoding="utf-8")
         return json.loads(first)
 
-    async def handle_user_message(self, payload, emit_event, req_id):
-        channel = payload.get("channel", "cli")
-        principal_id = principal_id_for_channel(channel, payload["principal_external_id"])
+    async def _ensure_queue_cond(self):
+        import asyncio
+
+        if self._queue_cond is None:
+            self._queue_cond = asyncio.Condition()
+        return self._queue_cond
+
+    async def _process_message(self, principal_id: str, payload, emit_event):
         text = payload.get("text", "")
         session = self.sessions.get(principal_id)
         if not session:
@@ -71,15 +83,7 @@ class SheriffGatewayService:
                         exp_dt = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00")).astimezone(timezone.utc)
                         if exp_dt <= datetime.now(timezone.utc):
                             tok = refresh_access_token(refresh)
-                            auth_obj.update(
-                                {
-                                    "access_token": tok.access_token,
-                                    "refresh_token": tok.refresh_token,
-                                    "id_token": tok.id_token,
-                                    "obtained_at": tok.obtained_at,
-                                    "expires_at": tok.expires_at,
-                                }
-                            )
+                            auth_obj.update({"access_token": tok.access_token, "refresh_token": tok.refresh_token, "id_token": tok.id_token, "obtained_at": tok.obtained_at, "expires_at": tok.expires_at})
                             await self.secrets.request("secrets.set_llm_auth", {"auth": auth_obj})
                             api_key = auth_obj.get("access_token") or ""
                     except Exception:
@@ -97,31 +101,45 @@ class SheriffGatewayService:
             append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": out_text})
             return {"status": "debug", "session_handle": session}
 
-        stream, final = await self.ai.request(
-            "agent.session.user_message",
-            {
-                "session_handle": session,
-                "text": text,
-                "model_ref": payload.get("model_ref"),
-                "provider_name": provider_name,
-                "api_key": api_key,
-                "base_url": base_url,
-            },
-            stream_events=True,
-        )
+        stream, final = await self.ai.request("agent.session.user_message", {"session_handle": session, "text": text, "model_ref": payload.get("model_ref"), "provider_name": provider_name, "api_key": api_key, "base_url": base_url}, stream_events=True)
         async for frame in stream:
             if frame["event"] == "tool.call":
                 result = await self._route_tool(principal_id, frame.get("payload", {}))
                 await emit_event("tool.result", result)
-                await self.ai.request(
-                    "agent.session.tool_result",
-                    {"session_handle": session, "tool_name": frame["payload"].get("tool_name", "tool"), "result": result},
-                )
+                await self.ai.request("agent.session.tool_result", {"session_handle": session, "tool_name": frame["payload"].get("tool_name", "tool"), "result": result})
                 continue
             await emit_event(frame["event"], frame.get("payload", {}))
         if inspect.isawaitable(final):
             await final
         return {"status": "done", "session_handle": session}
+
+    async def handle_user_message(self, payload, emit_event, req_id):
+        channel = payload.get("channel", "cli")
+        principal_id = principal_id_for_channel(channel, payload["principal_external_id"])
+        queue_id = str(uuid.uuid4())
+        append_jsonl(gw_root() / "state" / "message_queue.jsonl", {"event": "enqueue", "principal_id": principal_id, "queue_id": queue_id, "text": payload.get("text", "")})
+
+        cond = await self._ensure_queue_cond()
+        async with cond:
+            self._queue[principal_id].append(queue_id)
+            while True:
+                is_head = self._queue[principal_id] and self._queue[principal_id][0] == queue_id
+                busy = principal_id in self._processing
+                if is_head and not busy and not self._queue_paused:
+                    self._processing.add(principal_id)
+                    break
+                await cond.wait()
+
+        try:
+            out = await self._process_message(principal_id, payload, emit_event)
+            append_jsonl(gw_root() / "state" / "message_queue.jsonl", {"event": "dequeue", "principal_id": principal_id, "queue_id": queue_id})
+            return out
+        finally:
+            async with cond:
+                if self._queue[principal_id] and self._queue[principal_id][0] == queue_id:
+                    self._queue[principal_id].popleft()
+                self._processing.discard(principal_id)
+                cond.notify_all()
 
     async def _route_tool(self, principal_id: str, tool_call: dict) -> dict:
         tool_name = tool_call.get("tool_name")
@@ -144,6 +162,20 @@ class SheriffGatewayService:
             return res["result"]
         return {"status": "error", "error": f"unsupported tool {tool_name}"}
 
+    async def queue_control(self, payload, emit_event, req_id):
+        cond = await self._ensure_queue_cond()
+        pause = bool(payload.get("pause", False))
+        reason = payload.get("reason", "")
+        async with cond:
+            self._queue_paused = pause
+            self._queue_pause_reason = reason if pause else ""
+            cond.notify_all()
+        return {"ok": True, "paused": self._queue_paused, "reason": self._queue_pause_reason}
+
+    async def queue_status(self, payload, emit_event, req_id):
+        pending = sum(len(v) for v in self._queue.values())
+        return {"paused": self._queue_paused, "pause_reason": self._queue_pause_reason, "processing": len(self._processing), "pending": pending}
+
     async def notify_request_resolved(self, payload, emit_event, req_id):
         if not self.sessions:
             return {"status": "no_session"}
@@ -163,4 +195,6 @@ class SheriffGatewayService:
         return {
             "gateway.handle_user_message": self.handle_user_message,
             "gateway.notify_request_resolved": self.notify_request_resolved,
+            "gateway.queue.control": self.queue_control,
+            "gateway.queue.status": self.queue_status,
         }

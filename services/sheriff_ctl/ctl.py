@@ -213,12 +213,27 @@ def cmd_update(args):
         return
 
     _start_service("sheriff-secrets")
+    _start_service("sheriff-gateway")
     _start_service("sheriff-updater")
 
     async def _run_update() -> bool:
-        cli = ProcClient("sheriff-updater")
-        _, res = await cli.request("updater.run", {"master_password": mp, "auto_pull": not getattr(args, "no_pull", False)})
-        return bool(res.get("result", {}).get("ok"))
+        gw = ProcClient("sheriff-gateway")
+        updater = ProcClient("sheriff-updater")
+        await gw.request("gateway.queue.control", {"pause": True, "reason": "update"})
+        try:
+            # wait for in-flight agent work to finish
+            for _ in range(120):
+                _, st = await gw.request("gateway.queue.status", {})
+                r = st.get("result", {})
+                if int(r.get("processing", 0)) == 0:
+                    break
+                import asyncio as _a
+                await _a.sleep(0.5)
+
+            _, res = await updater.request("updater.run", {"master_password": mp, "auto_pull": not getattr(args, "no_pull", False)})
+            return bool(res.get("result", {}).get("ok"))
+        finally:
+            await gw.request("gateway.queue.control", {"pause": False})
 
     ok = asyncio.run(_run_update())
     if ok:

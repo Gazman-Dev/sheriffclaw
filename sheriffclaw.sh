@@ -201,6 +201,9 @@ setup_venv_and_install() {
     # shellcheck disable=SC1090
     source "$VENV_DIR/bin/activate"
 
+    # Suppress noisy urllib3 LibreSSL warning in installer UX.
+    export PYTHONWARNINGS="ignore::urllib3.exceptions.NotOpenSSLWarning"
+
     log "Installing SheriffClaw package..."
     python -m pip install --upgrade pip --quiet
     python -m pip install "$SOURCE_DIR" --quiet
@@ -248,7 +251,7 @@ run_onboarding_if_needed() {
     fi
 
     local interactive=0
-    if [ "${SHERIFF_NON_INTERACTIVE:-0}" != "1" ] && { [ -t 0 ] || tty -s; }; then
+    if [ "${SHERIFF_NON_INTERACTIVE:-0}" != "1" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
         interactive=1
     fi
 

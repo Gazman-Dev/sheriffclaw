@@ -229,12 +229,22 @@ setup_alias() {
 }
 
 run_onboarding_if_needed() {
-    local master_file="$INSTALL_DIR/gw/state/master.json"
-    local secrets_file="$INSTALL_DIR/gw/state/secrets.enc"
+    local state_dir="$INSTALL_DIR/gw/state"
 
     local existing_install=0
-    if [ -f "$master_file" ] && [ -f "$secrets_file" ]; then
-        existing_install=1
+    if [ -d "$state_dir" ]; then
+        # Legacy vault markers (pre-sqlite)
+        if [ -f "$state_dir/master.json" ] || [ -f "$state_dir/secrets.enc" ]; then
+            existing_install=1
+        fi
+        # Current vault marker (sqlite-backed)
+        if [ -f "$state_dir/secrets.db" ]; then
+            existing_install=1
+        fi
+        # Fallback: any persisted runtime state means this is not a first install
+        if [ "$existing_install" = "0" ] && [ -n "$(find "$state_dir" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null || true)" ]; then
+            existing_install=1
+        fi
     fi
 
     local interactive=0

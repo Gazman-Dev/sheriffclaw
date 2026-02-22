@@ -65,9 +65,17 @@ class SheriffCliGateService:
         if cmd == "unlock":
             if not args:
                 return {"kind": "error", "message": "Usage: /unlock <master_password>"}
-            _, res = await self.requests.request("requests.submit_master_password", {"master_password": " ".join(args)})
+            mp = " ".join(args)
+            _, res = await self.secrets.request("secrets.unlock", {"master_password": mp})
             ok = bool(res.get("result", {}).get("ok"))
-            return {"kind": "sheriff", "message": "Vault unlocked." if ok else "Unlock failed."}
+            if ok:
+                # compatibility: notify via requests channel so existing UX hooks continue to work
+                try:
+                    await self.requests.request("requests.submit_master_password", {"master_password": mp})
+                except Exception:
+                    pass
+                return {"kind": "sheriff", "message": "Vault unlocked."}
+            return {"kind": "sheriff", "message": "Unlock failed."}
 
         if cmd == "secret":
             if len(args) < 2:

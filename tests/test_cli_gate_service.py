@@ -56,14 +56,17 @@ async def test_unlock_command_usage_error():
 @pytest.mark.asyncio
 async def test_unlock_command_success_and_failure():
     svc = SheriffCliGateService()
+    svc.secrets = AsyncMock()
     svc.requests = AsyncMock()
-    svc.requests.request.side_effect = [
+    svc.secrets.request.side_effect = [
         (None, {"result": {"ok": False}}),
         (None, {"result": {"ok": True}}),
     ]
+    svc.requests.request.return_value = (None, {"result": {"ok": True}})
 
     bad = await svc.handle_message({"text": "/unlock wrong"}, None, "r1")
     ok = await svc.handle_message({"text": "/unlock right"}, None, "r2")
 
     assert bad["kind"] == "sheriff" and "failed" in bad["message"].lower()
     assert ok["kind"] == "sheriff" and "unlocked" in ok["message"].lower()
+    svc.secrets.request.assert_any_call("secrets.unlock", {"master_password": "right"})

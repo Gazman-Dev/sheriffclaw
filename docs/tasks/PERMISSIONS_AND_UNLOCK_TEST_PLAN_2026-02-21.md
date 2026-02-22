@@ -27,6 +27,7 @@ Validate end-to-end behavior for:
 - [x] master-policy gate behavior (`boot_check` => required/ok)
 - [x] submit master password wrong/correct transitions
 - [x] integrated into scenario runner (`permissions_unlock`)
+- [x] telegram flow simulation via debug + gate event log assertions
 - [ ] real Telegram delivery loop (requires external bot env)
 
 ## Reporting format

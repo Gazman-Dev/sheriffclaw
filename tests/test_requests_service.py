@@ -192,3 +192,26 @@ async def test_submit_master_password_failure_no_notify(requests_svc):
 
     notify_ops = [c[0][0] for c in requests_svc.tg_gate.request.call_args_list]
     assert "gate.notify_master_password_accepted" not in notify_ops
+
+
+@pytest.mark.asyncio
+async def test_boot_check_when_already_unlocked_returns_ok_without_notify(requests_svc):
+    requests_svc.secrets.request.return_value = (None, {"result": {"unlocked": True}})
+    out = await requests_svc.boot_check({}, None, "r1")
+    assert out["status"] == "ok"
+    notify_ops = [c[0][0] for c in requests_svc.tg_gate.request.call_args_list]
+    assert "gate.notify_master_password_required" not in notify_ops
+
+
+@pytest.mark.asyncio
+async def test_submit_master_password_success_notifies_gateway_payload(requests_svc):
+    requests_svc.secrets.request.return_value = (None, {"result": {"ok": True}})
+    await requests_svc.submit_master_password({"master_password": "masterpass"}, None, "r1")
+
+    found = False
+    for call in requests_svc.gateway.request.call_args_list:
+        op, payload = call[0][0], call[0][1]
+        if op == "gateway.notify_request_resolved" and payload.get("type") == "master_password":
+            found = True
+            assert payload.get("status") == "approved"
+    assert found

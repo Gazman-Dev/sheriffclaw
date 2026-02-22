@@ -19,6 +19,9 @@ log() { echo -e "${GREEN}[+] $*${NC}"; }
 warn() { echo -e "${YELLOW}[!] $*${NC}"; }
 err() { echo -e "${RED}[!] $*${NC}"; }
 
+# Keep installer output clean for end-users.
+export PYTHONWARNINGS="ignore"
+
 lower() {
     printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
@@ -317,24 +320,48 @@ run_onboarding_if_needed() {
         fi
 
         if [ -t 0 ]; then
-            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding "${ONBOARD_ARGS[@]}"; then
-                echo -e "${YELLOW}Onboarding exited.${NC}"
-                read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI
-                RI_LC="$(lower "$RI")"
-                if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
-                    "$VENV_DIR/bin/sheriff-ctl" factory-reset
+            if [ ${#ONBOARD_ARGS[@]} -gt 0 ]; then
+                if ! "$VENV_DIR/bin/sheriff-ctl" onboarding "${ONBOARD_ARGS[@]}"; then
+                    echo -e "${YELLOW}Onboarding exited.${NC}"
+                    read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI
+                    RI_LC="$(lower "$RI")"
+                    if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
+                        "$VENV_DIR/bin/sheriff-ctl" factory-reset
+                    fi
+                    return 1
                 fi
-                return 1
+            else
+                if ! "$VENV_DIR/bin/sheriff-ctl" onboarding; then
+                    echo -e "${YELLOW}Onboarding exited.${NC}"
+                    read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI
+                    RI_LC="$(lower "$RI")"
+                    if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
+                        "$VENV_DIR/bin/sheriff-ctl" factory-reset
+                    fi
+                    return 1
+                fi
             fi
         else
-            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding "${ONBOARD_ARGS[@]}" < /dev/tty > /dev/tty 2>&1; then
-                echo -e "${YELLOW}Onboarding exited.${NC}"
-                read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI < /dev/tty
-                RI_LC="$(lower "$RI")"
-                if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
-                    "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" factory-reset
+            if [ ${#ONBOARD_ARGS[@]} -gt 0 ]; then
+                if ! "$VENV_DIR/bin/sheriff-ctl" onboarding "${ONBOARD_ARGS[@]}" < /dev/tty > /dev/tty 2>&1; then
+                    echo -e "${YELLOW}Onboarding exited.${NC}"
+                    read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI < /dev/tty
+                    RI_LC="$(lower "$RI")"
+                    if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
+                        "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" factory-reset
+                    fi
+                    return 1
                 fi
-                return 1
+            else
+                if ! "$VENV_DIR/bin/sheriff-ctl" onboarding < /dev/tty > /dev/tty 2>&1; then
+                    echo -e "${YELLOW}Onboarding exited.${NC}"
+                    read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI < /dev/tty
+                    RI_LC="$(lower "$RI")"
+                    if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
+                        "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" factory-reset
+                    fi
+                    return 1
+                fi
             fi
         fi
         return 0

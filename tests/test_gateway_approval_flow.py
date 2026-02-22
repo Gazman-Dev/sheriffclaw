@@ -7,6 +7,7 @@ from services.sheriff_gateway.service import SheriffGatewayService
 async def test_gateway_continues_after_tool_needs_approval():
     svc = SheriffGatewayService()
     svc.ai = AsyncMock()
+    svc.secrets.request = AsyncMock(return_value=([], {"ok": True, "result": {"unlocked": True}}))
     svc._route_tool = AsyncMock(return_value={"status": "needs_tool_approval", "tool": "git"})
 
     async def ai_stream():

@@ -72,19 +72,21 @@ class SheriffGatewayService:
         base_url = ""
 
         _, unlocked = await self.secrets.request("secrets.is_unlocked", {})
-        if not unlocked.get("ok") or not unlocked.get("result", {}).get("unlocked"):
+        vault_known_locked = unlocked.get("ok") is True and unlocked.get("result", {}).get("unlocked") is False
+        if vault_known_locked:
             supplied_mp = (payload.get("master_password") or "").strip()
             if supplied_mp:
                 _, u = await self.secrets.request("secrets.unlock", {"master_password": supplied_mp})
                 if u.get("result", {}).get("ok"):
                     _, unlocked = await self.secrets.request("secrets.is_unlocked", {})
-            if (not unlocked.get("ok") or not unlocked.get("result", {}).get("unlocked")) and not debug_mode:
+                    vault_known_locked = unlocked.get("ok") is True and unlocked.get("result", {}).get("unlocked") is False
+            if vault_known_locked and not debug_mode:
                 msg = "🔒 Sheriff vault is locked. Run /unlock <master_password> first."
                 await emit_event("assistant.final", {"text": msg})
                 append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
                 return {"status": "locked", "session_handle": session}
 
-        if unlocked.get("ok") and unlocked.get("result", {}).get("unlocked"):
+        if unlocked.get("ok") is True and unlocked.get("result", {}).get("unlocked"):
             _, prov = await self.secrets.request("secrets.get_llm_provider", {})
             if not prov.get("ok"):
                 if not debug_mode:

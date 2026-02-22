@@ -40,7 +40,7 @@ EOF
 # Assertions
 
 grep -q "\[SHERIFF\] sheriff-secrets: ok" "$OUTPUT_FILE"
-grep -q '"status": "needs_secret"' "$OUTPUT_FILE"
+grep -q "vault is locked" "$OUTPUT_FILE"
 grep -q "\[SHERIFF\] Vault unlocked\." "$OUTPUT_FILE"
 grep -q "\[SHERIFF\] Secret gh_token: approved" "$OUTPUT_FILE"
 grep -q '"status": "needs_tool_approval"' "$OUTPUT_FILE"

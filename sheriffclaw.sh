@@ -248,17 +248,43 @@ run_onboarding_if_needed() {
     echo ""
 
     if [ "$interactive" = "1" ]; then
+        local skip_onboarding=0
         if [ "$existing_install" = "1" ]; then
             echo -e "${YELLOW}Existing installation detected.${NC}"
+            echo "Choose action:"
+            echo "  1) Start onboarding"
+            echo "  2) Update existing install (default)"
+            echo "  3) Factory reset (wipe ALL Sheriff/Agent data), then onboarding"
             if [ -t 0 ]; then
-                read -r -p "Factory reset from scratch (wipe ALL Sheriff/Agent data)? [y/N]: " REINSTALL_ANS
+                read -r -p "Select [1/2/3] (default 2): " SETUP_CHOICE
             else
-                read -r -p "Factory reset from scratch (wipe ALL Sheriff/Agent data)? [y/N]: " REINSTALL_ANS < /dev/tty
+                read -r -p "Select [1/2/3] (default 2): " SETUP_CHOICE < /dev/tty
             fi
-            REINSTALL_ANS_LC="$(lower "$REINSTALL_ANS")"
-            if [[ "$REINSTALL_ANS_LC" == "y" || "$REINSTALL_ANS_LC" == "yes" ]]; then
-                "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" factory-reset
-            fi
+            SETUP_CHOICE="${SETUP_CHOICE:-2}"
+
+            case "$SETUP_CHOICE" in
+                2)
+                    if [ -t 0 ]; then
+                        "$VENV_DIR/bin/sheriff-ctl" update || true
+                    else
+                        "$VENV_DIR/bin/sheriff-ctl" update < /dev/tty > /dev/tty 2>&1 || true
+                    fi
+                    skip_onboarding=1
+                    ;;
+                3)
+                    if [ -t 0 ]; then
+                        "$VENV_DIR/bin/sheriff-ctl" factory-reset || true
+                    else
+                        "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || true
+                    fi
+                    ;;
+                1|*)
+                    ;;
+            esac
+        fi
+
+        if [ "$skip_onboarding" = "1" ]; then
+            return 0
         fi
 
         if [ -t 0 ]; then

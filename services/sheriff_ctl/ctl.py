@@ -112,13 +112,58 @@ def _ai_worker_sandbox_profile() -> Path:
     return p
 
 
+def _linux_sandbox_profile() -> Path:
+    p = gw_root() / "state" / "ai_worker.bwrap.args"
+    workspace = gw_root().parent.resolve()
+    agent_ws = (workspace / "agent_workspace").resolve()
+    skill_root = (workspace / "skills").resolve()
+    system_skill_root = (workspace / "system_skills").resolve()
+    logs_gw = (gw_root() / "logs").resolve()
+    logs_llm = (llm_root() / "logs").resolve()
+
+    agent_ws.mkdir(parents=True, exist_ok=True)
+    logs_gw.mkdir(parents=True, exist_ok=True)
+    logs_llm.mkdir(parents=True, exist_ok=True)
+
+    args = [
+        "--die-with-parent",
+        "--unshare-all",
+        "--share-net",
+        "--ro-bind", "/usr", "/usr",
+        "--ro-bind", "/bin", "/bin",
+        "--ro-bind", "/lib", "/lib",
+        "--ro-bind", "/lib64", "/lib64",
+        "--ro-bind", "/etc", "/etc",
+        "--proc", "/proc",
+        "--dev", "/dev",
+        "--tmpfs", "/tmp",
+        "--ro-bind", str(workspace), str(workspace),
+        "--ro-bind", str(skill_root), str(skill_root),
+        "--ro-bind", str(system_skill_root), str(system_skill_root),
+        "--bind", str(agent_ws), str(agent_ws),
+        "--bind", str(logs_gw), str(logs_gw),
+        "--bind", str(logs_llm), str(logs_llm),
+        "--chdir", str(workspace),
+    ]
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("\n".join(args), encoding="utf-8")
+    return p
+
+
 def _service_command(service: str) -> list[str]:
     base = [_resolve_service_binary(service)]
-    if service == "ai-worker" and platform.system() == "Darwin":
-        sb = shutil.which("sandbox-exec")
-        if sb:
-            profile = _ai_worker_sandbox_profile()
-            return [sb, "-f", str(profile), *base]
+    if service == "ai-worker":
+        if platform.system() == "Darwin":
+            sb = shutil.which("sandbox-exec")
+            if sb:
+                profile = _ai_worker_sandbox_profile()
+                return [sb, "-f", str(profile), *base]
+        if platform.system() == "Linux":
+            bwrap = shutil.which("bwrap")
+            if bwrap:
+                profile = _linux_sandbox_profile()
+                args = [ln.strip() for ln in profile.read_text(encoding="utf-8").splitlines() if ln.strip()]
+                return [bwrap, *args, *base]
     return base
 
 

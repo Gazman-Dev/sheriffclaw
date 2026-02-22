@@ -10,4 +10,5 @@ Source: user request.
 - [x] Add worker path sandbox helper for payload paths
 - [x] Wire sheriff-call helper into skills context
 - [x] Add platform sandbox wrapper for ai-worker process launch (Darwin `sandbox-exec`)
+- [x] Add Linux sandbox wrapper for ai-worker launch (`bwrap` when available)
 - [ ] OS-level runtime sandboxing (separate user/container/jail) (future hardening)

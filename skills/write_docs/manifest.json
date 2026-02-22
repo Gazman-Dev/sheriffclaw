@@ -1,0 +1,6 @@
+{
+  "skill_id": "write_docs",
+  "description": "Write or improve documentation for modules and features",
+  "tags": ["docs", "documentation", "readme", "guide"],
+  "requires_tools": ["tools.exec"]
+}

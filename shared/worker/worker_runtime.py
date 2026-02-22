@@ -6,6 +6,7 @@ from pathlib import Path
 from shared.llm.providers import ChatGPTSubscriptionCodexProvider, OpenAICodexProvider, StubProvider, TestProvider
 from shared.llm.registry import resolve_model
 from shared.skills.loader import SkillLoader
+from shared.proc_rpc import ProcClient
 
 
 class WorkerRuntime:
@@ -19,6 +20,7 @@ class WorkerRuntime:
             system_root=workspace_root / "system_skills",
         )
         self.skills = self.skill_loader.load()
+        self._rpc_clients: dict[str, ProcClient] = {}
 
     @staticmethod
     def _last_tool_result(history: list[dict]) -> str:
@@ -63,6 +65,20 @@ class WorkerRuntime:
             return f"Scenario[{model}] last tool result: {self._last_tool_result(history)}"
 
         return f"Scenario[{model}] echo: {text}"
+
+    def _rpc_client(self, service: str) -> ProcClient:
+        cli = self._rpc_clients.get(service)
+        if cli is None:
+            cli = ProcClient(service)
+            self._rpc_clients[service] = cli
+        return cli
+
+    async def _sheriff_call(self, service: str, op: str, payload: dict):
+        if not service.startswith("sheriff-"):
+            raise ValueError("sheriff_call service must start with sheriff-")
+        cli = self._rpc_client(service)
+        _, res = await cli.request(op, payload)
+        return res.get("result", {})
 
     def _provider(self, provider: str, api_key: str, base_url: str = ""):
         key = f"{provider}:{api_key}:{base_url}"
@@ -133,14 +149,15 @@ class WorkerRuntime:
         if not loaded:
             raise ValueError(f"unknown skill: {name}")
 
-        impl = loaded.implementation_module
+        impl = getattr(loaded, "implementation_module", loaded)
         if "path" in payload and isinstance(payload["path"], str):
             payload = {**payload, "path": str(self._sandboxed_path(self.workspace_root, payload["path"]))}
 
         context = {
             "workspace_root": str(self.workspace_root),
-            "skill_root": str(loaded.root),
-            "skill_source": loaded.source,
+            "skill_root": str(getattr(loaded, "root", self.workspace_root)),
+            "skill_source": getattr(loaded, "source", "user"),
+            "sheriff_call": self._sheriff_call,
         }
         try:
             return await impl.run(payload, emit_event=emit_event, context=context)

@@ -8,5 +8,5 @@ Source: user request.
 - [x] Prevent user skill override of same-name system skills
 - [x] Keep legacy `skill.py` compatibility for migration
 - [x] Add worker path sandbox helper for payload paths
-- [ ] Wire sheriff-call helper into skills context (future)
+- [x] Wire sheriff-call helper into skills context
 - [ ] OS-level runtime sandboxing (separate user/container) (future)

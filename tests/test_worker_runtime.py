@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 from shared.worker.worker_runtime import WorkerRuntime
 
 
@@ -45,14 +45,11 @@ async def test_worker_runtime_triggers_tool_on_keyword():
 async def test_worker_skill_execution(monkeypatch):
     runtime = WorkerRuntime()
 
-    mock_skill = MagicMock()
+    class MockSkill:
+        async def run(self, payload, emit_event):
+            return {"worked": True}
 
-    async def mock_run(payload, emit_event):
-        return {"worked": True}
-
-    mock_skill.run = mock_run
-
-    monkeypatch.setattr(runtime.skill_loader, "load", lambda: {"test_skill": mock_skill})
+    monkeypatch.setattr(runtime.skill_loader, "load", lambda: {"test_skill": MockSkill()})
 
     result = await runtime.skill_run("test_skill", {}, None)
     assert result["worked"] is True
@@ -92,3 +89,40 @@ async def test_worker_scenario_last_tool_reads_history():
     finals = [p for e, p in events if e == "assistant.final"]
     assert len(finals) == 1
     assert "needs_secret" in finals[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_worker_skill_context_exposes_sheriff_call(monkeypatch):
+    runtime = WorkerRuntime()
+
+    async def fake_run(payload, emit_event=None, context=None):
+        fn = context["sheriff_call"]
+        return {"callable": callable(fn), "source": context["skill_source"]}
+
+    impl = type("Impl", (), {})()
+    impl.run = fake_run
+    loaded = type("Loaded", (), {"implementation_module": impl, "root": "/tmp", "source": "system"})
+    monkeypatch.setattr(runtime.skill_loader, "load", lambda: {"s": loaded})
+
+    out = await runtime.skill_run("s", {}, None)
+    assert out["callable"] is True
+    assert out["source"] == "system"
+
+
+@pytest.mark.asyncio
+async def test_sheriff_call_blocks_non_sheriff_service():
+    runtime = WorkerRuntime()
+    with pytest.raises(ValueError):
+        await runtime._sheriff_call("ai-worker", "x", {})
+
+
+@pytest.mark.asyncio
+async def test_sheriff_call_uses_proc_client(monkeypatch):
+    runtime = WorkerRuntime()
+    fake = AsyncMock()
+    fake.request.return_value = (None, {"result": {"ok": True}})
+    monkeypatch.setattr(runtime, "_rpc_client", lambda svc: fake)
+
+    out = await runtime._sheriff_call("sheriff-requests", "requests.get", {"x": 1})
+    assert out["ok"] is True
+    fake.request.assert_called_with("requests.get", {"x": 1})

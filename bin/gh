@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SKILL_GH="${ROOT_DIR}/../skills/private/github-app-auth/scripts/gh_app_exec.sh"
+
+if [[ ! -x "$SKILL_GH" ]]; then
+  echo "Missing github-app-auth wrapper: $SKILL_GH" >&2
+  exit 1
+fi
+
+exec bash "$SKILL_GH" "$@"

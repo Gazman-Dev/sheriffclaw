@@ -156,3 +156,39 @@ async def test_boot_check_uses_master_policy_file(requests_svc, tmp_path):
 
     out = await requests_svc.boot_check({}, None, "r1")
     assert out["status"] == "master_password_required"
+
+@pytest.mark.asyncio
+async def test_boot_check_disabled_policy_returns_ok(requests_svc, tmp_path):
+    requests_svc.secrets.request.return_value = (None, {"result": {"unlocked": False}})
+    state = tmp_path / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "master_policy.json").write_text(json.dumps({"allow_telegram_master_password": False}), encoding="utf-8")
+
+    out = await requests_svc.boot_check({}, None, "r1")
+    assert out["status"] == "ok"
+    notify_ops = [c[0][0] for c in requests_svc.tg_gate.request.call_args_list]
+    assert "gate.notify_master_password_required" not in notify_ops
+
+
+@pytest.mark.asyncio
+async def test_submit_master_password_success_notifies(requests_svc):
+    requests_svc.secrets.request.return_value = (None, {"result": {"ok": True}})
+
+    out = await requests_svc.submit_master_password({"master_password": "masterpass"}, None, "r1")
+    assert out["ok"] is True
+
+    notify_ops = [c[0][0] for c in requests_svc.tg_gate.request.call_args_list]
+    assert "gate.notify_master_password_accepted" in notify_ops
+    gateway_ops = [c[0][0] for c in requests_svc.gateway.request.call_args_list]
+    assert "gateway.notify_request_resolved" in gateway_ops
+
+
+@pytest.mark.asyncio
+async def test_submit_master_password_failure_no_notify(requests_svc):
+    requests_svc.secrets.request.return_value = (None, {"result": {"ok": False}})
+
+    out = await requests_svc.submit_master_password({"master_password": "wrong"}, None, "r1")
+    assert out["ok"] is False
+
+    notify_ops = [c[0][0] for c in requests_svc.tg_gate.request.call_args_list]
+    assert "gate.notify_master_password_accepted" not in notify_ops

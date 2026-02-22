@@ -33,7 +33,8 @@
   - prompts for master password only when needed
   - added `--force` flag
 - Added gateway proxy op `gateway.verify_master_password` and switched CLI verification to gateway path.
-- Added gateway proxy op `gateway.secrets.call` and migrated direct secrets access through gateway for:
+- Added gateway proxy op `gateway.secrets.call`, then hardened it with an explicit allowlist of permitted `secrets.*` operations.
+- Migrated direct secrets access through gateway for:
   - `ai_tg_llm`
   - `sheriff_requests`
   - `sheriff_tg_gate`
@@ -44,7 +45,7 @@
   - `sheriff_ctl`
 
 ## Remaining work
-- Replace generic `gateway.secrets.call` with narrower allowlisted ops over time (security hardening).
+- Split `gateway.secrets.call` further into dedicated gateway ops per domain (optional stricter shape/validation).
 - Add tests:
   - update skip when versions unchanged
   - force update path

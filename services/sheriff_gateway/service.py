@@ -14,6 +14,32 @@ from shared.transcript import append_jsonl
 
 
 class SheriffGatewayService:
+    ALLOWED_SECRETS_OPS = {
+        "secrets.verify_master_password",
+        "secrets.unlock",
+        "secrets.is_unlocked",
+        "secrets.initialize",
+        "secrets.get_llm_provider",
+        "secrets.set_llm_provider",
+        "secrets.get_llm_api_key",
+        "secrets.set_llm_api_key",
+        "secrets.get_llm_auth",
+        "secrets.set_llm_auth",
+        "secrets.clear_llm_auth",
+        "secrets.get_llm_bot_token",
+        "secrets.set_llm_bot_token",
+        "secrets.get_gate_bot_token",
+        "secrets.set_gate_bot_token",
+        "secrets.get_secret",
+        "secrets.set_secret",
+        "secrets.ensure_handle",
+        "secrets.activation.create",
+        "secrets.activation.claim",
+        "secrets.activation.status",
+        "secrets.telegram_webhook.get",
+        "secrets.telegram_webhook.set",
+    }
+
     def __init__(self) -> None:
         self.ai = ProcClient("ai-worker")
         self.web = ProcClient("sheriff-web")
@@ -213,8 +239,8 @@ class SheriffGatewayService:
 
     async def secrets_call(self, payload, emit_event, req_id):
         op = str(payload.get("op") or "")
-        if not op.startswith("secrets."):
-            return {"ok": False, "error": "invalid_op"}
+        if op not in self.ALLOWED_SECRETS_OPS:
+            return {"ok": False, "error": "op_not_allowed", "op": op}
         req_payload = payload.get("payload") or {}
         _, res = await self.secrets.request(op, req_payload)
         return {"ok": bool(res.get("ok", True)), "result": res.get("result", {}), "error": res.get("error")}

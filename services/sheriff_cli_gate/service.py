@@ -6,7 +6,7 @@ from shared.proc_rpc import ProcClient
 class SheriffCliGateService:
     def __init__(self) -> None:
         self.requests = ProcClient("sheriff-requests")
-        self.secrets = ProcClient("sheriff-secrets")
+        self.gateway = ProcClient("sheriff-gateway")
         self.services = [
             "sheriff-secrets",
             "sheriff-policy",
@@ -19,6 +19,10 @@ class SheriffCliGateService:
             "ai-worker",
             "ai-tg-llm",
         ]
+
+    async def _secrets(self, op: str, payload: dict):
+        _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})
+        return res.get("result", {})
 
     async def handle_message(self, payload, emit_event, req_id):
         text = (payload.get("text") or "").strip()
@@ -66,10 +70,9 @@ class SheriffCliGateService:
             if not args:
                 return {"kind": "error", "message": "Usage: /unlock <master_password>"}
             mp = " ".join(args)
-            _, res = await self.secrets.request("secrets.unlock", {"master_password": mp})
-            ok = bool(res.get("result", {}).get("ok"))
+            res = await self._secrets("secrets.unlock", {"master_password": mp})
+            ok = bool(res.get("ok"))
             if ok:
-                # compatibility: notify via requests channel so existing UX hooks continue to work
                 try:
                     await self.requests.request("requests.submit_master_password", {"master_password": mp})
                 except Exception:
@@ -85,8 +88,6 @@ class SheriffCliGateService:
             _, res = await self.requests.request("requests.resolve_secret", {"key": handle, "value": value})
             status = res.get("result", {}).get("status", "unknown")
             return {"kind": "sheriff", "message": f"Secret {handle}: {status}"}
-
-        # Auth provisioning is intentionally not exposed in Sheriff chat.
 
         if cmd in {"allow-domain", "deny-domain", "allow-tool", "deny-tool", "allow-output", "deny-output"}:
             if not args:

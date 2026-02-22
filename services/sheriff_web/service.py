@@ -8,8 +8,12 @@ from shared.secure_web import SecureWebRequester
 class SheriffWebService:
     def __init__(self) -> None:
         self.requester = SecureWebRequester(GatewayPolicy())
-        self.secrets = ProcClient("sheriff-secrets")
+        self.gateway = ProcClient("sheriff-gateway")
         self.policy = ProcClient("sheriff-policy")
+
+    async def _secrets(self, op: str, payload: dict):
+        _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})
+        return res.get("result", {})
 
     async def request(self, payload, emit_event, req_id):
         principal_id = payload["principal_id"]
@@ -21,8 +25,8 @@ class SheriffWebService:
 
         resolved = {}
         for header, handle in (payload.get("secret_headers") or {}).items():
-            _, sec = await self.secrets.request("secrets.get_secret", {"handle": handle})
-            resolved[header] = sec["result"].get("value", "")
+            sec = await self._secrets("secrets.get_secret", {"handle": handle})
+            resolved[header] = sec.get("value", "")
         response = self.requester.request_https(payload, resolved)
         return {"status": "executed", "response": response}
 

@@ -211,6 +211,14 @@ class SheriffGatewayService:
         _, res = await self.secrets.request("secrets.verify_master_password", {"master_password": master_password})
         return {"ok": bool(res.get("result", {}).get("ok"))}
 
+    async def secrets_call(self, payload, emit_event, req_id):
+        op = str(payload.get("op") or "")
+        if not op.startswith("secrets."):
+            return {"ok": False, "error": "invalid_op"}
+        req_payload = payload.get("payload") or {}
+        _, res = await self.secrets.request(op, req_payload)
+        return {"ok": bool(res.get("ok", True)), "result": res.get("result", {}), "error": res.get("error")}
+
     async def notify_request_resolved(self, payload, emit_event, req_id):
         if not self.sessions:
             return {"status": "no_session"}
@@ -233,4 +241,5 @@ class SheriffGatewayService:
             "gateway.queue.control": self.queue_control,
             "gateway.queue.status": self.queue_status,
             "gateway.verify_master_password": self.verify_master_password,
+            "gateway.secrets.call": self.secrets_call,
         }

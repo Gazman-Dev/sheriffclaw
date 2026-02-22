@@ -22,7 +22,6 @@ class SheriffRequestsService:
         self.vector_dir.mkdir(parents=True, exist_ok=True)
 
         self.tg_gate = ProcClient("sheriff-tg-gate")
-        self.secrets = ProcClient("sheriff-secrets")
         self.policy = ProcClient("sheriff-policy")
         self.gateway = ProcClient("sheriff-gateway")
 
@@ -32,6 +31,10 @@ class SheriffRequestsService:
             name="requests_catalog",
             embedding_function=self._embedding_function(),
         )
+
+    async def _secrets(self, op: str, payload: dict):
+        _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})
+        return res.get("result", {})
 
     @staticmethod
     def _embedding_function() -> SentenceTransformerEmbeddingFunction:
@@ -189,12 +192,9 @@ class SheriffRequestsService:
                     should_update_content = True
             request_id = self._insert_request_instance(conn, entry_id)
 
-        # Resilient upsert: Always ensure the entry is in Chroma, even if immutable.
         self._upsert_existing_entry(entry_type, key)
-
         entry = self._get_entry(entry_type, key)
 
-        # Notify only if not immutable (fresh request) or forced
         if not is_immutable or force_notify:
             await self.tg_gate.request(
                 "gate.notify_request",
@@ -260,11 +260,11 @@ class SheriffRequestsService:
 
     async def resolve_secret(self, payload, emit_event, req_id):
         key = payload["key"]
-        _, unlocked = await self.secrets.request("secrets.is_unlocked", {})
-        if not unlocked["result"].get("unlocked"):
+        unlocked = await self._secrets("secrets.is_unlocked", {})
+        if not unlocked.get("unlocked"):
             return {"status": "master_password_required", "type": "secret", "key": key}
 
-        await self.secrets.request("secrets.set_secret", {"handle": key, "value": payload["value"]})
+        await self._secrets("secrets.set_secret", {"handle": key, "value": payload["value"]})
         with self._conn() as conn:
             row = conn.execute("SELECT entry_id FROM catalog_entries WHERE type='secret' AND key=?", (key,)).fetchone()
             now = self._now_ms()
@@ -337,8 +337,8 @@ class SheriffRequestsService:
         return await self._resolve_policy_item("disclose_output", payload["key"], payload["action"])
 
     async def boot_check(self, payload, emit_event, req_id):
-        _, unlocked = await self.secrets.request("secrets.is_unlocked", {})
-        if unlocked["result"].get("unlocked"):
+        unlocked = await self._secrets("secrets.is_unlocked", {})
+        if unlocked.get("unlocked"):
             return {"status": "ok"}
 
         policy_path = gw_root() / "state" / "master_policy.json"
@@ -352,8 +352,8 @@ class SheriffRequestsService:
         return {"status": "ok"}
 
     async def submit_master_password(self, payload, emit_event, req_id):
-        _, res = await self.secrets.request("secrets.unlock", {"master_password": payload["master_password"]})
-        ok = bool(res["result"].get("ok"))
+        res = await self._secrets("secrets.unlock", {"master_password": payload["master_password"]})
+        ok = bool(res.get("ok"))
         if ok:
             await self.tg_gate.request("gate.notify_master_password_accepted", {"event": "master_password_accepted"})
             await self.gateway.request(

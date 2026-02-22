@@ -14,15 +14,18 @@ from shared.proc_rpc import ProcClient
 
 class TelegramWebhookService:
     def __init__(self):
-        self.secrets = ProcClient("sheriff-secrets")
         self.gateway = ProcClient("sheriff-gateway")
         self.ai_gate = ProcClient("ai-tg-llm")
         self.sheriff_gate = ProcClient("sheriff-tg-gate")
         self.cli_gate = ProcClient("sheriff-cli-gate")
 
+    async def _secrets(self, op: str, payload: dict):
+        _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})
+        return res.get("result", {})
+
     async def _load_or_init_cfg(self) -> dict:
-        _, got = await self.secrets.request("secrets.telegram_webhook.get", {})
-        cfg = got.get("result", {}).get("config")
+        got = await self._secrets("secrets.telegram_webhook.get", {})
+        cfg = got.get("config")
         if isinstance(cfg, dict) and cfg:
             return cfg
 
@@ -33,7 +36,7 @@ class TelegramWebhookService:
             "llm_secret": uuid.uuid4().hex,
             "sheriff_secret": uuid.uuid4().hex,
         }
-        await self.secrets.request("secrets.telegram_webhook.set", {"config": cfg})
+        await self._secrets("secrets.telegram_webhook.set", {"config": cfg})
         return cfg
 
     async def _handle_ai_message(self, token: str, user_id: str, chat_id: int, text: str):
@@ -98,15 +101,20 @@ class TelegramWebhookService:
         cert = __import__("os").environ.get("SHERIFF_WEBHOOK_CERT", "").strip()
         key = __import__("os").environ.get("SHERIFF_WEBHOOK_KEY", "").strip()
 
-        if not public_base.startswith("https://"):
-            raise RuntimeError("SHERIFF_WEBHOOK_PUBLIC_BASE must be https://...")
-        if not cert or not key:
-            raise RuntimeError("SHERIFF_WEBHOOK_CERT and SHERIFF_WEBHOOK_KEY are required (https only)")
+        if not public_base.startswith("https://") or not cert or not key:
+            # keep daemon alive and retry, instead of crashing service manager
+            while True:
+                public_base = __import__("os").environ.get("SHERIFF_WEBHOOK_PUBLIC_BASE", "").strip()
+                cert = __import__("os").environ.get("SHERIFF_WEBHOOK_CERT", "").strip()
+                key = __import__("os").environ.get("SHERIFF_WEBHOOK_KEY", "").strip()
+                if public_base.startswith("https://") and cert and key:
+                    break
+                await __import__("asyncio").sleep(5)
 
-        _, l = await self.secrets.request("secrets.get_llm_bot_token", {})
-        _, g = await self.secrets.request("secrets.get_gate_bot_token", {})
-        llm_token = l.get("result", {}).get("token", "")
-        sheriff_token = g.get("result", {}).get("token", "")
+        l = await self._secrets("secrets.get_llm_bot_token", {})
+        g = await self._secrets("secrets.get_gate_bot_token", {})
+        llm_token = l.get("token", "")
+        sheriff_token = g.get("token", "")
 
         if llm_token:
             requests.post(

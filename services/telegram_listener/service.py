@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 
 import requests
 
@@ -12,13 +11,16 @@ from shared.proc_rpc import ProcClient
 
 class TelegramListenerService:
     def __init__(self):
-        self.secrets = ProcClient("sheriff-secrets")
         self.gateway = ProcClient("sheriff-gateway")
         self.ai_gate = ProcClient("ai-tg-llm")
         self.sheriff_gate = ProcClient("sheriff-tg-gate")
         self.cli_gate = ProcClient("sheriff-cli-gate")
         self.offset_path = gw_root() / "state" / "telegram_offsets.json"
         self.offset_path.parent.mkdir(parents=True, exist_ok=True)
+
+    async def _secrets(self, op: str, payload: dict):
+        _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})
+        return res.get("result", {})
 
     def _load_offsets(self) -> dict:
         if not self.offset_path.exists():
@@ -122,10 +124,10 @@ class TelegramListenerService:
         offsets = self._load_offsets()
         while True:
             try:
-                _, l = await self.secrets.request("secrets.get_llm_bot_token", {})
-                _, g = await self.secrets.request("secrets.get_gate_bot_token", {})
-                llm_token = l.get("result", {}).get("token", "")
-                sheriff_token = g.get("result", {}).get("token", "")
+                l = await self._secrets("secrets.get_llm_bot_token", {})
+                g = await self._secrets("secrets.get_gate_bot_token", {})
+                llm_token = l.get("token", "")
+                sheriff_token = g.get("token", "")
 
                 if llm_token:
                     await self._poll_bot("llm", llm_token, offsets)

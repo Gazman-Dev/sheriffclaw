@@ -26,7 +26,7 @@ scenario last tool
 /exit
 EOF
 
-grep -q '"status": "needs_secret"' "$OUT_FILE"
+grep -q 'vault is locked' "$OUT_FILE"
 grep -q 'Secret gh_token: approved' "$OUT_FILE"
 grep -q '"status": "needs_tool_approval"' "$OUT_FILE"
 grep -q 'allow-tool python: approved' "$OUT_FILE"

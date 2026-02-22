@@ -6,7 +6,7 @@ Source: user request in chat to add broader end-to-end coverage and execute it.
 
 - [x] Fresh install → one-shot sheriff message
 - [x] Fresh install → sheriff slash routing
-- [ ] One-shot wait behavior (10s after last response, Esc cancel)
+- [~] One-shot wait behavior (10s after last response automated; Esc cancel pending PTY automation)
 - [x] Onboarded no-arg menu flow branches
 - [x] Restart auth gate (wrong vs correct master password)
 - [x] Factory reset integrity (state wiped)

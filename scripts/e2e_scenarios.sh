@@ -180,6 +180,7 @@ run_scenario "one_shot_esc_cancel" scenario_one_shot_esc_cancel
 run_scenario "permissions_unlock" "$ROOT_DIR/scripts/e2e_permissions_unlock.sh"
 run_scenario "telegram_simulated_debug" "$ROOT_DIR/scripts/e2e_telegram_simulated_debug.sh"
 run_scenario "state_isolation" "$ROOT_DIR/scripts/e2e_state_isolation.sh"
+run_scenario "update_flow" "$ROOT_DIR/scripts/e2e_update_flow.sh"
 if [ "$WITH_DOCKER" -eq 1 ]; then
   run_scenario "docker_fresh_install" "$ROOT_DIR/scripts/e2e_fresh_install_docker.sh"
 fi

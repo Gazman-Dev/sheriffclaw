@@ -38,6 +38,7 @@ GW_ORDER = [
     "sheriff-gateway",
     "sheriff-tg-gate",
     "sheriff-cli-gate",
+    "sheriff-updater",
 ]
 LLM_ORDER = ["ai-worker", "ai-tg-llm", "telegram-webhook"]
 ALL = [*GW_ORDER, *LLM_ORDER]
@@ -203,12 +204,30 @@ def _verify_master_password(mp: str) -> bool:
 
 
 def cmd_update(args):
-    repo_root = Path(__file__).resolve().parents[2]
-    installer = repo_root / "install.sh"
-    if not installer.exists():
-        print("Update script not found.")
+    mp = getattr(args, "master_password", None)
+    if not mp:
+        mp = getpass.getpass("Master password for update: ")
+
+    if not _verify_master_password(mp):
+        print("Invalid master password. Update cancelled.")
         return
-    subprocess.run(["bash", str(installer)], check=False)  # noqa: S603
+
+    _start_service("sheriff-secrets")
+    _start_service("sheriff-updater")
+
+    async def _run_update() -> bool:
+        cli = ProcClient("sheriff-updater")
+        _, res = await cli.request("updater.run", {"master_password": mp, "auto_pull": not getattr(args, "no_pull", False)})
+        return bool(res.get("result", {}).get("ok"))
+
+    ok = asyncio.run(_run_update())
+    if ok:
+        print("Restarting services after update...")
+        cmd_stop(argparse.Namespace())
+        cmd_start(argparse.Namespace())
+        print("Update completed.")
+    else:
+        print("Update failed.")
 
 
 def cmd_onboard(args):
@@ -578,7 +597,7 @@ def cmd_entry(args):
             print("Services restarted.")
             return
         if choice == "update":
-            cmd_update(argparse.Namespace())
+            cmd_update(argparse.Namespace(master_password=None, no_pull=False))
             return
         if choice in {"factory reset", "factory-reset"}:
             cmd_factory_reset(argparse.Namespace(yes=False))
@@ -764,6 +783,11 @@ def build_parser() -> argparse.ArgumentParser:
     cl.add_argument("op")
     cl.add_argument("--json", default="{}")
     cl.set_defaults(func=cmd_call)
+
+    upd = sub.add_parser("update")
+    upd.add_argument("--master-password", default=None)
+    upd.add_argument("--no-pull", action="store_true", help="Skip git pull and only reinstall current source")
+    upd.set_defaults(func=cmd_update)
 
     cfg = sub.add_parser("configure-llm")
     cfg.add_argument("--provider", default="openai-codex")

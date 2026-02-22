@@ -28,6 +28,7 @@ sheriff-web = "services.sheriff_web.__main__:main"
 sheriff-tools = "services.sheriff_tools.__main__:main"
 sheriff-tg-gate = "services.sheriff_tg_gate.__main__:main"
 sheriff-cli-gate = "services.sheriff_cli_gate.__main__:main"
+sheriff-updater = "services.sheriff_updater.__main__:main"
 
 ai-worker = "services.ai_worker.__main__:main"
 ai-tg-llm = "services.ai_tg_llm.__main__:main"

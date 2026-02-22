@@ -40,3 +40,10 @@ def test_debug_parses():
     parser = build_parser()
     args = parser.parse_args(["debug", "on"])
     assert args.value == "on"
+
+
+def test_update_parses():
+    parser = build_parser()
+    args = parser.parse_args(["update", "--master-password", "x", "--no-pull"])
+    assert args.master_password == "x"
+    assert args.no_pull is True

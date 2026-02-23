@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from shared.identity import principal_id_for_channel
 from shared.llm.device_auth import refresh_access_token
+from shared.oplog import get_op_logger
 from shared.paths import gw_root
 from shared.proc_rpc import ProcClient
 from shared.transcript import append_jsonl
@@ -47,6 +48,7 @@ class SheriffGatewayService:
         self.secrets = ProcClient("sheriff-secrets")
         self.requests = ProcClient("sheriff-requests")
         self.tg_gate = ProcClient("sheriff-tg-gate")
+        self.log = get_op_logger("gateway")
         self.sessions: dict[str, str] = {}
         self._queue = defaultdict(deque)
         self._processing = set()
@@ -162,21 +164,33 @@ class SheriffGatewayService:
         stream, final = await self.ai.request("agent.session.user_message", {"session_handle": session, "text": text, "model_ref": payload.get("model_ref"), "provider_name": provider_name, "api_key": api_key, "base_url": base_url}, stream_events=True)
         saw_final = False
         delta_parts: list[str] = []
+        event_counts: dict[str, int] = {}
         async for frame in stream:
-            if frame["event"] == "tool.call":
+            ev = frame.get("event")
+            event_counts[ev] = event_counts.get(ev, 0) + 1
+            if ev == "tool.call":
                 result = await self._route_tool(principal_id, frame.get("payload", {}))
                 await emit_event("tool.result", result)
                 await self.ai.request("agent.session.tool_result", {"session_handle": session, "tool_name": frame["payload"].get("tool_name", "tool"), "result": result})
                 continue
-            if frame["event"] == "assistant.final":
+            if ev == "assistant.final":
                 saw_final = True
-            elif frame["event"] == "assistant.delta":
+            elif ev == "assistant.delta":
                 part = str((frame.get("payload") or {}).get("text") or "")
                 if part:
                     delta_parts.append(part)
-            await emit_event(frame["event"], frame.get("payload", {}))
+            await emit_event(ev, frame.get("payload", {}))
 
         final_res = await final if inspect.isawaitable(final) else final
+        self.log.info(
+            "ai_stream session=%s events=%s saw_final=%s deltas=%s final_ok=%s final_err=%s",
+            session,
+            event_counts,
+            saw_final,
+            len(delta_parts),
+            (final_res or {}).get("ok") if isinstance(final_res, dict) else None,
+            (final_res or {}).get("error") if isinstance(final_res, dict) else None,
+        )
         if isinstance(final_res, dict) and final_res.get("ok") is False:
             err = final_res.get("error") or "unknown_error"
             msg = f"AI worker error: {err}"

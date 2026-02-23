@@ -372,9 +372,9 @@ def _verify_master_password(mp: str) -> bool:
     return asyncio.run(_verify_master_password_async(mp))
 
 
-async def _gw_secrets_call(op: str, payload: dict | None = None) -> dict:
-    gw = ProcClient("sheriff-gateway")
-    _, res = await gw.request("gateway.secrets.call", {"op": op, "payload": payload or {}})
+async def _gw_secrets_call(op: str, payload: dict | None = None, gw: ProcClient | None = None) -> dict:
+    cli = gw or ProcClient("sheriff-gateway")
+    _, res = await cli.request("gateway.secrets.call", {"op": op, "payload": payload or {}})
     outer = res.get("result", {})
     # gateway.secrets.call returns {ok, result, error}; unwrap for callers.
     if isinstance(outer, dict) and "result" in outer:
@@ -471,14 +471,15 @@ def cmd_onboard(args):
 
     if keep_unchanged and _is_onboarded():
         async def _load_existing() -> dict[str, str]:
-            ok = await _gw_secrets_call("secrets.unlock", {"master_password": mp})
+            gw = ProcClient("sheriff-gateway")
+            ok = await _gw_secrets_call("secrets.unlock", {"master_password": mp}, gw=gw)
             if not ok.get("ok"):
                 raise RuntimeError("failed to unlock with provided master password")
-            p = await _gw_secrets_call("secrets.get_llm_provider", {})
-            k = await _gw_secrets_call("secrets.get_llm_api_key", {})
-            la = await _gw_secrets_call("secrets.get_llm_auth", {})
-            lb = await _gw_secrets_call("secrets.get_llm_bot_token", {})
-            gb = await _gw_secrets_call("secrets.get_gate_bot_token", {})
+            p = await _gw_secrets_call("secrets.get_llm_provider", {}, gw=gw)
+            k = await _gw_secrets_call("secrets.get_llm_api_key", {}, gw=gw)
+            la = await _gw_secrets_call("secrets.get_llm_auth", {}, gw=gw)
+            lb = await _gw_secrets_call("secrets.get_llm_bot_token", {}, gw=gw)
+            gb = await _gw_secrets_call("secrets.get_gate_bot_token", {}, gw=gw)
             return {
                 "llm_provider": p.get("provider") or "",
                 "llm_api_key": k.get("api_key") or "",
@@ -579,7 +580,7 @@ def cmd_onboard(args):
 
     allow_tg = False
 
-    async def _telegram_activate_bot(role: str, token: str, timeout_sec: int = 300) -> bool:
+    async def _telegram_activate_bot(gw: ProcClient, role: str, token: str, timeout_sec: int = 300) -> bool:
         import requests
 
         print(f"\n{role.upper()} bot activation:")
@@ -607,7 +608,7 @@ def cmd_onboard(args):
 
         while time.time() - start < timeout_sec:
             # Already activated?
-            st = await _gw_secrets_call("secrets.activation.status", {"bot_role": role})
+            st = await _gw_secrets_call("secrets.activation.status", {"bot_role": role}, gw=gw)
             if st.get("user_id"):
                 return True
 
@@ -646,7 +647,7 @@ def cmd_onboard(args):
                     OPLOG.info("activation[%s] skip update id=%s reason=missing_user_or_chat", role, update_id)
                     continue
 
-                bound = await _gw_secrets_call("secrets.activation.status", {"bot_role": role})
+                bound = await _gw_secrets_call("secrets.activation.status", {"bot_role": role}, gw=gw)
                 bound_uid = bound.get("user_id")
                 if bound_uid and str(bound_uid) == user_id:
                     OPLOG.info("activation[%s] skip update id=%s reason=already_bound user_id=%s", role, update_id, user_id)
@@ -654,7 +655,7 @@ def cmd_onboard(args):
 
                 code = sent_codes.get(user_id)
                 if not code:
-                    c = await _gw_secrets_call("secrets.activation.create", {"bot_role": role, "user_id": user_id})
+                    c = await _gw_secrets_call("secrets.activation.create", {"bot_role": role, "user_id": user_id}, gw=gw)
                     code = c.get("code")
                     if not code:
                         OPLOG.warning("activation[%s] failed to create code user_id=%s response=%s", role, user_id, c)
@@ -680,7 +681,7 @@ def cmd_onboard(args):
                     return False
                 if not code_in:
                     continue
-                claim = await _gw_secrets_call("secrets.activation.claim", {"bot_role": role, "code": code_in})
+                claim = await _gw_secrets_call("secrets.activation.claim", {"bot_role": role, "code": code_in}, gw=gw)
                 if claim.get("ok"):
                     ok_user = str(claim.get("user_id") or "")
                     ok_chat = user_chat.get(ok_user)
@@ -727,25 +728,26 @@ def cmd_onboard(args):
                 "gate_bot_token": "",
                 "allow_telegram_master_password": False,
             },
+            gw=gw,
         )
-        unlock_res = await _gw_secrets_call("secrets.unlock", {"master_password": mp})
+        unlock_res = await _gw_secrets_call("secrets.unlock", {"master_password": mp}, gw=gw)
         if not unlock_res.get("ok"):
             OPLOG.error("onboard unlock failed after initialize: %s", unlock_res)
             raise RuntimeError("failed to unlock vault after onboarding initialize")
-        st_unlock = await _gw_secrets_call("secrets.is_unlocked", {})
+        st_unlock = await _gw_secrets_call("secrets.is_unlocked", {}, gw=gw)
         if not st_unlock.get("unlocked"):
             OPLOG.error("onboard unlock check failed after initialize: %s", st_unlock)
             raise RuntimeError("vault is still locked after unlock")
 
         if llm_auth:
-            await _gw_secrets_call("secrets.set_llm_auth", {"auth": llm_auth})
+            await _gw_secrets_call("secrets.set_llm_auth", {"auth": llm_auth}, gw=gw)
 
         interactive = sys.stdin.isatty()
 
         if llm_bot:
-            await _gw_secrets_call("secrets.set_llm_bot_token", {"token": llm_bot})
+            await _gw_secrets_call("secrets.set_llm_bot_token", {"token": llm_bot}, gw=gw)
             if interactive:
-                ok = await _telegram_activate_bot("llm", llm_bot)
+                ok = await _telegram_activate_bot(gw, "llm", llm_bot)
                 if ok:
                     print("AI bot activated.")
                 else:
@@ -759,9 +761,9 @@ def cmd_onboard(args):
                 gate_tok = input("Telegram Sheriff bot token (BotFather): ").strip()
 
         if gate_tok:
-            await _gw_secrets_call("secrets.set_gate_bot_token", {"token": gate_tok})
+            await _gw_secrets_call("secrets.set_gate_bot_token", {"token": gate_tok}, gw=gw)
             if interactive:
-                ok = await _telegram_activate_bot("sheriff", gate_tok)
+                ok = await _telegram_activate_bot(gw, "sheriff", gate_tok)
                 if ok:
                     print("Sheriff bot activated.")
                 else:

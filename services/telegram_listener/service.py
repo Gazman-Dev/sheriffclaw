@@ -16,6 +16,7 @@ class TelegramListenerService:
         self.sheriff_gate = ProcClient("sheriff-tg-gate")
         self.cli_gate = ProcClient("sheriff-cli-gate")
         self.offset_path = gw_root() / "state" / "telegram_offsets.json"
+        self.tokens_cache_path = gw_root() / "state" / "telegram_tokens_cache.json"
         self.offset_path.parent.mkdir(parents=True, exist_ok=True)
         self._webhook_cleared: set[str] = set()
 
@@ -39,6 +40,18 @@ class TelegramListenerService:
 
     def _save_offsets(self, offsets: dict) -> None:
         self.offset_path.write_text(json.dumps(offsets, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _load_tokens_cache(self) -> dict:
+        if not self.tokens_cache_path.exists():
+            return {"llm": "", "sheriff": ""}
+        try:
+            obj = json.loads(self.tokens_cache_path.read_text(encoding="utf-8"))
+            return {"llm": str(obj.get("llm", "")), "sheriff": str(obj.get("sheriff", ""))}
+        except Exception:
+            return {"llm": "", "sheriff": ""}
+
+    def _save_tokens_cache(self, tokens: dict) -> None:
+        self.tokens_cache_path.write_text(json.dumps(tokens, ensure_ascii=False, indent=2), encoding="utf-8")
 
     @staticmethod
     def _send_message(token: str, chat_id: int | str, text: str) -> None:
@@ -152,13 +165,27 @@ class TelegramListenerService:
 
     async def run_forever(self):
         offsets = self._load_offsets()
+        cached_tokens = self._load_tokens_cache()
         while True:
             try:
-                specs = [
-                    ("llm", (await self._secrets("secrets.get_llm_bot_token", {})).get("token", "")),
-                    ("sheriff", (await self._secrets("secrets.get_gate_bot_token", {})).get("token", "")),
-                ]
-                sheriff_token = dict(specs).get("sheriff", "")
+                llm_live = (await self._secrets("secrets.get_llm_bot_token", {})).get("token", "")
+                sheriff_live = (await self._secrets("secrets.get_gate_bot_token", {})).get("token", "")
+
+                llm_token = llm_live or cached_tokens.get("llm", "")
+                sheriff_token = sheriff_live or cached_tokens.get("sheriff", "")
+
+                # Refresh cache only when we have live values.
+                changed = False
+                if llm_live and llm_live != cached_tokens.get("llm", ""):
+                    cached_tokens["llm"] = llm_live
+                    changed = True
+                if sheriff_live and sheriff_live != cached_tokens.get("sheriff", ""):
+                    cached_tokens["sheriff"] = sheriff_live
+                    changed = True
+                if changed:
+                    self._save_tokens_cache(cached_tokens)
+
+                specs = [("llm", llm_token), ("sheriff", sheriff_token)]
                 for role, token in specs:
                     if token:
                         await self._poll_bot(role, token, sheriff_token, offsets)

@@ -115,19 +115,23 @@ class TelegramListenerService:
         async for frame in stream:
             if frame.get("event") == "assistant.final":
                 reply = frame.get("payload", {}).get("text")
-        final_res = await final if asyncio.iscoroutine(final) else final
+        final_res = await final if asyncio.isfuture(final) or asyncio.iscoroutine(final) else final
 
         if reply:
             self._send_message(token, chat_id, reply)
 
         result_obj = (final_res or {}).get("result", {}) if isinstance(final_res, dict) else {}
-        if result_obj.get("status") == "locked":
+        status_obj = result_obj.get("status")
+        self.log.info("ai gateway final status=%s has_reply=%s", status_obj, bool(reply))
+        if status_obj == "locked":
             # Always notify on Sheriff channel too, so user can unlock right there.
             msg = "🔒 Vault is locked. Open the Sheriff bot and send: /unlock <master_password>"
             if sheriff_token:
                 self._send_message(sheriff_token, chat_id, msg)
             elif not reply:
                 self._send_message(token, chat_id, msg)
+        elif not reply:
+            self._send_message(token, chat_id, "⚠️ No response generated. Please try again in a moment.")
 
     async def _handle_sheriff_message(self, token: str, user_id: str, chat_id: int, text: str):
         # Direct unlock path for reliability during locked-state recovery.

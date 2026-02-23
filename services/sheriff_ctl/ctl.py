@@ -41,7 +41,7 @@ GW_ORDER = [
     "sheriff-cli-gate",
     "sheriff-updater",
 ]
-LLM_ORDER = ["ai-worker", "ai-tg-llm", "telegram-webhook"]
+LLM_ORDER = ["ai-worker", "ai-tg-llm", "telegram-listener", "telegram-webhook"]
 ALL = [*GW_ORDER, *LLM_ORDER]
 
 OPLOG = get_op_logger("ctl")

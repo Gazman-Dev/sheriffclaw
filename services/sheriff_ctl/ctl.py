@@ -41,8 +41,10 @@ GW_ORDER = [
     "sheriff-cli-gate",
     "sheriff-updater",
 ]
-LLM_ORDER = ["ai-worker", "ai-tg-llm", "telegram-listener", "telegram-webhook"]
+LLM_ORDER = ["ai-worker", "ai-tg-llm", "telegram-listener"]
 ALL = [*GW_ORDER, *LLM_ORDER]
+# Daemonized services managed directly by ServiceManager (long-running edge listeners).
+MANAGED_SERVICES = ["telegram-listener"]
 
 OPLOG = get_op_logger("ctl")
 
@@ -265,7 +267,7 @@ def cmd_start(args):
             print("Start cancelled.")
             return
 
-    SERVICE_MANAGER.start_many(ALL)
+    SERVICE_MANAGER.start_many(MANAGED_SERVICES)
 
     mp = getattr(args, "master_password", None) or os.getenv("SHERIFF_MASTER_PASSWORD", "")
     if mp:
@@ -288,7 +290,7 @@ def cmd_start(args):
 
 
 def cmd_stop(args):
-    SERVICE_MANAGER.stop_many(list(reversed(ALL)))
+    SERVICE_MANAGER.stop_many(list(reversed(MANAGED_SERVICES)))
 
 
 def cmd_status(args):
@@ -355,8 +357,6 @@ async def _gw_secrets_call(op: str, payload: dict | None = None, gw: ProcClient 
 
 
 def cmd_update(args):
-    SERVICE_MANAGER.start_many(["sheriff-secrets", "sheriff-gateway", "sheriff-updater"])
-
     mp = getattr(args, "master_password", None)
 
     async def _run_update() -> tuple[bool, str]:
@@ -780,8 +780,8 @@ def cmd_onboard(args):
         print("\nOnboarding cancelled.")
         return
 
-    # Keep services alive after onboarding so Telegram replies work immediately.
-    SERVICE_MANAGER.start_many(ALL)
+    # Keep edge listener services alive after onboarding so Telegram replies work immediately.
+    SERVICE_MANAGER.start_many(MANAGED_SERVICES)
 
     if mp:
         async def _post_unlock() -> bool:
@@ -986,10 +986,6 @@ def cmd_chat(args):
 
     async def _run():
         nonlocal chat_master_password
-        # Keep stateful chat stable by ensuring core daemons are running.
-        core = ["sheriff-secrets", "sheriff-requests", "sheriff-gateway", "sheriff-cli-gate", "ai-worker"]
-        SERVICE_MANAGER.start_many(core)
-
         gateway = ProcClient("sheriff-gateway")
         cli_gate = ProcClient("sheriff-cli-gate")
 

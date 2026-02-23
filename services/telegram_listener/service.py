@@ -17,6 +17,7 @@ class TelegramListenerService:
         self.cli_gate = ProcClient("sheriff-cli-gate")
         self.offset_path = gw_root() / "state" / "telegram_offsets.json"
         self.offset_path.parent.mkdir(parents=True, exist_ok=True)
+        self._webhook_cleared: set[str] = set()
 
     async def _secrets(self, op: str, payload: dict):
         _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})
@@ -44,16 +45,29 @@ class TelegramListenerService:
         except Exception:
             pass
 
+    def _ensure_long_polling(self, token: str) -> None:
+        if not token or token in self._webhook_cleared:
+            return
+        try:
+            requests.post(
+                f"https://api.telegram.org/bot{token}/deleteWebhook",
+                json={"drop_pending_updates": False},
+                timeout=15,
+            )
+        except Exception:
+            return
+        self._webhook_cleared.add(token)
+
     async def _handle_ai_message(self, token: str, user_id: str, chat_id: int, text: str):
         _, gate = await self.ai_gate.request("ai_tg_llm.inbound_message", {"user_id": user_id, "text": text})
         result = gate.get("result", {})
         status = result.get("status")
         if status == "activation_required":
             code = result.get("activation_code", "")
-            self._send_message(token, chat_id, f"Your activation code is: {code}\nReply: activate {code}")
+            self._send_message(token, chat_id, f"Your activation code is: {code}")
             return
         if status == "activated":
-            self._send_message(token, chat_id, "Activated. You can chat now.")
+            self._send_message(token, chat_id, "✅ Activated. You can chat now.")
             return
         if status != "accepted":
             return
@@ -78,10 +92,10 @@ class TelegramListenerService:
         status = result.get("status")
         if status == "activation_required":
             code = result.get("activation_code", "")
-            self._send_message(token, chat_id, f"Your activation code is: {code}\nReply: activate {code}")
+            self._send_message(token, chat_id, f"Your activation code is: {code}")
             return
         if status == "activated":
-            self._send_message(token, chat_id, "Sheriff activated.")
+            self._send_message(token, chat_id, "✅ Sheriff activated.")
             return
         if status != "accepted":
             return
@@ -92,12 +106,13 @@ class TelegramListenerService:
             self._send_message(token, chat_id, msg)
 
     async def _poll_bot(self, role: str, token: str, offsets: dict):
+        self._ensure_long_polling(token)
         offset = int(offsets.get(role, 0))
         try:
             r = requests.get(
                 f"https://api.telegram.org/bot{token}/getUpdates",
                 params={"timeout": 25, "allowed_updates": '["message"]', "offset": offset},
-                timeout=30,
+                timeout=35,
             )
             data = r.json()
             updates = data.get("result", []) if isinstance(data, dict) else []
@@ -124,15 +139,13 @@ class TelegramListenerService:
         offsets = self._load_offsets()
         while True:
             try:
-                l = await self._secrets("secrets.get_llm_bot_token", {})
-                g = await self._secrets("secrets.get_gate_bot_token", {})
-                llm_token = l.get("token", "")
-                sheriff_token = g.get("token", "")
-
-                if llm_token:
-                    await self._poll_bot("llm", llm_token, offsets)
-                if sheriff_token:
-                    await self._poll_bot("sheriff", sheriff_token, offsets)
+                specs = [
+                    ("llm", (await self._secrets("secrets.get_llm_bot_token", {})).get("token", "")),
+                    ("sheriff", (await self._secrets("secrets.get_gate_bot_token", {})).get("token", "")),
+                ]
+                for role, token in specs:
+                    if token:
+                        await self._poll_bot(role, token, offsets)
                 self._save_offsets(offsets)
             except Exception:
                 await asyncio.sleep(2)

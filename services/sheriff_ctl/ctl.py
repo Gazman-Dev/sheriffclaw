@@ -19,6 +19,7 @@ import tty
 
 # requests is imported lazily in onboarding activation flow to avoid noisy startup warnings.
 
+from shared.oplog import get_op_logger
 from shared.paths import gw_root, llm_root
 from shared.proc_rpc import ProcClient
 
@@ -43,6 +44,8 @@ GW_ORDER = [
 ]
 LLM_ORDER = ["ai-worker", "ai-tg-llm", "telegram-webhook"]
 ALL = [*GW_ORDER, *LLM_ORDER]
+
+OPLOG = get_op_logger("ctl")
 
 
 def _debug_mode_path() -> Path:
@@ -580,18 +583,20 @@ def cmd_onboard(args):
         # If webhook is currently set for this token, getUpdates will not deliver messages.
         # Best-effort disable webhook during activation polling.
         try:
-            requests.post(
+            r = requests.post(
                 f"https://api.telegram.org/bot{token}/deleteWebhook",
                 json={"drop_pending_updates": False},
                 timeout=15,
             )
-        except Exception:
-            pass
+            OPLOG.info("activation[%s] deleteWebhook status=%s body=%s", role, r.status_code, (r.text or "")[:300])
+        except Exception as e:
+            OPLOG.exception("activation[%s] deleteWebhook failed: %s", role, e)
 
         offset = 0
         sent_codes: dict[str, str] = {}
         user_chat: dict[str, int] = {}
         start = time.time()
+        wait_ticks = 0
 
         while time.time() - start < timeout_sec:
             # Already activated?
@@ -607,7 +612,9 @@ def cmd_onboard(args):
                 )
                 data = resp.json()
                 updates = data.get("result", []) if isinstance(data, dict) else []
-            except Exception:
+                OPLOG.info("activation[%s] getUpdates status=%s count=%s offset=%s", role, resp.status_code, len(updates), offset)
+            except Exception as e:
+                OPLOG.exception("activation[%s] getUpdates failed: %s", role, e)
                 updates = []
 
             for upd in updates:
@@ -637,13 +644,14 @@ def cmd_onboard(args):
 
                     text = f"Your activation code is: {code}"
                     try:
-                        requests.post(
+                        s = requests.post(
                             f"https://api.telegram.org/bot{token}/sendMessage",
                             json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
                             timeout=15,
                         )
-                    except Exception:
-                        pass
+                        OPLOG.info("activation[%s] send code chat_id=%s status=%s body=%s", role, chat_id, s.status_code, (s.text or "")[:300])
+                    except Exception as e:
+                        OPLOG.exception("activation[%s] send code failed chat_id=%s err=%s", role, chat_id, e)
 
             if sent_codes:
                 try:
@@ -656,21 +664,27 @@ def cmd_onboard(args):
                 if claim.get("ok"):
                     ok_user = str(claim.get("user_id") or "")
                     ok_chat = user_chat.get(ok_user)
+                    OPLOG.info("activation[%s] claim success user_id=%s chat_id=%s", role, ok_user, ok_chat)
                     if ok_chat:
                         try:
-                            requests.post(
+                            s = requests.post(
                                 f"https://api.telegram.org/bot{token}/sendMessage",
                                 json={"chat_id": ok_chat, "text": "✅ Activated. You can chat now.", "disable_web_page_preview": True},
                                 timeout=15,
                             )
-                        except Exception:
-                            pass
+                            OPLOG.info("activation[%s] send success message chat_id=%s status=%s", role, ok_chat, s.status_code)
+                        except Exception as e:
+                            OPLOG.exception("activation[%s] send success message failed chat_id=%s err=%s", role, ok_chat, e)
                     return True
                 print("Invalid code, try again.")
             else:
+                wait_ticks += 1
+                if wait_ticks % 5 == 1:
+                    OPLOG.info("activation[%s] waiting for DM... elapsed=%ss", role, int(time.time() - start))
                 print("Waiting for a Telegram DM to the bot...")
                 await asyncio.sleep(2)
 
+        OPLOG.warning("activation[%s] timed out after %ss", role, timeout_sec)
         return False
 
     async def _run():

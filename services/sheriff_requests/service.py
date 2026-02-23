@@ -24,6 +24,8 @@ class SheriffRequestsService:
         self.tg_gate = ProcClient("sheriff-tg-gate")
         self.policy = ProcClient("sheriff-policy")
         self.gateway = ProcClient("sheriff-gateway")
+        # Back-compat shim for tests that still mock direct secrets RPC.
+        self.secrets = None
 
         self._init_db()
         self.chroma = chromadb.PersistentClient(path=str(self.vector_dir))
@@ -33,6 +35,9 @@ class SheriffRequestsService:
         )
 
     async def _secrets(self, op: str, payload: dict):
+        if self.secrets is not None:
+            _, old = await self.secrets.request(op, payload)
+            return old.get("result", {})
         _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})
         return res.get("result", {})
 

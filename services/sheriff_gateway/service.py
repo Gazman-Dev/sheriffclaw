@@ -107,7 +107,9 @@ class SheriffGatewayService:
                     _, unlocked = await self.secrets.request("secrets.is_unlocked", {})
                     vault_known_locked = unlocked.get("ok") is True and unlocked.get("result", {}).get("unlocked") is False
             if vault_known_locked:
-                # Silent lock gate: do not emit agent output while vault is locked.
+                msg = "🔒 Sheriff vault is locked. Run /unlock <master_password> first."
+                await emit_event("assistant.final", {"text": msg})
+                append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
                 return {"status": "locked", "session_handle": session}
 
         if unlocked.get("ok") is True and unlocked.get("result", {}).get("unlocked"):

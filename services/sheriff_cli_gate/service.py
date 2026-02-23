@@ -7,6 +7,8 @@ class SheriffCliGateService:
     def __init__(self) -> None:
         self.requests = ProcClient("sheriff-requests")
         self.gateway = ProcClient("sheriff-gateway")
+        # Back-compat shim for existing tests/mocks.
+        self.secrets = None
         self.services = [
             "sheriff-secrets",
             "sheriff-policy",
@@ -21,6 +23,9 @@ class SheriffCliGateService:
         ]
 
     async def _secrets(self, op: str, payload: dict):
+        if self.secrets is not None:
+            _, old = await self.secrets.request(op, payload)
+            return old.get("result", {})
         _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})
         return res.get("result", {})
 

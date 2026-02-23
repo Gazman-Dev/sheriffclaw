@@ -9,9 +9,14 @@ class SheriffTgGateService:
     def __init__(self):
         self.gateway = ProcClient("sheriff-gateway")
         self.policy = ProcClient("sheriff-policy")
+        # Back-compat shim for tests that still mock direct secrets RPC.
+        self.secrets = None
         self.log_path = gw_root() / "state" / "gate_events.jsonl"
 
     async def _secrets(self, op: str, payload: dict):
+        if self.secrets is not None:
+            _, old = await self.secrets.request(op, payload)
+            return old.get("result", {})
         _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})
         return res.get("result", {})
 

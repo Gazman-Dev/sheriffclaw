@@ -19,6 +19,7 @@ class TelegramListenerService:
         self.cli_gate = ProcClient("sheriff-cli-gate")
         self.offset_path = gw_root() / "state" / "telegram_offsets.json"
         self.tokens_cache_path = gw_root() / "state" / "telegram_tokens_cache.json"
+        self.unlock_channel_path = gw_root() / "state" / "telegram_unlock_channel.json"
         self.offset_path.parent.mkdir(parents=True, exist_ok=True)
         self._webhook_cleared: set[str] = set()
 
@@ -54,6 +55,15 @@ class TelegramListenerService:
 
     def _save_tokens_cache(self, tokens: dict) -> None:
         self.tokens_cache_path.write_text(json.dumps(tokens, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _load_unlock_channel_token(self) -> str:
+        if not self.unlock_channel_path.exists():
+            return ""
+        try:
+            obj = json.loads(self.unlock_channel_path.read_text(encoding="utf-8"))
+            return str(obj.get("token", ""))
+        except Exception:
+            return ""
 
     @staticmethod
     def _send_message(token: str, chat_id: int | str, text: str) -> None:
@@ -181,6 +191,12 @@ class TelegramListenerService:
 
                 llm_token = llm_live or cached_tokens.get("llm", "")
                 sheriff_token = sheriff_live or cached_tokens.get("sheriff", "")
+                # Security policy: when Telegram unlock is enabled, sheriff token may be mirrored
+                # outside vault for unlock continuity; use it as last resort for sheriff channel only.
+                if not sheriff_token:
+                    sheriff_token = self._load_unlock_channel_token()
+                    if sheriff_token:
+                        self.log.info("using unlock-channel sheriff token fallback")
 
                 # Refresh cache only when we have live values.
                 changed = False

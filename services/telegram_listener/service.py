@@ -23,6 +23,7 @@ class TelegramListenerService:
         self.unlock_channel_path = gw_root() / "state" / "telegram_unlock_channel.json"
         self.offset_path.parent.mkdir(parents=True, exist_ok=True)
         self._webhook_cleared: set[str] = set()
+        self._llm_missing_notified = False
 
     async def _secrets(self, op: str, payload: dict):
         _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})
@@ -57,14 +58,17 @@ class TelegramListenerService:
     def _save_tokens_cache(self, tokens: dict) -> None:
         self.tokens_cache_path.write_text(json.dumps(tokens, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def _load_unlock_channel_token(self) -> str:
+    def _load_unlock_channel(self) -> dict:
         if not self.unlock_channel_path.exists():
-            return ""
+            return {"token": "", "user_id": ""}
         try:
             obj = json.loads(self.unlock_channel_path.read_text(encoding="utf-8"))
-            return str(obj.get("token", ""))
+            return {"token": str(obj.get("token", "")), "user_id": str(obj.get("user_id", ""))}
         except Exception:
-            return ""
+            return {"token": "", "user_id": ""}
+
+    def _load_unlock_channel_token(self) -> str:
+        return self._load_unlock_channel().get("token", "")
 
     def _send_message(self, token: str, chat_id: int | str, text: str) -> None:
         try:
@@ -177,6 +181,10 @@ class TelegramListenerService:
             _, out = await self.cli_gate.request("cli.handle_message", {"text": text})
             msg = out.get("result", {}).get("message", "ok")
             self._send_message(token, chat_id, msg)
+            return
+
+        # Non-command messages on Sheriff channel should still guide user.
+        self._send_message(token, chat_id, "Sheriff channel commands: /unlock <master_password>, /status")
 
     async def _poll_bot(self, role: str, token: str, sheriff_token: str, offsets: dict):
         self._ensure_long_polling(token)
@@ -243,6 +251,18 @@ class TelegramListenerService:
                 specs = [("llm", llm_token), ("sheriff", sheriff_token)]
                 if not llm_token:
                     self.log.info("llm token unavailable (vault likely locked); waiting for sheriff unlock")
+                    if sheriff_token and not self._llm_missing_notified:
+                        unlock_ch = self._load_unlock_channel()
+                        uid = unlock_ch.get("user_id", "")
+                        if uid:
+                            self._send_message(
+                                sheriff_token,
+                                int(uid),
+                                "ℹ️ LLM bot token unavailable while vault is locked. Send /unlock <master_password> in Sheriff bot, then retry AI bot.",
+                            )
+                        self._llm_missing_notified = True
+                else:
+                    self._llm_missing_notified = False
                 for role, token in specs:
                     if token:
                         await self._poll_bot(role, token, sheriff_token, offsets)

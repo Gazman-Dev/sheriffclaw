@@ -129,6 +129,20 @@ class TelegramListenerService:
                 self._send_message(token, chat_id, msg)
 
     async def _handle_sheriff_message(self, token: str, user_id: str, chat_id: int, text: str):
+        # Direct unlock path for reliability during locked-state recovery.
+        if text.startswith("/unlock"):
+            parts = text.split(" ", 1)
+            if len(parts) < 2 or not parts[1].strip():
+                self._send_message(token, chat_id, "Usage: /unlock <master_password>")
+                return
+            mp = parts[1].strip()
+            r = await self._secrets("secrets.unlock", {"master_password": mp})
+            if r.get("ok"):
+                self._send_message(token, chat_id, "✅ Vault unlocked.")
+            else:
+                self._send_message(token, chat_id, "❌ Unlock failed.")
+            return
+
         _, gate = await self.sheriff_gate.request("gate.inbound_message", {"user_id": user_id, "text": text})
         result = gate.get("result", {})
         status = result.get("status")
@@ -210,6 +224,8 @@ class TelegramListenerService:
                     self._save_tokens_cache(cached_tokens)
 
                 specs = [("llm", llm_token), ("sheriff", sheriff_token)]
+                if not llm_token:
+                    self.log.info("llm token unavailable (vault likely locked); waiting for sheriff unlock")
                 for role, token in specs:
                     if token:
                         await self._poll_bot(role, token, sheriff_token, offsets)

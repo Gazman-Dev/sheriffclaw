@@ -101,10 +101,11 @@ class ChatGPTSubscriptionCodexProvider(_CodexCliBase):
         self.base_url = base_url.rstrip("/")
 
     def _generate_sync(self, messages: list[dict], model: str) -> str:
-        # Subscription auth is handled by `codex login` token store.
-        # Keep access_token argument for backward compatibility with stored settings.
+        if not self.access_token:
+            raise ValueError("missing ChatGPT subscription access token")
         prompt = self._render_prompt(messages)
-        return self._run_codex_exec(prompt, model)
+        # Keep token in-memory only; do not rely on codex auth file state.
+        return self._run_codex_exec(prompt, model, {"OPENAI_API_KEY": self.access_token})
 
     async def generate(self, messages: list[dict], model: str = "gpt-5.3-codex") -> str:
         return await asyncio.to_thread(self._generate_sync, messages, model)

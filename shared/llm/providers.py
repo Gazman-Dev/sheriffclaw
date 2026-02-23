@@ -57,7 +57,7 @@ class _CodexCliBase:
         if env_extra:
             env.update({k: v for k, v in env_extra.items() if v is not None})
 
-        cmd = ["codex", "exec", "--model", model, prompt]
+        cmd = ["codex", "exec", "--skip-git-repo-check", "--model", model, prompt]
         proc = subprocess.run(cmd, capture_output=True, text=True, env=env, check=False)  # noqa: S603
         if proc.returncode != 0:
             err = (proc.stderr or proc.stdout or "").strip()

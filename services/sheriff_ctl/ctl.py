@@ -375,7 +375,14 @@ def _verify_master_password(mp: str) -> bool:
 async def _gw_secrets_call(op: str, payload: dict | None = None) -> dict:
     gw = ProcClient("sheriff-gateway")
     _, res = await gw.request("gateway.secrets.call", {"op": op, "payload": payload or {}})
-    return res.get("result", {})
+    outer = res.get("result", {})
+    # gateway.secrets.call returns {ok, result, error}; unwrap for callers.
+    if isinstance(outer, dict) and "result" in outer:
+        if not outer.get("ok", True):
+            return {"_error": outer.get("error")}
+        inner = outer.get("result", {})
+        return inner if isinstance(inner, dict) else {}
+    return outer if isinstance(outer, dict) else {}
 
 
 def cmd_update(args):
@@ -650,6 +657,7 @@ def cmd_onboard(args):
                     c = await _gw_secrets_call("secrets.activation.create", {"bot_role": role, "user_id": user_id})
                     code = c.get("code")
                     if not code:
+                        OPLOG.warning("activation[%s] failed to create code user_id=%s response=%s", role, user_id, c)
                         continue
                     sent_codes[user_id] = code
                     user_chat[user_id] = int(chat_id)

@@ -219,16 +219,22 @@ setup_alias() {
         shell_cfg="$HOME/.bash_profile"
     fi
 
-    if [ -n "$shell_cfg" ]; then
-        if ! grep -q "alias sheriff=\|$VENV_DIR/bin/sheriff" "$shell_cfg"; then
-            echo "alias sheriff='$VENV_DIR/bin/sheriff'" >> "$shell_cfg"
-            log "Added alias 'sheriff' to $shell_cfg"
-        fi
-        if ! grep -q "alias sheriff-ctl=\|$VENV_DIR/bin/sheriff-ctl" "$shell_cfg"; then
-            echo "alias sheriff-ctl='$VENV_DIR/bin/sheriff-ctl'" >> "$shell_cfg"
-            log "Added alias 'sheriff-ctl' to $shell_cfg"
-        fi
+    if [ -z "$shell_cfg" ]; then
+        return 0
     fi
+
+    # Never persist aliases pointing to temporary/custom test install dirs.
+    local canonical_venv="$HOME/.sheriffclaw/venv"
+
+    # Replace any previous sheriff aliases with canonical target.
+    local tmpf
+    tmpf="$(mktemp)"
+    grep -vE "^alias sheriff=|^alias sheriff-ctl=" "$shell_cfg" > "$tmpf" || true
+    mv "$tmpf" "$shell_cfg"
+
+    echo "alias sheriff='$canonical_venv/bin/sheriff'" >> "$shell_cfg"
+    echo "alias sheriff-ctl='$canonical_venv/bin/sheriff-ctl'" >> "$shell_cfg"
+    log "Updated aliases in $shell_cfg"
 }
 
 run_onboarding_if_needed() {

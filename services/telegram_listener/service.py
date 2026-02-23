@@ -5,12 +5,14 @@ import json
 
 import requests
 
+from shared.oplog import get_op_logger
 from shared.paths import gw_root
 from shared.proc_rpc import ProcClient
 
 
 class TelegramListenerService:
     def __init__(self):
+        self.log = get_op_logger("telegram-listener")
         self.gateway = ProcClient("sheriff-gateway")
         self.ai_gate = ProcClient("ai-tg-llm")
         self.sheriff_gate = ProcClient("sheriff-tg-gate")
@@ -68,12 +70,14 @@ class TelegramListenerService:
         if not token or token in self._webhook_cleared:
             return
         try:
-            requests.post(
+            r = requests.post(
                 f"https://api.telegram.org/bot{token}/deleteWebhook",
                 json={"drop_pending_updates": False},
                 timeout=15,
             )
-        except Exception:
+            self.log.info("deleteWebhook status=%s body=%s", r.status_code, (r.text or "")[:240])
+        except Exception as e:
+            self.log.exception("deleteWebhook failed: %s", e)
             return
         self._webhook_cleared.add(token)
 
@@ -144,7 +148,9 @@ class TelegramListenerService:
             )
             data = r.json()
             updates = data.get("result", []) if isinstance(data, dict) else []
-        except Exception:
+            self.log.info("poll role=%s status=%s count=%s offset=%s", role, r.status_code, len(updates), offset)
+        except Exception as e:
+            self.log.exception("poll failed role=%s err=%s", role, e)
             return
 
         for upd in updates:
@@ -157,8 +163,10 @@ class TelegramListenerService:
             if not user_id or chat_id is None or not text:
                 continue
             if role == "llm":
+                self.log.info("dispatch role=llm user_id=%s text=%s", user_id, text[:80])
                 await self._handle_ai_message(token, sheriff_token, user_id, int(chat_id), text)
             else:
+                self.log.info("dispatch role=sheriff user_id=%s text=%s", user_id, text[:80])
                 await self._handle_sheriff_message(token, user_id, int(chat_id), text)
 
         offsets[role] = offset

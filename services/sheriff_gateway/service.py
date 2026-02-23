@@ -161,6 +161,7 @@ class SheriffGatewayService:
 
         stream, final = await self.ai.request("agent.session.user_message", {"session_handle": session, "text": text, "model_ref": payload.get("model_ref"), "provider_name": provider_name, "api_key": api_key, "base_url": base_url}, stream_events=True)
         saw_final = False
+        delta_parts: list[str] = []
         async for frame in stream:
             if frame["event"] == "tool.call":
                 result = await self._route_tool(principal_id, frame.get("payload", {}))
@@ -169,17 +170,25 @@ class SheriffGatewayService:
                 continue
             if frame["event"] == "assistant.final":
                 saw_final = True
+            elif frame["event"] == "assistant.delta":
+                part = str((frame.get("payload") or {}).get("text") or "")
+                if part:
+                    delta_parts.append(part)
             await emit_event(frame["event"], frame.get("payload", {}))
 
         final_res = await final if inspect.isawaitable(final) else final
         if isinstance(final_res, dict) and final_res.get("ok") is False:
-            msg = f"AI worker error: {final_res.get('error') or 'unknown_error'}"
+            err = final_res.get("error") or "unknown_error"
+            msg = f"AI worker error: {err}"
             await emit_event("assistant.final", {"text": msg})
             append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
             return {"status": "ai_error", "session_handle": session}
 
         if not saw_final:
-            msg = "AI produced no final response."
+            if delta_parts:
+                msg = "".join(delta_parts).strip() or "AI produced partial output only."
+            else:
+                msg = "AI produced no final response."
             await emit_event("assistant.final", {"text": msg})
             append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
 

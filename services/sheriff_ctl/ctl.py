@@ -7,8 +7,6 @@ import json
 import os
 import platform
 import shutil
-import signal
-import subprocess
 import sys
 import time
 import warnings
@@ -22,6 +20,7 @@ import tty
 from shared.oplog import get_op_logger
 from shared.paths import gw_root, llm_root
 from shared.proc_rpc import ProcClient
+from shared.service_manager import ServiceManager
 
 if os.getenv("SHERIFF_DEBUG", "0") not in {"1", "true", "yes"}:
     try:
@@ -236,50 +235,23 @@ def _service_command(service: str) -> list[str]:
     return base
 
 
+SERVICE_MANAGER = ServiceManager(_service_command, _pid_path, _log_paths)
+
+
 def _start_service(service: str) -> None:
-    pid = _read_pid(service)
-    if pid and _alive(pid):
-        return
-    out_path, err_path = _log_paths(service)
-    out = out_path.open("a", encoding="utf-8")
-    err = err_path.open("a", encoding="utf-8")
-    proc = subprocess.Popen(_service_command(service), stdout=out, stderr=err)  # noqa: S603
-    _pid_path(service).write_text(str(proc.pid), encoding="utf-8")
+    SERVICE_MANAGER.start(service)
 
 
 def _read_pid(service: str) -> int | None:
-    p = _pid_path(service)
-    if not p.exists():
-        return None
-    try:
-        return int(p.read_text(encoding="utf-8").strip())
-    except ValueError:
-        return None
+    return SERVICE_MANAGER.read_pid(service)
 
 
 def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
+    return SERVICE_MANAGER.alive(pid)
 
 
 def _stop_service(service: str) -> None:
-    pid = _read_pid(service)
-    if pid is None:
-        return
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        _pid_path(service).unlink(missing_ok=True)
-        return
-    deadline = time.time() + 3
-    while time.time() < deadline and _alive(pid):
-        time.sleep(0.1)
-    if _alive(pid):
-        os.kill(pid, signal.SIGKILL)
-    _pid_path(service).unlink(missing_ok=True)
+    SERVICE_MANAGER.stop(service)
 
 
 def cmd_start(args):
@@ -293,8 +265,7 @@ def cmd_start(args):
             print("Start cancelled.")
             return
 
-    for svc in ALL:
-        _start_service(svc)
+    SERVICE_MANAGER.start_many(ALL)
 
     mp = getattr(args, "master_password", None) or os.getenv("SHERIFF_MASTER_PASSWORD", "")
     if mp:
@@ -317,14 +288,12 @@ def cmd_start(args):
 
 
 def cmd_stop(args):
-    for svc in reversed(ALL):
-        _stop_service(svc)
+    SERVICE_MANAGER.stop_many(list(reversed(ALL)))
 
 
 def cmd_status(args):
     for svc in ALL:
-        pid = _read_pid(svc)
-        print(f"{svc}: {pid if pid and _alive(pid) else 'stopped'}")
+        print(f"{svc}: {SERVICE_MANAGER.status_code(svc)}")
 
 
 def cmd_logs(args):
@@ -386,9 +355,7 @@ async def _gw_secrets_call(op: str, payload: dict | None = None, gw: ProcClient 
 
 
 def cmd_update(args):
-    _start_service("sheriff-secrets")
-    _start_service("sheriff-gateway")
-    _start_service("sheriff-updater")
+    SERVICE_MANAGER.start_many(["sheriff-secrets", "sheriff-gateway", "sheriff-updater"])
 
     mp = getattr(args, "master_password", None)
 
@@ -814,8 +781,7 @@ def cmd_onboard(args):
         return
 
     # Keep services alive after onboarding so Telegram replies work immediately.
-    for svc in ALL:
-        _start_service(svc)
+    SERVICE_MANAGER.start_many(ALL)
 
     if mp:
         async def _post_unlock() -> bool:
@@ -1022,8 +988,7 @@ def cmd_chat(args):
         nonlocal chat_master_password
         # Keep stateful chat stable by ensuring core daemons are running.
         core = ["sheriff-secrets", "sheriff-requests", "sheriff-gateway", "sheriff-cli-gate", "ai-worker"]
-        for svc in core:
-            _start_service(svc)
+        SERVICE_MANAGER.start_many(core)
 
         gateway = ProcClient("sheriff-gateway")
         cli_gate = ProcClient("sheriff-cli-gate")

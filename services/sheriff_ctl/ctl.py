@@ -92,6 +92,53 @@ def _resolve_service_binary(service: str) -> str:
     return str(venv_bin) if venv_bin.exists() else service
 
 
+def _telegram_unlock_channel_path() -> Path:
+    return gw_root() / "state" / "telegram_unlock_channel.json"
+
+
+def _save_telegram_unlock_channel(*, token: str, user_id: str | None) -> None:
+    p = _telegram_unlock_channel_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        json.dumps({"token": token or "", "user_id": str(user_id or "")}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _clear_telegram_unlock_channel() -> None:
+    _telegram_unlock_channel_path().unlink(missing_ok=True)
+
+
+def _load_telegram_unlock_channel() -> dict:
+    p = _telegram_unlock_channel_path()
+    if not p.exists():
+        return {}
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+        return {"token": str(obj.get("token", "")), "user_id": str(obj.get("user_id", ""))}
+    except Exception:
+        return {}
+
+
+def _notify_sheriff_channel(text: str) -> bool:
+    cfg = _load_telegram_unlock_channel()
+    token = cfg.get("token", "")
+    user_id = cfg.get("user_id", "")
+    if not token or not user_id:
+        return False
+    try:
+        import requests
+
+        requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": int(user_id), "text": text, "disable_web_page_preview": True},
+            timeout=15,
+        )
+        return True
+    except Exception:
+        return False
+
+
 def _ai_worker_sandbox_profile() -> Path:
     p = gw_root() / "state" / "ai_worker.sb"
     workspace = gw_root().parent
@@ -285,8 +332,12 @@ def cmd_start(args):
         ok = asyncio.run(_unlock())
         if ok:
             print("Vault unlocked on start.")
+            _notify_sheriff_channel("✅ Sheriff services restarted and vault unlocked.")
         else:
             print("Warning: failed to unlock vault on start (master password rejected).")
+            _notify_sheriff_channel("🔒 Sheriff restarted but vault is locked. Send: /unlock <master_password>")
+    else:
+        _notify_sheriff_channel("ℹ️ Sheriff services restarted. Vault state unknown; send /unlock <master_password> if needed.")
 
 
 def cmd_stop(args):
@@ -330,6 +381,7 @@ def cmd_factory_reset(args):
     for svc in reversed(ALL):
         _stop_service(svc)
     _wipe_all_state()
+    _clear_telegram_unlock_channel()
     print("Factory reset complete. All Sheriff/Agent state removed.")
 
 
@@ -358,6 +410,7 @@ async def _gw_secrets_call(op: str, payload: dict | None = None, gw: ProcClient 
 
 def cmd_update(args):
     mp = getattr(args, "master_password", None)
+    _notify_sheriff_channel("🔄 Sheriff update started.")
 
     async def _run_update() -> tuple[bool, str]:
         gw = ProcClient("sheriff-gateway")
@@ -405,6 +458,7 @@ def cmd_update(args):
         print(note)
     if ok:
         if "skipped" in note.lower():
+            _notify_sheriff_channel("ℹ️ Sheriff update skipped (versions not increased).")
             return
         print("Restarting services after update...")
         cmd_stop(argparse.Namespace())
@@ -412,8 +466,12 @@ def cmd_update(args):
         cmd_start(argparse.Namespace(master_password=start_mp))
         if not start_mp:
             print("Note: services restarted without master password; vault may remain locked until /unlock.")
+            _notify_sheriff_channel("🔒 Sheriff updated and restarted, but vault is locked. Send: /unlock <master_password>")
+        else:
+            _notify_sheriff_channel("✅ Sheriff update completed and services restarted.")
         print("Update completed.")
     else:
+        _notify_sheriff_channel("❌ Sheriff update failed. Check logs.")
         print("Update failed.")
 
 
@@ -776,6 +834,17 @@ def cmd_onboard(args):
         master_policy = gw_root() / "state" / "master_policy.json"
         master_policy.parent.mkdir(parents=True, exist_ok=True)
         master_policy.write_text(json.dumps({"allow_telegram_master_password": allow_tg}), encoding="utf-8")
+
+        # Optional: allow proactive lock/unlock notifications via Sheriff channel only.
+        if allow_tg and gate_tok:
+            bound = await _gw_secrets_call("secrets.activation.status", {"bot_role": "sheriff"}, gw=gw)
+            bound_uid = str(bound.get("user_id") or "")
+            if bound_uid:
+                _save_telegram_unlock_channel(token=gate_tok, user_id=bound_uid)
+            else:
+                _clear_telegram_unlock_channel()
+        else:
+            _clear_telegram_unlock_channel()
 
     try:
         asyncio.run(_run())

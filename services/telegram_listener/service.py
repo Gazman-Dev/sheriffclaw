@@ -97,6 +97,15 @@ class TelegramListenerService:
         self._webhook_cleared.add(token)
 
     async def _handle_ai_message(self, token: str, sheriff_token: str, user_id: str, chat_id: int, text: str):
+        unlocked = await self._secrets("secrets.is_unlocked", {})
+        if not unlocked.get("unlocked"):
+            msg = "🔒 Vault is locked. Send /unlock <master_password> in Sheriff bot, then retry."
+            self._send_message(token, chat_id, msg)
+            if sheriff_token:
+                self._send_message(sheriff_token, chat_id, msg)
+            self.log.info("ai blocked while locked user_id=%s", user_id)
+            return
+
         _, gate = await self.ai_gate.request("ai_tg_llm.inbound_message", {"user_id": user_id, "text": text})
         result = gate.get("result", {})
         status = result.get("status")

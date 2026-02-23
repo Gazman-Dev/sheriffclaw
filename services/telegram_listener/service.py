@@ -65,16 +65,16 @@ class TelegramListenerService:
         except Exception:
             return ""
 
-    @staticmethod
-    def _send_message(token: str, chat_id: int | str, text: str) -> None:
+    def _send_message(self, token: str, chat_id: int | str, text: str) -> None:
         try:
-            requests.post(
+            r = requests.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
                 json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
                 timeout=20,
             )
-        except Exception:
-            pass
+            self.log.info("sendMessage chat_id=%s status=%s body=%s", chat_id, r.status_code, (r.text or "")[:240])
+        except Exception as e:
+            self.log.exception("sendMessage failed chat_id=%s err=%s", chat_id, e)
 
     def _ensure_long_polling(self, token: str) -> None:
         if not token or token in self._webhook_cleared:
@@ -95,6 +95,7 @@ class TelegramListenerService:
         _, gate = await self.ai_gate.request("ai_tg_llm.inbound_message", {"user_id": user_id, "text": text})
         result = gate.get("result", {})
         status = result.get("status")
+        self.log.info("ai inbound status=%s user_id=%s", status, user_id)
         if status == "activation_required":
             code = result.get("activation_code", "")
             self._send_message(token, chat_id, f"Your activation code is: {code}")
@@ -137,6 +138,7 @@ class TelegramListenerService:
                 return
             mp = parts[1].strip()
             r = await self._secrets("secrets.unlock", {"master_password": mp})
+            self.log.info("unlock attempt user_id=%s ok=%s", user_id, bool(r.get("ok")))
             if r.get("ok"):
                 self._send_message(token, chat_id, "✅ Vault unlocked.")
             else:
@@ -146,6 +148,7 @@ class TelegramListenerService:
         _, gate = await self.sheriff_gate.request("gate.inbound_message", {"user_id": user_id, "text": text})
         result = gate.get("result", {})
         status = result.get("status")
+        self.log.info("sheriff inbound status=%s user_id=%s", status, user_id)
         if status == "activation_required":
             code = result.get("activation_code", "")
             self._send_message(token, chat_id, f"Your activation code is: {code}")

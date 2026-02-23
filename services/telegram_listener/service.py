@@ -13,6 +13,7 @@ from shared.proc_rpc import ProcClient
 class TelegramListenerService:
     def __init__(self):
         self.log = get_op_logger("telegram-listener")
+        self.log.info("telegram-listener boot (build=delta-fallback-v2)")
         self.gateway = ProcClient("sheriff-gateway")
         self.ai_gate = ProcClient("ai-tg-llm")
         self.sheriff_gate = ProcClient("sheriff-tg-gate")

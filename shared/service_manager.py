@@ -42,10 +42,17 @@ class ServiceManager:
             return str(pid)
         return "stopped"
 
+    def _kill_by_name_fallback(self, service: str) -> None:
+        # Cleanup stale processes that may survive pidfile churn (best-effort).
+        subprocess.run(["pkill", "-f", f"/bin/{service}"], check=False)  # noqa: S603
+        subprocess.run(["pkill", "-f", f" {service}"], check=False)  # noqa: S603
+
     def start(self, service: str) -> str:
         pid = self.read_pid(service)
         if pid and self.alive(pid):
             return "already_running"
+        # Avoid duplicate lingering workers after update/reinstall.
+        self._kill_by_name_fallback(service)
         out_path, err_path = self._log_paths_for(service)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         err_path.parent.mkdir(parents=True, exist_ok=True)
@@ -58,6 +65,7 @@ class ServiceManager:
     def stop(self, service: str) -> str:
         pid = self.read_pid(service)
         if pid is None:
+            self._kill_by_name_fallback(service)
             return "already_stopped"
         try:
             os.kill(pid, signal.SIGTERM)

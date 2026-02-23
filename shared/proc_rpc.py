@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import uuid
 from collections import deque
@@ -20,6 +21,7 @@ class ProcClient:
         self.proc: asyncio.subprocess.Process | None = None
         self._stderr_tail: deque[str] = deque(maxlen=80)
         self._lock = asyncio.Lock()
+        self.request_timeout_sec = float(os.environ.get("SHERIFF_RPC_TIMEOUT_SEC", "600"))
 
     async def start(self):
         if self.proc and self.proc.returncode is None:
@@ -65,7 +67,13 @@ class ProcClient:
             if not stream_events:
                 events = []
                 while True:
-                    frame = await self._read_frame()
+                    try:
+                        frame = await asyncio.wait_for(self._read_frame(), timeout=self.request_timeout_sec)
+                    except asyncio.TimeoutError as e:
+                        raise ServiceCrashedError(
+                            f"rpc timeout waiting for {self.binary}:{op} after {self.request_timeout_sec:.0f}s; stderr tail:\n"
+                            + "\n".join(self._stderr_tail)
+                        ) from e
                     if frame.get("id") != req_id:
                         raise ProtocolError(f"unexpected frame id {frame.get('id')} expected {req_id}")
                     if "event" in frame:
@@ -76,7 +84,13 @@ class ProcClient:
             frames: list[dict] = []
             final = None
             while True:
-                frame = await self._read_frame()
+                try:
+                    frame = await asyncio.wait_for(self._read_frame(), timeout=self.request_timeout_sec)
+                except asyncio.TimeoutError as e:
+                    raise ServiceCrashedError(
+                        f"rpc timeout waiting for {self.binary}:{op} after {self.request_timeout_sec:.0f}s; stderr tail:\n"
+                        + "\n".join(self._stderr_tail)
+                    ) from e
                 if frame.get("id") != req_id:
                     raise ProtocolError(f"unexpected frame id {frame.get('id')} expected {req_id}")
                 if "event" in frame:

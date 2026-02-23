@@ -452,8 +452,21 @@ def cmd_onboard(args):
 
     mp = args.master_password
     if mp is None:
-        if bool(getattr(args, "keep_unchanged", False)) and _is_onboarded():
-            mp = getpass.getpass("Current Master Password (keep unchanged mode): ")
+        if _is_onboarded():
+            if bool(getattr(args, "keep_unchanged", False)):
+                mp = getpass.getpass("Current Master Password (keep unchanged mode): ")
+            else:
+                choice = input("Master password: [K]eep current / [N]ew? (default K): ").strip().lower()
+                if choice in {"", "k", "keep"}:
+                    mp = getpass.getpass("Current Master Password: ")
+                else:
+                    while True:
+                        a = getpass.getpass("Set New Master Password: ")
+                        b = getpass.getpass("Confirm New Master Password: ")
+                        if a and a == b:
+                            mp = a
+                            break
+                        print("Passwords do not match. Please try again.")
         else:
             while True:
                 a = getpass.getpass("Set Master Password: ")
@@ -800,9 +813,32 @@ def cmd_onboard(args):
         print("\nOnboarding cancelled.")
         return
 
+    # Keep services alive after onboarding so Telegram replies work immediately.
+    for svc in ALL:
+        _start_service(svc)
+
+    if mp:
+        async def _post_unlock() -> bool:
+            gw = ProcClient("sheriff-gateway")
+            for _ in range(20):
+                try:
+                    await gw.request("health", {})
+                    break
+                except Exception:
+                    await asyncio.sleep(0.2)
+            st = await _gw_secrets_call("secrets.is_unlocked", {}, gw=gw)
+            if st.get("unlocked"):
+                return True
+            res = await _gw_secrets_call("secrets.unlock", {"master_password": mp}, gw=gw)
+            return bool(res.get("ok"))
+
+        ok_unlock = asyncio.run(_post_unlock())
+        if not ok_unlock:
+            print("Warning: services started, but vault unlock failed in running secrets service.")
+
     debug_mode = bool(getattr(args, "debug_mode", False))
     _write_debug_mode(debug_mode)
-    print(f"Onboarding complete. Secrets initialized and unlocked. Debug mode {'ON' if debug_mode else 'OFF'}.")
+    print(f"Onboarding complete. Services started and secrets unlocked. Debug mode {'ON' if debug_mode else 'OFF'}.")
 
 
 def cmd_debug(args):
@@ -1115,5 +1151,8 @@ def main_sheriff(argv: list[str] | None = None) -> None:
     args = p.parse_args(argv)
     if args.debug is not None:
         cmd_debug(argparse.Namespace(value=args.debug))
+        return
+    if len(args.message) == 1 and args.message[0].lower() == "status":
+        cmd_status(argparse.Namespace())
         return
     cmd_entry(args)

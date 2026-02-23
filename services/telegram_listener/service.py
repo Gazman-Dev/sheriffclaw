@@ -64,7 +64,7 @@ class TelegramListenerService:
             return
         self._webhook_cleared.add(token)
 
-    async def _handle_ai_message(self, token: str, user_id: str, chat_id: int, text: str):
+    async def _handle_ai_message(self, token: str, sheriff_token: str, user_id: str, chat_id: int, text: str):
         _, gate = await self.ai_gate.request("ai_tg_llm.inbound_message", {"user_id": user_id, "text": text})
         result = gate.get("result", {})
         status = result.get("status")
@@ -87,10 +87,19 @@ class TelegramListenerService:
         async for frame in stream:
             if frame.get("event") == "assistant.final":
                 reply = frame.get("payload", {}).get("text")
-        if asyncio.iscoroutine(final):
-            await final
+        final_res = await final if asyncio.iscoroutine(final) else final
+
         if reply:
             self._send_message(token, chat_id, reply)
+
+        result_obj = (final_res or {}).get("result", {}) if isinstance(final_res, dict) else {}
+        if result_obj.get("status") == "locked":
+            # Always notify on Sheriff channel too, so user can unlock right there.
+            msg = "🔒 Vault is locked. Open the Sheriff bot and send: /unlock <master_password>"
+            if sheriff_token:
+                self._send_message(sheriff_token, chat_id, msg)
+            elif not reply:
+                self._send_message(token, chat_id, msg)
 
     async def _handle_sheriff_message(self, token: str, user_id: str, chat_id: int, text: str):
         _, gate = await self.sheriff_gate.request("gate.inbound_message", {"user_id": user_id, "text": text})
@@ -111,7 +120,7 @@ class TelegramListenerService:
             msg = out.get("result", {}).get("message", "ok")
             self._send_message(token, chat_id, msg)
 
-    async def _poll_bot(self, role: str, token: str, offsets: dict):
+    async def _poll_bot(self, role: str, token: str, sheriff_token: str, offsets: dict):
         self._ensure_long_polling(token)
         offset = int(offsets.get(role, 0))
         try:
@@ -135,7 +144,7 @@ class TelegramListenerService:
             if not user_id or chat_id is None or not text:
                 continue
             if role == "llm":
-                await self._handle_ai_message(token, user_id, int(chat_id), text)
+                await self._handle_ai_message(token, sheriff_token, user_id, int(chat_id), text)
             else:
                 await self._handle_sheriff_message(token, user_id, int(chat_id), text)
 
@@ -149,9 +158,10 @@ class TelegramListenerService:
                     ("llm", (await self._secrets("secrets.get_llm_bot_token", {})).get("token", "")),
                     ("sheriff", (await self._secrets("secrets.get_gate_bot_token", {})).get("token", "")),
                 ]
+                sheriff_token = dict(specs).get("sheriff", "")
                 for role, token in specs:
                     if token:
-                        await self._poll_bot(role, token, offsets)
+                        await self._poll_bot(role, token, sheriff_token, offsets)
                 self._save_offsets(offsets)
             except Exception:
                 await asyncio.sleep(2)

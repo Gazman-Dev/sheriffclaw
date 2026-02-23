@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from shared.llm.providers import OpenAICodexProvider, StubProvider, TestProvider
 from shared.llm.registry import resolve_model
@@ -32,16 +32,14 @@ async def test_test_provider_for_testing_channel():
 
 
 @pytest.mark.asyncio
-async def test_openai_codex_provider_parses_output_text():
+async def test_openai_codex_provider_uses_codex_cli_exec():
     provider = OpenAICodexProvider(api_key="k")
-    fake_resp = Mock()
-    fake_resp.raise_for_status = Mock()
-    fake_resp.json.return_value = {"output_text": "hi from codex"}
 
-    with patch("shared.llm.providers.requests.post", return_value=fake_resp):
+    with patch.object(OpenAICodexProvider, "_run_codex_exec", return_value="hi from codex") as run_exec:
         out = await provider.generate([{"role": "user", "content": "hello"}], model="gpt-5.3-codex")
 
     assert out == "hi from codex"
+    assert run_exec.called
 
 
 def test_resolve_model_defaults():

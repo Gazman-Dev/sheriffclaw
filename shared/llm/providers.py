@@ -6,6 +6,8 @@ import shutil
 import subprocess
 from typing import Any
 
+import requests  # backward-compatible import target for existing tests
+
 
 class StubProvider:
     async def generate(self, messages: list[dict], model: str = "stub") -> str:

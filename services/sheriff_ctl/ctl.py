@@ -304,16 +304,9 @@ def _stop_service(service: str) -> None:
 
 
 def cmd_start(args):
-    already = [svc for svc in ALL if (_read_pid(svc) and _alive(_read_pid(svc)))]
-    if already and sys.stdin.isatty():
-        ans = input(f"Services already running ({', '.join(already)}). Stop and restart? [y/N]: ").strip().lower()
-        if ans in ("y", "yes"):
-            for svc in reversed(already):
-                _stop_service(svc)
-        else:
-            print("Start cancelled.")
-            return
-
+    # Managed services are always restarted on start to avoid stale old binaries
+    # surviving updates due to pidfile drift.
+    SERVICE_MANAGER.stop_many(list(reversed(MANAGED_SERVICES)))
     SERVICE_MANAGER.start_many(MANAGED_SERVICES)
 
     mp = getattr(args, "master_password", None) or os.getenv("SHERIFF_MASTER_PASSWORD", "")

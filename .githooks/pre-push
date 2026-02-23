@@ -10,7 +10,7 @@ if [[ ! -x ".venv/bin/pytest" ]]; then
 fi
 
 echo "[pre-push] Running test suite..."
-.venv/bin/pytest -q
+PYTHONWARNINGS=ignore .venv/bin/pytest -q --disable-warnings
 
 LAST_MSG="$(git log -1 --pretty=%s)"
 if [[ "$LAST_MSG" =~ ^chore:\ bump\ sheriff\ version\ to\  ]]; then

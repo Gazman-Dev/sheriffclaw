@@ -60,6 +60,11 @@ class SheriffTgGateService:
         role = "sheriff"
 
         st = await self._secrets("secrets.activation.status", {"bot_role": role})
+        # If vault is locked/unavailable, activation lookup may be inaccessible.
+        # Fall back to gateway/CLI lock handling so user still gets a response.
+        if not st or "user_id" not in st:
+            return {"status": "accepted", "user_id": user_id, "degraded": "activation_unavailable"}
+
         bound = st.get("user_id")
         if bound and str(bound) == user_id:
             return {"status": "accepted", "user_id": user_id}

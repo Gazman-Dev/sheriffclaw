@@ -408,7 +408,10 @@ def cmd_update(args):
             return
         print("Restarting services after update...")
         cmd_stop(argparse.Namespace())
-        cmd_start(argparse.Namespace())
+        start_mp = mp if (mp and isinstance(mp, str) and mp.strip()) else None
+        cmd_start(argparse.Namespace(master_password=start_mp))
+        if not start_mp:
+            print("Note: services restarted without master password; vault may remain locked until /unlock.")
         print("Update completed.")
     else:
         print("Update failed.")

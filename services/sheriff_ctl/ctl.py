@@ -577,8 +577,20 @@ def cmd_onboard(args):
         print("2) The bot will reply with an activation code.")
         print("3) Paste that code here.")
 
+        # If webhook is currently set for this token, getUpdates will not deliver messages.
+        # Best-effort disable webhook during activation polling.
+        try:
+            requests.post(
+                f"https://api.telegram.org/bot{token}/deleteWebhook",
+                json={"drop_pending_updates": False},
+                timeout=15,
+            )
+        except Exception:
+            pass
+
         offset = 0
         sent_codes: dict[str, str] = {}
+        user_chat: dict[str, int] = {}
         start = time.time()
 
         while time.time() - start < timeout_sec:
@@ -621,16 +633,17 @@ def cmd_onboard(args):
                     if not code:
                         continue
                     sent_codes[user_id] = code
+                    user_chat[user_id] = int(chat_id)
 
-                text = f"Your activation code is: {code}\nReply: activate {code}"
-                try:
-                    requests.post(
-                        f"https://api.telegram.org/bot{token}/sendMessage",
-                        json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
-                        timeout=15,
-                    )
-                except Exception:
-                    pass
+                    text = f"Your activation code is: {code}"
+                    try:
+                        requests.post(
+                            f"https://api.telegram.org/bot{token}/sendMessage",
+                            json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
+                            timeout=15,
+                        )
+                    except Exception:
+                        pass
 
             if sent_codes:
                 try:
@@ -641,6 +654,17 @@ def cmd_onboard(args):
                     continue
                 claim = await _gw_secrets_call("secrets.activation.claim", {"bot_role": role, "code": code_in})
                 if claim.get("ok"):
+                    ok_user = str(claim.get("user_id") or "")
+                    ok_chat = user_chat.get(ok_user)
+                    if ok_chat:
+                        try:
+                            requests.post(
+                                f"https://api.telegram.org/bot{token}/sendMessage",
+                                json={"chat_id": ok_chat, "text": "✅ Activated. You can chat now.", "disable_web_page_preview": True},
+                                timeout=15,
+                            )
+                        except Exception:
+                            pass
                     return True
                 print("Invalid code, try again.")
             else:

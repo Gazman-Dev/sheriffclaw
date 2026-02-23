@@ -160,15 +160,29 @@ class SheriffGatewayService:
             return {"status": "debug", "session_handle": session}
 
         stream, final = await self.ai.request("agent.session.user_message", {"session_handle": session, "text": text, "model_ref": payload.get("model_ref"), "provider_name": provider_name, "api_key": api_key, "base_url": base_url}, stream_events=True)
+        saw_final = False
         async for frame in stream:
             if frame["event"] == "tool.call":
                 result = await self._route_tool(principal_id, frame.get("payload", {}))
                 await emit_event("tool.result", result)
                 await self.ai.request("agent.session.tool_result", {"session_handle": session, "tool_name": frame["payload"].get("tool_name", "tool"), "result": result})
                 continue
+            if frame["event"] == "assistant.final":
+                saw_final = True
             await emit_event(frame["event"], frame.get("payload", {}))
-        if inspect.isawaitable(final):
-            await final
+
+        final_res = await final if inspect.isawaitable(final) else final
+        if isinstance(final_res, dict) and final_res.get("ok") is False:
+            msg = f"AI worker error: {final_res.get('error') or 'unknown_error'}"
+            await emit_event("assistant.final", {"text": msg})
+            append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
+            return {"status": "ai_error", "session_handle": session}
+
+        if not saw_final:
+            msg = "AI produced no final response."
+            await emit_event("assistant.final", {"text": msg})
+            append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
+
         return {"status": "done", "session_handle": session}
 
     async def handle_user_message(self, payload, emit_event, req_id):

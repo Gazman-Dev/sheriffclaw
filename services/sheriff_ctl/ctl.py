@@ -43,8 +43,9 @@ GW_ORDER = [
 ]
 LLM_ORDER = ["ai-worker", "ai-tg-llm", "telegram-listener"]
 ALL = [*GW_ORDER, *LLM_ORDER]
-# Daemonized services managed directly by ServiceManager (long-running edge listeners).
-MANAGED_SERVICES = ["telegram-listener"]
+# Daemonized services managed directly by ServiceManager.
+# Keep secrets always-on so unlock state survives normal operation.
+MANAGED_SERVICES = ["sheriff-secrets", "telegram-listener"]
 
 OPLOG = get_op_logger("ctl")
 
@@ -405,7 +406,7 @@ def cmd_update(args):
     mp = getattr(args, "master_password", None)
     _notify_sheriff_channel("🔄 Sheriff update started.")
 
-    async def _run_update() -> tuple[bool, str]:
+    async def _run_update() -> tuple[bool, str, bool]:
         gw = ProcClient("sheriff-gateway")
         updater = ProcClient("sheriff-updater")
 
@@ -415,7 +416,7 @@ def cmd_update(args):
             nonlocal mp
             if not mp:
                 if not sys.stdin.isatty():
-                    return False, "Master password required for secrets update. Pass --master-password in non-interactive mode."
+                    return False, "Master password required for secrets update. Pass --master-password in non-interactive mode.", True
                 mp = getpass.getpass("Master password for update (secrets version increased): ")
             if not await _verify_master_password_async(mp):
                 return False, "Invalid master password. Update cancelled."
@@ -440,28 +441,33 @@ def cmd_update(args):
                 },
             )
             result = res.get("result", {})
+            secrets_changed = bool((((result.get("plan") or {}).get("changes") or {}).get("secrets") or {}).get("increased"))
             if result.get("ok") and result.get("mode") == "skipped":
-                return True, "No component version increased; update skipped. Use --force to reinstall anyway."
-            return bool(result.get("ok")), ""
+                return True, "No component version increased; update skipped. Use --force to reinstall anyway.", False
+            return bool(result.get("ok")), "", secrets_changed
         finally:
             await gw.request("gateway.queue.control", {"pause": False})
 
-    ok, note = asyncio.run(_run_update())
+    ok, note, secrets_changed = asyncio.run(_run_update())
     if note:
         print(note)
     if ok:
         if "skipped" in note.lower():
             _notify_sheriff_channel("ℹ️ Sheriff update skipped (versions not increased).")
             return
-        print("Restarting services after update...")
-        cmd_stop(argparse.Namespace())
-        start_mp = mp if (mp and isinstance(mp, str) and mp.strip()) else None
-        cmd_start(argparse.Namespace(master_password=start_mp))
-        if not start_mp:
-            print("Note: services restarted without master password; vault may remain locked until /unlock.")
-            _notify_sheriff_channel("🔒 Sheriff updated and restarted, but vault is locked. Send: /unlock <master_password>")
+        if secrets_changed:
+            print("Restarting managed services after secrets update...")
+            cmd_stop(argparse.Namespace())
+            start_mp = mp if (mp and isinstance(mp, str) and mp.strip()) else None
+            cmd_start(argparse.Namespace(master_password=start_mp))
+            if not start_mp:
+                print("Note: services restarted without master password; vault may remain locked until /unlock.")
+                _notify_sheriff_channel("🔒 Sheriff updated (secrets changed) and restarted; send /unlock <master_password>.")
+            else:
+                _notify_sheriff_channel("✅ Sheriff update completed (secrets changed) and services restarted unlocked.")
         else:
-            _notify_sheriff_channel("✅ Sheriff update completed and services restarted.")
+            print("Secrets version unchanged; preserving running secrets service (no lock reset).")
+            _notify_sheriff_channel("✅ Sheriff update completed. Secrets unchanged; unlock state preserved.")
         print("Update completed.")
     else:
         _notify_sheriff_channel("❌ Sheriff update failed. Check logs.")

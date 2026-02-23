@@ -352,6 +352,12 @@ run_onboarding_if_needed() {
         return 0
     fi
 
+    if [ "$existing_install" = "1" ] && [ "${SHERIFF_FORCE_ONBOARDING:-0}" != "1" ]; then
+        log "Existing install detected in non-interactive mode; running update (no reset)."
+        "$VENV_DIR/bin/sheriff" update --no-pull || true
+        return 0
+    fi
+
     MP="${SHERIFF_MASTER_PASSWORD:-local-dev-master-password}"
     LLM_PROVIDER="${SHERIFF_LLM_PROVIDER:-stub}"
     LLM_API_KEY="${SHERIFF_LLM_API_KEY:-}"

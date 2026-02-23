@@ -1145,6 +1145,30 @@ def main(argv: list[str] | None = None) -> None:
     args.func(args)
 
 def main_sheriff(argv: list[str] | None = None) -> None:
+    argv = list(argv or sys.argv[1:])
+
+    # Route full CLI surface through `sheriff` so users don't need sheriff-ctl.
+    ctl_commands = {
+        "start",
+        "stop",
+        "status",
+        "logs",
+        "onboard",
+        "onboarding",
+        "factory-reset",
+        "debug",
+        "skill",
+        "call",
+        "update",
+        "sandbox",
+        "configure-llm",
+        "logout-llm",
+        "chat",
+    }
+    if argv and argv[0] in ctl_commands:
+        main(argv)
+        return
+
     p = argparse.ArgumentParser(prog="sheriff")
     p.add_argument("--debug", choices=["on", "off"], default=None)
     p.add_argument("message", nargs="*")

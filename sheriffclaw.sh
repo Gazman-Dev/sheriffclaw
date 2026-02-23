@@ -204,9 +204,6 @@ setup_venv_and_install() {
     # shellcheck disable=SC1090
     source "$VENV_DIR/bin/activate"
 
-    # Suppress noisy urllib3 LibreSSL warning in installer UX.
-    export PYTHONWARNINGS="ignore::urllib3.exceptions.NotOpenSSLWarning"
-
     log "Installing SheriffClaw package..."
     python -m pip install --upgrade pip --quiet
     python -m pip install "$SOURCE_DIR" --quiet
@@ -313,55 +310,31 @@ run_onboarding_if_needed() {
             return 0
         fi
 
-        local ONBOARD_ARGS=()
+        local DEBUG_MODE_FLAG=""
         if [ "${ENABLE_DEBUG_MODE:-0}" = "1" ] || [ "${SHERIFF_DEBUG_MODE:-0}" = "1" ]; then
-            ONBOARD_ARGS+=(--debug-mode)
+            DEBUG_MODE_FLAG="--debug-mode"
             warn "Debug mode requested: onboarding will enable deterministic debug mode after setup."
         fi
 
         if [ -t 0 ]; then
-            if [ ${#ONBOARD_ARGS[@]} -gt 0 ]; then
-                if ! "$VENV_DIR/bin/sheriff-ctl" onboarding "${ONBOARD_ARGS[@]}"; then
-                    echo -e "${YELLOW}Onboarding exited.${NC}"
-                    read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI
-                    RI_LC="$(lower "$RI")"
-                    if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
-                        "$VENV_DIR/bin/sheriff-ctl" factory-reset
-                    fi
-                    return 1
+            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding ${DEBUG_MODE_FLAG:+$DEBUG_MODE_FLAG}; then
+                echo -e "${YELLOW}Onboarding exited.${NC}"
+                read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI
+                RI_LC="$(lower "$RI")"
+                if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
+                    "$VENV_DIR/bin/sheriff-ctl" factory-reset
                 fi
-            else
-                if ! "$VENV_DIR/bin/sheriff-ctl" onboarding; then
-                    echo -e "${YELLOW}Onboarding exited.${NC}"
-                    read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI
-                    RI_LC="$(lower "$RI")"
-                    if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
-                        "$VENV_DIR/bin/sheriff-ctl" factory-reset
-                    fi
-                    return 1
-                fi
+                return 1
             fi
         else
-            if [ ${#ONBOARD_ARGS[@]} -gt 0 ]; then
-                if ! "$VENV_DIR/bin/sheriff-ctl" onboarding "${ONBOARD_ARGS[@]}" < /dev/tty > /dev/tty 2>&1; then
-                    echo -e "${YELLOW}Onboarding exited.${NC}"
-                    read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI < /dev/tty
-                    RI_LC="$(lower "$RI")"
-                    if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
-                        "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" factory-reset
-                    fi
-                    return 1
+            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding ${DEBUG_MODE_FLAG:+$DEBUG_MODE_FLAG} < /dev/tty > /dev/tty 2>&1; then
+                echo -e "${YELLOW}Onboarding exited.${NC}"
+                read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI < /dev/tty
+                RI_LC="$(lower "$RI")"
+                if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
+                    "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" factory-reset
                 fi
-            else
-                if ! "$VENV_DIR/bin/sheriff-ctl" onboarding < /dev/tty > /dev/tty 2>&1; then
-                    echo -e "${YELLOW}Onboarding exited.${NC}"
-                    read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI < /dev/tty
-                    RI_LC="$(lower "$RI")"
-                    if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
-                        "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" factory-reset
-                    fi
-                    return 1
-                fi
+                return 1
             fi
         fi
         return 0

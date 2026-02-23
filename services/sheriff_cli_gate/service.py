@@ -27,7 +27,13 @@ class SheriffCliGateService:
             _, old = await self.secrets.request(op, payload)
             return old.get("result", {})
         _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})
-        return res.get("result", {})
+        outer = res.get("result", {})
+        if isinstance(outer, dict) and "result" in outer:
+            if not outer.get("ok", True):
+                return {}
+            inner = outer.get("result", {})
+            return inner if isinstance(inner, dict) else {}
+        return outer if isinstance(outer, dict) else {}
 
     async def handle_message(self, payload, emit_event, req_id):
         text = (payload.get("text") or "").strip()

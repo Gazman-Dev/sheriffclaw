@@ -21,7 +21,13 @@ class TelegramWebhookService:
 
     async def _secrets(self, op: str, payload: dict):
         _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})
-        return res.get("result", {})
+        outer = res.get("result", {})
+        if isinstance(outer, dict) and "result" in outer:
+            if not outer.get("ok", True):
+                return {}
+            inner = outer.get("result", {})
+            return inner if isinstance(inner, dict) else {}
+        return outer if isinstance(outer, dict) else {}
 
     async def _load_or_init_cfg(self) -> dict:
         got = await self._secrets("secrets.telegram_webhook.get", {})

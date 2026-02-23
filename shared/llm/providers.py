@@ -64,8 +64,6 @@ class _CodexCliBase:
             "--full-auto",
             "--sandbox",
             "workspace-write",
-            "--ask-for-approval",
-            "never",
             "--model",
             model,
             prompt,

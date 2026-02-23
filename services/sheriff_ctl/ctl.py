@@ -625,12 +625,24 @@ def cmd_onboard(args):
                 chat = msg.get("chat") or {}
                 user_id = str(from_user.get("id") or "")
                 chat_id = chat.get("id")
+                text_in = (msg.get("text") or "").strip()
+                OPLOG.info(
+                    "activation[%s] update id=%s has_message=%s user_id=%s chat_id=%s has_text=%s",
+                    role,
+                    update_id,
+                    bool(msg),
+                    bool(user_id),
+                    chat_id,
+                    bool(text_in),
+                )
                 if not user_id or chat_id is None:
+                    OPLOG.info("activation[%s] skip update id=%s reason=missing_user_or_chat", role, update_id)
                     continue
 
                 bound = await _gw_secrets_call("secrets.activation.status", {"bot_role": role})
                 bound_uid = bound.get("user_id")
                 if bound_uid and str(bound_uid) == user_id:
+                    OPLOG.info("activation[%s] skip update id=%s reason=already_bound user_id=%s", role, update_id, user_id)
                     continue
 
                 code = sent_codes.get(user_id)

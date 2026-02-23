@@ -263,6 +263,7 @@ run_onboarding_if_needed() {
     if [ "$interactive" = "1" ]; then
         local skip_onboarding=0
         local ENABLE_DEBUG_MODE=0
+        local KEEP_UNCHANGED=0
         if [ "$existing_install" = "1" ]; then
             echo -e "${YELLOW}Existing installation detected.${NC}"
             echo "Choose action:"
@@ -302,6 +303,7 @@ run_onboarding_if_needed() {
                     fi
                     ;;
                 1|*)
+                    KEEP_UNCHANGED=1
                     ;;
             esac
         fi
@@ -315,9 +317,13 @@ run_onboarding_if_needed() {
             DEBUG_MODE_FLAG="--debug-mode"
             warn "Debug mode requested: onboarding will enable deterministic debug mode after setup."
         fi
+        local KEEP_FLAG=""
+        if [ "${KEEP_UNCHANGED:-0}" = "1" ]; then
+            KEEP_FLAG="--keep-unchanged"
+        fi
 
         if [ -t 0 ]; then
-            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding ${DEBUG_MODE_FLAG:+$DEBUG_MODE_FLAG}; then
+            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding ${KEEP_FLAG:+$KEEP_FLAG} ${DEBUG_MODE_FLAG:+$DEBUG_MODE_FLAG}; then
                 echo -e "${YELLOW}Onboarding exited.${NC}"
                 read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI
                 RI_LC="$(lower "$RI")"
@@ -327,7 +333,7 @@ run_onboarding_if_needed() {
                 return 1
             fi
         else
-            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding ${DEBUG_MODE_FLAG:+$DEBUG_MODE_FLAG} < /dev/tty > /dev/tty 2>&1; then
+            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding ${KEEP_FLAG:+$KEEP_FLAG} ${DEBUG_MODE_FLAG:+$DEBUG_MODE_FLAG} < /dev/tty > /dev/tty 2>&1; then
                 echo -e "${YELLOW}Onboarding exited.${NC}"
                 read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI < /dev/tty
                 RI_LC="$(lower "$RI")"

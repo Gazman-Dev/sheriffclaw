@@ -384,12 +384,12 @@ setup_venv_and_install
 setup_alias
 setup_ai_worker_user
 
-if [ "${SHERIFF_START_DAEMONS:-0}" = "1" ]; then
+if [ "${SHERIFF_START_DAEMONS:-1}" = "1" ]; then
     log "Starting services..."
-    "$VENV_DIR/bin/sheriff-ctl" start
+    "$VENV_DIR/bin/sheriff" start
     sleep 2
 else
-    log "Skipping daemon start (services are started on-demand)."
+    log "Skipping daemon start (SHERIFF_START_DAEMONS=0)."
 fi
 
 run_onboarding_if_needed

@@ -940,15 +940,16 @@ def cmd_call(args):
 
 def cmd_logout_llm(args):
     async def _run():
-        unlocked = await _gw_secrets_call("secrets.is_unlocked", {})
+        gw = ProcClient("sheriff-gateway")
+        unlocked = await _gw_secrets_call("secrets.is_unlocked", {}, gw=gw)
         if not unlocked.get("unlocked"):
             if not args.master_password:
                 raise RuntimeError("vault is locked; pass --master-password")
-            res = await _gw_secrets_call("secrets.unlock", {"master_password": args.master_password})
+            res = await _gw_secrets_call("secrets.unlock", {"master_password": args.master_password}, gw=gw)
             if not res.get("ok"):
                 raise RuntimeError("failed to unlock vault with provided master password")
-        await _gw_secrets_call("secrets.set_llm_api_key", {"api_key": ""})
-        await _gw_secrets_call("secrets.clear_llm_auth", {})
+        await _gw_secrets_call("secrets.set_llm_api_key", {"api_key": ""}, gw=gw)
+        await _gw_secrets_call("secrets.clear_llm_auth", {}, gw=gw)
 
     asyncio.run(_run())
     print("LLM auth cleared from vault.")
@@ -961,16 +962,17 @@ def cmd_configure_llm(args):
         api_key = getpass.getpass(f"API key for {provider}: ").strip()
 
     async def _run():
-        unlocked = await _gw_secrets_call("secrets.is_unlocked", {})
+        gw = ProcClient("sheriff-gateway")
+        unlocked = await _gw_secrets_call("secrets.is_unlocked", {}, gw=gw)
         if not unlocked.get("unlocked"):
             if not args.master_password:
                 raise RuntimeError("vault is locked; pass --master-password to configure llm")
-            res = await _gw_secrets_call("secrets.unlock", {"master_password": args.master_password})
+            res = await _gw_secrets_call("secrets.unlock", {"master_password": args.master_password}, gw=gw)
             if not res.get("ok"):
                 raise RuntimeError("failed to unlock vault with provided master password")
 
-        await _gw_secrets_call("secrets.set_llm_provider", {"provider": provider})
-        await _gw_secrets_call("secrets.set_llm_api_key", {"api_key": api_key})
+        await _gw_secrets_call("secrets.set_llm_provider", {"provider": provider}, gw=gw)
+        await _gw_secrets_call("secrets.set_llm_api_key", {"api_key": api_key}, gw=gw)
 
     asyncio.run(_run())
     print(f"LLM provider configured: {provider}")

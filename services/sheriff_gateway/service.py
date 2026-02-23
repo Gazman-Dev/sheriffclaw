@@ -131,11 +131,9 @@ class SheriffGatewayService:
                 elif provider_name == "openai-codex":
                     _, key = await self.secrets.request("secrets.get_llm_api_key", {})
                     api_key = key.get("result", {}).get("api_key") or ""
-                    if not api_key and not debug_mode:
-                        msg = "OpenAI API key missing. Run: sheriff-ctl configure-llm --provider openai-codex"
-                        await emit_event("assistant.final", {"text": msg})
-                        append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
-                        return {"status": "llm_key_missing", "session_handle": session}
+                    if not api_key:
+                        # Fall back to subscription auth via codex CLI login.
+                        provider_name = "openai-codex-chatgpt"
 
         if self._debug_mode_enabled():
             msg = self._pop_debug_message()

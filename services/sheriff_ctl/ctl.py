@@ -728,7 +728,15 @@ def cmd_onboard(args):
                 "allow_telegram_master_password": False,
             },
         )
-        await _gw_secrets_call("secrets.unlock", {"master_password": mp})
+        unlock_res = await _gw_secrets_call("secrets.unlock", {"master_password": mp})
+        if not unlock_res.get("ok"):
+            OPLOG.error("onboard unlock failed after initialize: %s", unlock_res)
+            raise RuntimeError("failed to unlock vault after onboarding initialize")
+        st_unlock = await _gw_secrets_call("secrets.is_unlocked", {})
+        if not st_unlock.get("unlocked"):
+            OPLOG.error("onboard unlock check failed after initialize: %s", st_unlock)
+            raise RuntimeError("vault is still locked after unlock")
+
         if llm_auth:
             await _gw_secrets_call("secrets.set_llm_auth", {"auth": llm_auth})
 

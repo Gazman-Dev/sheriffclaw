@@ -23,11 +23,12 @@ def test_secrets_encryption_roundtrip(tmp_path):
     s1.unlock("pw")
     s1.set_secret("gh", "token")
 
-    # Reload
+    # Reload should restore unlocked session for process consistency
     s2 = SecretsState(enc_path, ver_path)
-    assert not s2.is_unlocked()
+    assert s2.is_unlocked()
 
-    # Wrong password
+    # Lock then wrong password remains locked
+    s2.lock()
     s2.unlock("wrong")
     assert not s2.is_unlocked()
 

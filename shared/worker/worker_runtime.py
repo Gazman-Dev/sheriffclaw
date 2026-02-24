@@ -81,15 +81,15 @@ class WorkerRuntime:
         _, res = await cli.request(op, payload)
         return res.get("result", {})
 
-    def _provider(self, provider: str, api_key: str, base_url: str = ""):
-        key = f"{provider}:{api_key}:{base_url}"
+    def _provider(self, provider: str, api_key: str, base_url: str = "", codex_state_b64: str = ""):
+        key = f"{provider}:{api_key}:{base_url}:{hash(codex_state_b64)}"
         if key not in self.providers:
             if provider == "test":
                 self.providers[key] = TestProvider()
             elif provider in {"openai-codex"}:
-                self.providers[key] = OpenAICodexProvider(api_key=api_key, base_url=base_url or "https://api.openai.com/v1")
+                self.providers[key] = OpenAICodexProvider(api_key=api_key, base_url=base_url or "https://api.openai.com/v1", codex_state_b64=codex_state_b64)
             elif provider in {"openai-codex-chatgpt"}:
-                self.providers[key] = ChatGPTSubscriptionCodexProvider(access_token=api_key, base_url=base_url or "https://chatgpt.com/backend-api/codex")
+                self.providers[key] = ChatGPTSubscriptionCodexProvider(access_token=api_key, base_url=base_url or "https://chatgpt.com/backend-api/codex", codex_state_b64=codex_state_b64)
             else:
                 self.providers[key] = StubProvider()
         return self.providers[key]
@@ -111,6 +111,7 @@ class WorkerRuntime:
         provider_name: str | None = None,
         api_key: str = "",
         base_url: str = "",
+        codex_state_b64: str = "",
     ):
         history = self.sessions.setdefault(session_handle, [])
         history.append({"role": "user", "content": text})
@@ -123,8 +124,11 @@ class WorkerRuntime:
             if "tool" in lower:
                 await emit_event("tool.call", {"tool_name": "tools.exec", "payload": {"argv": ["echo", "tool-invoked"], "taint": False}, "reason": "trigger word"})
             selected_provider = provider_name or ("test" if model.startswith("test/") else "stub")
-            provider = self._provider(selected_provider, api_key, base_url)
+            provider = self._provider(selected_provider, api_key, base_url, codex_state_b64)
             answer = await provider.generate(history, model=model)
+            state_b64 = getattr(provider, "last_codex_state_b64", "")
+            if state_b64:
+                await emit_event("provider.state", {"codex_state_b64": state_b64})
 
         await emit_event("assistant.delta", {"text": answer})
         await emit_event("assistant.final", {"text": answer})

@@ -23,6 +23,7 @@ class AIWorkerService:
             provider_name=payload.get("provider_name"),
             api_key=payload.get("api_key", ""),
             base_url=payload.get("base_url", ""),
+            codex_state_b64=payload.get("codex_state_b64", ""),
         )
         return {"status": "done"}
 

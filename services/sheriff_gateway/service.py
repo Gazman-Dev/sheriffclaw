@@ -39,6 +39,8 @@ class SheriffGatewayService:
         "secrets.activation.status",
         "secrets.telegram_webhook.get",
         "secrets.telegram_webhook.set",
+        "secrets.codex_state.get",
+        "secrets.codex_state.set",
     }
 
     def __init__(self) -> None:
@@ -98,6 +100,7 @@ class SheriffGatewayService:
         provider_name = "stub"
         api_key = ""
         base_url = ""
+        codex_state_b64 = ""
 
         _, unlocked = await self.secrets.request("secrets.is_unlocked", {})
         vault_known_locked = unlocked.get("ok") is True and unlocked.get("result", {}).get("unlocked") is False
@@ -154,6 +157,9 @@ class SheriffGatewayService:
                         append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
                         return {"status": "llm_key_missing", "session_handle": session}
 
+                _, cstate = await self.secrets.request("secrets.codex_state.get", {})
+                codex_state_b64 = cstate.get("result", {}).get("bundle_b64") or ""
+
         if self._debug_mode_enabled():
             msg = self._pop_debug_message()
             out_text = msg.get("text") or msg.get("content") or json.dumps(msg, ensure_ascii=False)
@@ -161,13 +167,17 @@ class SheriffGatewayService:
             append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": out_text})
             return {"status": "debug", "session_handle": session}
 
-        stream, final = await self.ai.request("agent.session.user_message", {"session_handle": session, "text": text, "model_ref": payload.get("model_ref"), "provider_name": provider_name, "api_key": api_key, "base_url": base_url}, stream_events=True)
+        stream, final = await self.ai.request("agent.session.user_message", {"session_handle": session, "text": text, "model_ref": payload.get("model_ref"), "provider_name": provider_name, "api_key": api_key, "base_url": base_url, "codex_state_b64": codex_state_b64}, stream_events=True)
         saw_final = False
         delta_parts: list[str] = []
         event_counts: dict[str, int] = {}
+        new_codex_state_b64 = ""
         async for frame in stream:
             ev = frame.get("event")
             event_counts[ev] = event_counts.get(ev, 0) + 1
+            if ev == "provider.state":
+                new_codex_state_b64 = str((frame.get("payload") or {}).get("codex_state_b64") or "")
+                continue
             if ev == "tool.call":
                 result = await self._route_tool(principal_id, frame.get("payload", {}))
                 await emit_event("tool.result", result)
@@ -191,6 +201,8 @@ class SheriffGatewayService:
             (final_res or {}).get("ok") if isinstance(final_res, dict) else None,
             (final_res or {}).get("error") if isinstance(final_res, dict) else None,
         )
+        if new_codex_state_b64:
+            await self.secrets.request("secrets.codex_state.set", {"bundle_b64": new_codex_state_b64})
         if isinstance(final_res, dict) and final_res.get("ok") is False:
             err = final_res.get("error") or "unknown_error"
             msg = f"AI worker error: {err}"

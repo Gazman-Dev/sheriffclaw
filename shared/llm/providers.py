@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import os
 import shutil
 import subprocess
+import tarfile
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import requests  # backward-compatible import target for existing tests
@@ -23,6 +28,10 @@ class TestProvider:
 
 class _CodexCliBase:
     _codex_checked = False
+
+    def __init__(self, codex_state_b64: str = ""):
+        self.codex_state_b64 = codex_state_b64 or ""
+        self.last_codex_state_b64 = self.codex_state_b64
 
     @classmethod
     def _ensure_codex_installed(cls) -> None:
@@ -50,10 +59,40 @@ class _CodexCliBase:
         lines.append("\nReply as the assistant to the last user message.")
         return "\n".join(lines)
 
-    @classmethod
-    def _run_codex_exec(cls, prompt: str, model: str, env_extra: dict[str, str] | None = None) -> str:
-        cls._ensure_codex_installed()
+    @staticmethod
+    def _ram_codex_home() -> Path:
+        if Path("/dev/shm").exists():
+            base = Path("/dev/shm")
+        else:
+            base = Path(tempfile.gettempdir())
+        p = base / "sheriff-codex-home"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    def _restore_codex_state(self, codex_home: Path) -> None:
+        if not self.codex_state_b64:
+            return
+        raw = base64.b64decode(self.codex_state_b64.encode("utf-8"))
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as tf:
+            tf.extractall(codex_home)
+
+    def _snapshot_codex_state(self, codex_home: Path) -> str:
+        bio = io.BytesIO()
+        with tarfile.open(fileobj=bio, mode="w:gz") as tf:
+            for child in codex_home.iterdir():
+                tf.add(child, arcname=child.name)
+        return base64.b64encode(bio.getvalue()).decode("utf-8")
+
+    def _run_codex_exec(self, prompt: str, model: str, env_extra: dict[str, str] | None = None) -> str:
+        self._ensure_codex_installed()
+        codex_home = self._ram_codex_home()
+        try:
+            self._restore_codex_state(codex_home)
+        except Exception:
+            pass
+
         env = os.environ.copy()
+        env["CODEX_HOME"] = str(codex_home)
         if env_extra:
             env.update({k: v for k, v in env_extra.items() if v is not None})
 
@@ -69,6 +108,12 @@ class _CodexCliBase:
             prompt,
         ]
         proc = subprocess.run(cmd, capture_output=True, text=True, env=env, check=False)  # noqa: S603
+
+        try:
+            self.last_codex_state_b64 = self._snapshot_codex_state(codex_home)
+        except Exception:
+            self.last_codex_state_b64 = self.codex_state_b64
+
         if proc.returncode != 0:
             err = (proc.stderr or proc.stdout or "").strip()
             raise RuntimeError(f"codex exec failed ({proc.returncode}): {err}")
@@ -79,7 +124,8 @@ class _CodexCliBase:
 
 
 class OpenAICodexProvider(_CodexCliBase):
-    def __init__(self, api_key: str, base_url: str = "https://api.openai.com/v1"):
+    def __init__(self, api_key: str, base_url: str = "https://api.openai.com/v1", codex_state_b64: str = ""):
+        super().__init__(codex_state_b64=codex_state_b64)
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
 
@@ -94,16 +140,15 @@ class OpenAICodexProvider(_CodexCliBase):
 
 
 class ChatGPTSubscriptionCodexProvider(_CodexCliBase):
-    def __init__(self, access_token: str, base_url: str = "https://chatgpt.com/backend-api/codex"):
+    def __init__(self, access_token: str, base_url: str = "https://chatgpt.com/backend-api/codex", codex_state_b64: str = ""):
+        super().__init__(codex_state_b64=codex_state_b64)
         self.access_token = access_token
         self.base_url = base_url.rstrip("/")
 
     def _generate_sync(self, messages: list[dict], model: str) -> str:
-        if not self.access_token:
-            raise ValueError("missing ChatGPT subscription access token")
         prompt = self._render_prompt(messages)
-        # Keep token in-memory only; do not rely on codex auth file state.
-        return self._run_codex_exec(prompt, model, {"OPENAI_API_KEY": self.access_token})
+        # Subscription auth should come from restored CODEX_HOME login state.
+        return self._run_codex_exec(prompt, model)
 
     async def generate(self, messages: list[dict], model: str = "gpt-5.3-codex") -> str:
         return await asyncio.to_thread(self._generate_sync, messages, model)

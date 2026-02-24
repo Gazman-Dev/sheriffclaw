@@ -100,6 +100,13 @@ class SheriffSecretsService:
         self.state.set_telegram_webhook_config(payload.get("config", {}))
         return {"status": "saved"}
 
+    async def codex_state_get(self, payload, emit_event, req_id):
+        return {"bundle_b64": self.state.get_config("codex_cli_state_b64", "")}
+
+    async def codex_state_set(self, payload, emit_event, req_id):
+        self.state.set_config("codex_cli_state_b64", payload.get("bundle_b64", ""))
+        return {"status": "saved"}
+
     def ops(self):
         return {
             "secrets.initialize": self.initialize,
@@ -128,4 +135,6 @@ class SheriffSecretsService:
             "secrets.activation.status": self.activation_status,
             "secrets.telegram_webhook.get": self.telegram_webhook_get,
             "secrets.telegram_webhook.set": self.telegram_webhook_set,
+            "secrets.codex_state.get": self.codex_state_get,
+            "secrets.codex_state.set": self.codex_state_set,
         }

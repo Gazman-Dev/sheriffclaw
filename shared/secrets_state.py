@@ -5,6 +5,7 @@ import json
 import random
 import sqlite3
 import string
+import time
 from pathlib import Path
 
 from shared.crypto import decrypt_text, encrypt_text
@@ -15,7 +16,9 @@ class SecretsState:
         # enc_path now stores sqlite DB (extension kept for backward compatibility)
         self.db_path = enc_path
         self.verifier_path = verifier_path
+        self.session_path = verifier_path.parent / "secrets_session.json"
         self._password: str | None = None
+        self._load_session_unlock()
 
     @staticmethod
     def _hash(password: str) -> str:
@@ -137,6 +140,29 @@ class SecretsState:
         for k, v in legacy.items():
             self._db_set(k, v)
 
+    def _save_session_unlock(self, password: str) -> None:
+        self.session_path.parent.mkdir(parents=True, exist_ok=True)
+        self.session_path.write_text(json.dumps({"password": password, "ts": int(time.time())}), encoding="utf-8")
+
+    def _clear_session_unlock(self) -> None:
+        self.session_path.unlink(missing_ok=True)
+
+    def _load_session_unlock(self) -> None:
+        if self._password:
+            return
+        if not self.session_path.exists():
+            return
+        try:
+            data = json.loads(self.session_path.read_text(encoding="utf-8"))
+            pw = str(data.get("password") or "")
+            if pw and self.verify_master_password(pw):
+                self._migrate_legacy_if_needed(pw)
+                self._password = pw
+                return
+        except Exception:
+            pass
+        self._clear_session_unlock()
+
     def initialize(self, payload: dict) -> None:
         password = payload["master_password"]
         state = self._default_state(payload)
@@ -154,6 +180,7 @@ class SecretsState:
         for k, v in state.items():
             self._db_set(k, v)
         self._password = None
+        self._clear_session_unlock()
 
     def verify_master_password(self, password: str) -> bool:
         if not self.verifier_path.exists():
@@ -170,15 +197,21 @@ class SecretsState:
             with self._db_connect() as conn:
                 conn.commit()
         self._password = password
+        self._save_session_unlock(password)
         return True
 
     def lock(self) -> None:
         self._password = None
+        self._clear_session_unlock()
 
     def is_unlocked(self) -> bool:
+        if self._password is None:
+            self._load_session_unlock()
         return self._password is not None
 
     def _require(self) -> None:
+        if not self._password:
+            self._load_session_unlock()
         if not self._password:
             raise RuntimeError("secrets are locked")
 

@@ -305,12 +305,19 @@ def _stop_service(service: str) -> None:
 
 
 def cmd_start(args):
-    # Managed services are always restarted on start to avoid stale old binaries
-    # surviving updates due to pidfile drift.
-    SERVICE_MANAGER.stop_many(list(reversed(MANAGED_SERVICES)))
-    SERVICE_MANAGER.start_many(MANAGED_SERVICES)
-
     mp = getattr(args, "master_password", None) or os.getenv("SHERIFF_MASTER_PASSWORD", "")
+
+    # Avoid resetting secrets lock state unless we can unlock immediately.
+    to_restart = list(MANAGED_SERVICES)
+    if not mp and "sheriff-secrets" in to_restart:
+        pid = _read_pid("sheriff-secrets")
+        if pid and _alive(pid):
+            to_restart = [svc for svc in to_restart if svc != "sheriff-secrets"]
+
+    # Restart managed services we selected to avoid stale old binaries.
+    SERVICE_MANAGER.stop_many(list(reversed(to_restart)))
+    SERVICE_MANAGER.start_many(to_restart)
+
     if mp:
         async def _unlock():
             gw = ProcClient("sheriff-gateway")

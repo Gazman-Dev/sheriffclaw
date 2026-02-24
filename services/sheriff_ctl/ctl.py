@@ -593,31 +593,23 @@ def cmd_onboard(args):
                     env = os.environ.copy()
                     env["CODEX_HOME"] = str(codex_home)
 
-                    # Run login in parallel, then detect completion via `codex login status`.
-                    login_proc = subprocess.Popen(["codex", "login"], env=env)  # noqa: S603
-                    start_ts = time.time()
-                    status_ok = False
-                    while time.time() - start_ts < 900:
-                        st = subprocess.run(["codex", "login", "status"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)  # noqa: S603
-                        if st.returncode == 0:
-                            status_ok = True
-                            break
-                        if login_proc.poll() is not None and login_proc.returncode not in (0, None):
-                            break
-                        time.sleep(1.0)
+                    proc = subprocess.Popen(["codex", "login"], env=env)  # noqa: S603
+                    print("\nBrowser login in progress. Complete login, then press Enter here.")
+                    input("Press Enter after finishing login in browser...")
 
-                    if status_ok:
-                        # ensure login proc is not left hanging
-                        if login_proc.poll() is None:
-                            login_proc.terminate()
-                        # snapshot CODEX_HOME into encrypted vault state bundle
-                        snap = _CodexCliBase(codex_state_b64="")._snapshot_codex_state(codex_home)
-                        codex_state_b64 = snap
-                    else:
-                        if login_proc.poll() is None:
-                            login_proc.terminate()
-                        print("codex login did not complete in time; please retry.")
+                    st = subprocess.run(["codex", "login", "status"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)  # noqa: S603
+                    if st.returncode != 0:
+                        if proc.poll() is None:
+                            proc.terminate()
+                        print("codex login status is not authenticated. Please retry.")
                         continue
+
+                    if proc.poll() is None:
+                        proc.terminate()
+
+                    # snapshot CODEX_HOME into encrypted vault state bundle
+                    snap = _CodexCliBase(codex_state_b64="")._snapshot_codex_state(codex_home)
+                    codex_state_b64 = snap
                 except Exception as e:
                     print(f"Login cancelled/failed: {e}")
                     continue

@@ -15,7 +15,6 @@ class TelegramListenerService:
         self.log = get_op_logger("telegram-listener")
         self.log.info("telegram-listener boot (build=delta-fallback-v2)")
         self.gateway = ProcClient("sheriff-gateway")
-        self.ai_gate = ProcClient("ai-tg-llm")
         self.sheriff_gate = ProcClient("sheriff-tg-gate")
         self.cli_gate = ProcClient("sheriff-cli-gate")
         self.offset_path = gw_root() / "state" / "telegram_offsets.json"
@@ -106,19 +105,23 @@ class TelegramListenerService:
             self.log.info("ai blocked while locked user_id=%s", user_id)
             return
 
-        _, gate = await self.ai_gate.request("ai_tg_llm.inbound_message", {"user_id": user_id, "text": text})
-        result = gate.get("result", {})
-        status = result.get("status")
-        self.log.info("ai inbound status=%s user_id=%s", status, user_id)
-        if status == "activation_required":
-            code = result.get("activation_code", "")
-            self._send_message(token, chat_id, f"Your activation code is: {code}")
+        role = "llm"
+        st = await self._secrets("secrets.activation.status", {"bot_role": role})
+        bound = st.get("user_id")
+        if not bound or str(bound) != user_id:
+            if text.startswith("activate "):
+                code = text.split(" ", 1)[1].strip().lower()
+                claim = await self._secrets("secrets.activation.claim", {"bot_role": role, "code": code})
+                if claim.get("ok"):
+                    self._send_message(token, chat_id, "✅ Activated. You can chat now.")
+                    return
+            c = await self._secrets("secrets.activation.create", {"bot_role": role, "user_id": user_id})
+            code = c.get("code", "")
+            if code:
+                self._send_message(token, chat_id, f"Your activation code is: {code}")
             return
-        if status == "activated":
-            self._send_message(token, chat_id, "✅ Activated. You can chat now.")
-            return
-        if status != "accepted":
-            return
+
+        self.log.info("ai inbound status=accepted user_id=%s", user_id)
 
         stream, final = await self.gateway.request(
             "gateway.handle_user_message",

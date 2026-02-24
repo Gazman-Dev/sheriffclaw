@@ -4,10 +4,8 @@ import inspect
 import json
 import uuid
 from collections import defaultdict, deque
-from datetime import datetime, timezone
 
 from shared.identity import principal_id_for_channel
-from shared.llm.device_auth import refresh_access_token
 from shared.oplog import get_op_logger
 from shared.paths import gw_root
 from shared.proc_rpc import ProcClient
@@ -128,26 +126,8 @@ class SheriffGatewayService:
             else:
                 provider_name = prov.get("result", {}).get("provider") or provider_name
                 if provider_name == "openai-codex-chatgpt":
-                    _, auth = await self.secrets.request("secrets.get_llm_auth", {})
-                    auth_obj = auth.get("result", {}).get("auth") or {}
-                    api_key = auth_obj.get("access_token") or ""
-                    expires_at = auth_obj.get("expires_at")
-                    refresh = auth_obj.get("refresh_token")
-                    if expires_at and refresh:
-                        try:
-                            exp_dt = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00")).astimezone(timezone.utc)
-                            if exp_dt <= datetime.now(timezone.utc):
-                                tok = refresh_access_token(refresh)
-                                auth_obj.update({"access_token": tok.access_token, "refresh_token": tok.refresh_token, "id_token": tok.id_token, "obtained_at": tok.obtained_at, "expires_at": tok.expires_at})
-                                await self.secrets.request("secrets.set_llm_auth", {"auth": auth_obj})
-                                api_key = auth_obj.get("access_token") or ""
-                        except Exception:
-                            pass
-                    if not api_key and not debug_mode:
-                        msg = "LLM auth missing/expired. Re-run onboarding login or configure-llm."
-                        await emit_event("assistant.final", {"text": msg})
-                        append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
-                        return {"status": "llm_auth_missing", "session_handle": session}
+                    # Subscription auth is sourced from codex CLI state bundle (vault-backed).
+                    api_key = ""
                 elif provider_name == "openai-codex":
                     _, key = await self.secrets.request("secrets.get_llm_api_key", {})
                     api_key = key.get("result", {}).get("api_key") or ""

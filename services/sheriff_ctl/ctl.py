@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import shutil
+import subprocess
 import sys
 import time
 import warnings
@@ -513,6 +514,7 @@ def cmd_onboard(args):
     llm_prov = args.llm_provider
     llm_key = args.llm_api_key
     llm_auth = None
+    codex_state_b64 = ""
     keep_unchanged = bool(getattr(args, "keep_unchanged", False))
     existing: dict[str, str] = {}
 
@@ -583,23 +585,26 @@ def cmd_onboard(args):
                 break
 
             if choice == "2":
-                print("Starting ChatGPT subscription browser login...")
-                from shared.llm.device_auth import run_browser_oauth_login
+                print("Starting Codex CLI login...")
                 try:
-                    tokens = run_browser_oauth_login(timeout_seconds=900)
-                except RuntimeError as e:
+                    from shared.llm.providers import _CodexCliBase
+
+                    codex_home = _CodexCliBase._ram_codex_home()
+                    env = os.environ.copy()
+                    env["CODEX_HOME"] = str(codex_home)
+                    proc = subprocess.run(["codex", "login"], env=env, check=False)
+                    if proc.returncode != 0:
+                        print("codex login failed; please retry.")
+                        continue
+                    # snapshot CODEX_HOME into encrypted vault state bundle
+                    snap = _CodexCliBase(codex_state_b64="")._snapshot_codex_state(codex_home)
+                    codex_state_b64 = snap
+                except Exception as e:
                     print(f"Login cancelled/failed: {e}")
                     continue
                 llm_prov = "openai-codex-chatgpt"
                 llm_key = ""
-                llm_auth = {
-                    "type": "chatgpt_browser_oauth",
-                    "access_token": tokens.access_token,
-                    "refresh_token": tokens.refresh_token,
-                    "id_token": tokens.id_token,
-                    "obtained_at": tokens.obtained_at,
-                    "expires_at": tokens.expires_at,
-                }
+                llm_auth = None
                 break
 
     if llm_key is None:
@@ -788,6 +793,10 @@ def cmd_onboard(args):
 
         if llm_auth:
             await _gw_secrets_call("secrets.set_llm_auth", {"auth": llm_auth}, gw=gw)
+        if codex_state_b64:
+            await _gw_secrets_call("secrets.codex_state.set", {"bundle_b64": codex_state_b64}, gw=gw)
+            # Subscription auth now lives in codex CLI state bundle.
+            await _gw_secrets_call("secrets.clear_llm_auth", {}, gw=gw)
 
         interactive = sys.stdin.isatty()
 

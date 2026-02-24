@@ -7,7 +7,6 @@ import os
 import shutil
 import subprocess
 import tarfile
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -60,14 +59,33 @@ class _CodexCliBase:
         return "\n".join(lines)
 
     @staticmethod
+    def _ensure_macos_ramdisk(mount_point: Path, size_mb: int = 64) -> None:
+        mount_point.parent.mkdir(parents=True, exist_ok=True)
+        if mount_point.exists() and any(mount_point.iterdir()):
+            return
+        mount_point.mkdir(parents=True, exist_ok=True)
+
+        # Create a RAM disk and mount it at mount_point (best-effort idempotent).
+        sectors = str(size_mb * 2048)
+        dev = subprocess.run(["hdiutil", "attach", "-nomount", f"ram://{sectors}"], capture_output=True, text=True, check=True).stdout.strip()  # noqa: S603
+        subprocess.run(["newfs_hfs", "-v", "SheriffCodexRAM", dev], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603
+        subprocess.run(["mount", "-t", "hfs", dev, str(mount_point)], check=True)  # noqa: S603
+
+    @staticmethod
     def _ram_codex_home() -> Path:
+        # Linux: require tmpfs-backed /dev/shm.
         if Path("/dev/shm").exists():
-            base = Path("/dev/shm")
-        else:
-            base = Path(tempfile.gettempdir())
-        p = base / "sheriff-codex-home"
-        p.mkdir(parents=True, exist_ok=True)
-        return p
+            p = Path("/dev/shm") / "sheriff-codex-home"
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+
+        # macOS: create dedicated RAM disk mount.
+        if os.uname().sysname.lower() == "darwin":
+            p = Path.home() / ".sheriffclaw" / "runtime" / "codex-ram"
+            _CodexCliBase._ensure_macos_ramdisk(p)
+            return p
+
+        raise RuntimeError("No RAM-backed filesystem available for CODEX_HOME")
 
     def _restore_codex_state(self, codex_home: Path) -> None:
         if not self.codex_state_b64:

@@ -96,9 +96,17 @@ class _CodexCliBase:
 
     def _snapshot_codex_state(self, codex_home: Path) -> str:
         bio = io.BytesIO()
+        # macOS adds these root-owned directories to mounted volumes; skip them.
+        skip_names = {".fseventsd", ".Trashes", ".Spotlight-V100", ".TemporaryItems"}
+
         with tarfile.open(fileobj=bio, mode="w:gz") as tf:
             for child in codex_home.iterdir():
-                tf.add(child, arcname=child.name)
+                if child.name in skip_names:
+                    continue
+                try:
+                    tf.add(child, arcname=child.name)
+                except PermissionError:
+                    pass  # Ignore unreadable files so the rest of the snapshot completes
         return base64.b64encode(bio.getvalue()).decode("utf-8")
 
     def _run_codex_exec(self, prompt: str, model: str, env_extra: dict[str, str] | None = None) -> str:

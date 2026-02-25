@@ -1,130 +1,244 @@
 # Project Status
-Pre Alpha - Don't install yet ;)
+
+Pre‑Alpha — **Do not install in production yet**
+
+---
 
 # Sheriff Claw 🤠
-**The Secure Way to Use Autonomous AI Agents**
 
-Sheriff Claw is a security layer that sits between your AI agent and your sensitive data. It allows you to use powerful AI tools without giving them access to your passwords or API keys.
+**The AI Firewall for Secure Autonomous Agents**
+
+Sheriff Claw lets you use powerful AI agents **without giving them access to your secrets or your system**.
+
+It is a **safe, controlled alternative to Open Claw**, built for people who want real AI power *without* losing control, privacy, or security.
+
+---
+
+## 🔐 The Three Promises
+
+Sheriff Claw is built around three non‑negotiable guarantees:
+
+### 1️⃣ No Public Internet Exposure
+
+Your system is **never exposed to the public internet**.
+
+* No open ports
+* No inbound access
+* No random scanning or drive‑by attacks
+
+If someone doesn’t already have access to your Telegram account or your device, **they cannot even see you exist**.
+
+---
+
+### 2️⃣ AI Never Sees Your Secrets
+
+Your AI agent **can never read your passwords, API keys, or tokens**.
+
+* No secrets in environment variables
+* No plaintext config files
+* No prompt injection attacks
+
+Even if the AI is manipulated, jailbroken, or hallucinating — **it has nothing to steal**.
+
+---
+
+### 3️⃣ You Approve Every Capability
+
+The AI **cannot run arbitrary commands**.
+
+* It can only access services you explicitly approve
+* It cannot execute random system actions
+* It cannot “hallucinate” permissions
+
+You are always in control. The AI works *for* you, not *instead of* you.
+
+---
+
+## 🧠 What Is Sheriff Claw?
+
+Sheriff Claw is the **first true AI firewall**.
+
+It sits between:
+
+* Your **AI agent** (smart, powerful, untrusted)
+* Your **system and secrets** (trusted, protected)
+
+The AI never touches raw secrets or devices directly.
+Everything goes through the Sheriff.
+
+> Think of it like this:
+>
+> * The AI is the worker
+> * The Sheriff is the security guard
+> * You are the boss
+
+---
+
+## 🔒 How It Works (Non‑Technical Overview)
+
+Sheriff Claw uses **two separate communication channels**:
+
+### 🛡️ The Sheriff Channel (Secure Control)
+
+* A private Telegram channel
+* Talks only to **the Sheriff program running on your device**
+* Handles passwords, approvals, and permissions
+
+The Sheriff is **not an AI**.
+It is a strict, deterministic security program.
+
+---
+
+### 🤖 The AI Channel (The Worker)
+
+* A separate Telegram channel
+* Where you talk to your AI agent
+* Used for tasks like:
+
+    * Research
+    * Writing code
+    * Automation
+    * Planning
+
+The AI **cannot access the Sheriff channel**.
+
+---
+
+## 🔑 Secure Workflow Example
+
+**Goal:** Post a daily tweet about trending news.
+
+1. You tell the AI:
+   *"Check the news and post the top story every morning."*
+
+2. The AI realizes it needs an **X (Twitter) token**.
+
+3. The Sheriff messages you privately:
+   *"The AI needs an X token. Please provide it."*
+
+4. You enter the token **securely**.
+
+5. The Sheriff encrypts and stores it.
+
+6. The AI sends tweet text to the Sheriff.
+
+7. The Sheriff signs and posts the tweet.
+
+✅ **Result:**
+
+* The tweet is posted
+* The AI never saw the token
+* Nothing sensitive was exposed
+
+---
+
+## 🛡️ Why This Is Actually Safe
+
+* **No social engineering:** The Sheriff cannot be tricked — it is not an AI
+* **No prompt injection:** The AI has zero access to secrets
+* **No persistence risk:** Secrets disappear after reboot until you unlock
+
+---
+
+## 🧩 Technical Architecture (For Developers)
+
+### 🐍 Python‑Only, Isolated Services
+
+* Written entirely in Python
+* Each component runs as an isolated service
+* Clear boundaries between responsibilities
+
+---
+
+### 🧪 Debug & Test First Design
+
+* Every service has a **debug implementation**
+* Used for:
+
+    * Unit tests
+    * Integration tests
+    * Deterministic simulations
+
+Production code never mixes with test logic.
+
+---
+
+### 🔐 Secrets Database
+
+* Encrypted SQLite database
+* Stores:
+
+    * Secrets
+    * Configs
+    * Permissions
+
+**Critical security property:**
+
+* The master password is **never stored**
+* It exists **only in RAM**
+* After reboot, the system is locked
+
+Even with root access, an attacker gets nothing.
+
+---
+
+## 🔒 End‑to‑End Secret Entry (Telegram)
+
+Sheriff Claw only communicates via:
+
+* Telegram channels
+* Local device communication
+
+### Why Telegram?
+
+Telegram supports **inline HTML apps**.
+Sheriff Claw uses them for secure secret entry:
+
+1. Sheriff sends an HTML password form
+2. You enter a secret
+3. JavaScript encrypts it using the agent’s public key
+4. Encrypted data is sent back via Telegram
+
+No third‑party services.
+No plaintext transmission.
+True end‑to‑end encryption.
+
+---
 
 ## 🚀 Quick Install (macOS)
-
-Copy and paste this one line into your terminal and hit Enter:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Gazman-Dev/sheriffclaw/main/install.sh | bash
 ```
 
-_This script downloads Sheriff Claw, installs it, and guides you through the setup._
+The installer:
+
+* Downloads Sheriff Claw
+* Guides initial setup
+* Connects Telegram channels
 
 ---
 
-Here are the two updated sections for your README:
+## 🖥️ Terminal Channel
 
-## 🔒 How It Works: The Two Channels
-
-Sheriff Claw uses **two separate Telegram channels** to keep your digital life safe.
-
-1.  **The Sheriff Channel (Secure Control):**
-    This is a private line between you and the **Sheriff**, a secure computer program running on your machine. **The Sheriff is not an AI**; it is a strict security guard that manages your secrets and permissions.
-
-2.  **The AI Channel (The Worker):**
-    This is where you chat with your **AI Agent**. You can ask it to do amazing things like:
-    *   "Research the latest tech news and write a summary."
-    *   "Check my calendar and book a meeting."
-    *   "Write code to fix a bug in my website."
-
-The AI is smart and capable, but because it lives in a separate channel, it cannot access the secrets in the Sheriff's vault.
-
-### 🔑 The Secure Workflow
-
-Here is exactly how you can let the AI manage your accounts without ever giving it your password. Let's say you want the AI to **post a daily tweet about trending news**:
-
-1.  **You ask the AI:** "Please check the news and tweet the top story every morning."
-2.  **The AI checks its tools:** It realizes it needs an **X (Twitter) Token** to post on your behalf, but it doesn't have it.
-3.  **The Sheriff alerts you:** The AI asks the Sheriff for help. The Sheriff immediately messages you on the **Secure Sheriff Channel**: *"The AI needs an X Token to proceed. Please provide it."*
-4.  **You provide the secret:** You paste the token directly into the secure chat with the Sheriff.
-5.  **The Sheriff locks it away:** The Sheriff encrypts the token in its vault and tells the AI, *"I have the token. You may proceed."*
-6.  **The AI works safely:** The AI generates the tweet and sends the text to the Sheriff. The Sheriff takes the token from the vault, signs the message, and posts it to X.
-
-**The Result:** The tweet is posted, but **the AI never saw your token.** It simply used the Sheriff to get the job done safely.
-
-### 🛡️ Why This is Safer
-
-*   **Immune to Trickery:** Since the Sheriff is a rigid program and not an AI, it cannot be tricked into revealing your secrets by a malicious website or a clever prompt.
-*   **Encrypted Storage:** Your secrets are not saved in plain text files that the AI can read. They are encrypted with a Master Password that only you know.
-*   **Total Separation:** Because the AI and the Sheriff live in different channels, the AI has no physical way to access the raw data inside the Sheriff's vault.
-
----
-
-## 📚 Wiki Docs
-
-- [LLM vs Sheriff Roles](https://github.com/Gazman-Dev/sheriffclaw/wiki/Roles:-LLM-vs-Sheriff)
-- [System Usage Guide](https://github.com/Gazman-Dev/sheriffclaw/wiki/How-to-Use-SheriffClaw)
-
-## 🖥️ Terminal Channel (new)
-
-After install, start an interactive terminal channel:
+Start an interactive session:
 
 ```bash
 sheriff-ctl chat
 ```
 
 Routing rules:
-- messages starting with `/` go to **Sheriff**
-- any other text goes to the **AI bot**
+
+* Messages starting with `/` → **Sheriff**
+* Everything else → **AI agent**
 
 Examples:
-- `/status` → Sheriff
-- `/ yes I agree` → Sheriff
-- `what / do?` → AI bot
 
-Configure Codex auth (outside Sheriff channel, stored in encrypted vault):
+* `/status`
+* `/ yes I agree`
+* `what should I automate next?`
 
-```bash
-sheriff-ctl configure-llm --provider openai-codex --api-key <OPENAI_API_KEY> --master-password <MASTER_PASSWORD>
-```
 
-Optional test bot route:
+---
 
-```bash
-sheriff-ctl chat --model-ref test/default
-```
-
-Deterministic scenario simulator (for testing permissions + secrets):
-
-```bash
-sheriff-ctl chat --model-ref scenario/default
-```
-
-Run scripted E2E simulation locally:
-
-```bash
-./scripts/e2e_cli_simulation.sh
-```
-
-Run install-path E2E check (fresh ~/.sheriffclaw install + chat flow):
-
-```bash
-./scripts/e2e_installation_check.sh
-```
-
-Run Linux validation in Docker (unit + CLI E2E + installer E2E + reinstall idempotency):
-
-```bash
-./scripts/test_linux_docker.sh
-```
-
-Run reinstall idempotency check locally:
-
-```bash
-./scripts/e2e_reinstall_idempotency.sh
-```
-
-## 🏁 Getting Started
-
-1.  **Run the install command** above.
-2.  **Set your Master Password:** This is used to encrypt your local vault.
-3.  **Connect the Channels:** The setup script will help you link the Sheriff Program and the AI Agent to Telegram.
-4.  **Start Working:** Send your keys to the Sheriff, and give tasks to the AI.
-
-**Stay Safe, Partner! 🤠**
+**Sheriff Claw gives you real AI power — on your terms.** 🤠

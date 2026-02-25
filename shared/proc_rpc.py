@@ -36,6 +36,7 @@ class ProcClient:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            limit=10 * 1024 * 1024,  # Increase limit to 10MB to handle large payloads
             cwd=self.cwd,
             env=self.env,
         )
@@ -44,10 +45,14 @@ class ProcClient:
     async def _drain_stderr(self):
         assert self.proc and self.proc.stderr
         while True:
-            line = await self.proc.stderr.readline()
-            if not line:
-                return
-            self._stderr_tail.append(line.decode("utf-8", errors="replace").rstrip())
+            try:
+                line = await self.proc.stderr.readline()
+                if not line:
+                    return
+                self._stderr_tail.append(line.decode("utf-8", errors="replace").rstrip())
+            except ValueError:
+                # Ignore limit overrun errors in stderr draining if they somehow happen
+                continue
 
     async def _read_frame(self) -> dict:
         assert self.proc and self.proc.stdout

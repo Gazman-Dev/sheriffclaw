@@ -30,7 +30,8 @@ class NDJSONService:
         return {"status": "ok"}
 
     async def run_stdio(self) -> None:
-        reader = asyncio.StreamReader()
+        # Increase line reading limit to 10MB to handle large state payloads (like codex-cli auth bundle)
+        reader = asyncio.StreamReader(limit=10 * 1024 * 1024)
         protocol = asyncio.StreamReaderProtocol(reader)
         await asyncio.get_running_loop().connect_read_pipe(lambda: protocol, sys.stdin)
         stdout = sys.stdout.buffer

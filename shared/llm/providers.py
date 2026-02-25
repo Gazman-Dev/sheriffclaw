@@ -52,10 +52,13 @@ class _CodexCliBase:
     def _render_prompt(messages: list[dict[str, Any]]) -> str:
         lines: list[str] = [
             "System: You are the AI Agent for Sheriff Claw.",
-            "System: You are running in an environment where you DO have outbound internet access. You can use curl, python, etc., to fetch data.",
-            "System: To request secrets or permissions from the user, you can interact with the Sheriff API by executing the local `sheriff-ctl` command in your shell.",
-            "System: Example to request a secret: `sheriff-ctl call sheriff-requests requests.create_or_update --json '{\"type\": \"secret\", \"key\": \"github_token\", \"one_liner\": \"Need token to clone repo\"}'`",
-            "System: The user will approve or deny requests securely through their Sheriff channel.",
+            "System: You are running inside a strict OS-level sandbox. Your entire file system access is restricted.",
+            "System: You CANNOT read or write files in the user's home directory. You ONLY have access to your workspace.",
+            "System: You HAVE outbound internet access to fetch docs, search the web, and download dependencies into your workspace.",
+            "System: SECURITY POLICY: Do NOT attempt to install software globally or access personal files.",
+            "System: If you need a secret (like an API key, DB credential, etc.), you MUST request it from the user via the Sheriff API.",
+            "System: To request a secret via Sheriff API, execute: `sheriff-ctl call sheriff-requests requests.create_or_update --json '{\"type\": \"secret\", \"key\": \"<name_of_secret>\", \"one_liner\": \"<why you need it>\"}'`",
+            "System: After requesting a secret, STOP and politely ask the user to approve it in their Sheriff channel.",
             "Conversation history:"
         ]
         for msg in messages[-20:]:
@@ -88,7 +91,8 @@ class _CodexCliBase:
 
         # macOS: create dedicated RAM disk mount.
         if os.uname().sysname.lower() == "darwin":
-            p = Path.home() / ".sheriffclaw" / "runtime" / "codex-ram"
+            # Place inside llm_root() so the OS sandbox naturally permits read/write
+            p = Path(os.environ.get("SHERIFFCLAW_ROOT", Path.home() / ".sheriffclaw")).resolve() / "llm" / "run" / "codex-ram"
             _CodexCliBase._ensure_macos_ramdisk(p)
             return p
 
@@ -124,8 +128,14 @@ class _CodexCliBase:
         except Exception:
             pass
 
+        # Define the agent workspace explicitly
+        workspace_dir = Path(os.environ.get("SHERIFFCLAW_ROOT", Path.home() / ".sheriffclaw")).resolve() / "agent_workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+
         env = os.environ.copy()
         env["CODEX_HOME"] = str(codex_home)
+        # Force tools like npm and git to use the workspace as their home directory
+        env["HOME"] = str(workspace_dir)
         if env_extra:
             env.update({k: v for k, v in env_extra.items() if v is not None})
 
@@ -134,6 +144,7 @@ class _CodexCliBase:
             "--search",
             "--dangerously-bypass-approvals-and-sandbox",
             "exec",
+            "-C", str(workspace_dir),
             "--skip-git-repo-check",
             "--model",
             model,

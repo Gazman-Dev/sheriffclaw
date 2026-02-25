@@ -143,23 +143,43 @@ def _notify_sheriff_channel(text: str) -> bool:
 
 def _ai_worker_sandbox_profile() -> Path:
     p = gw_root() / "state" / "ai_worker.sb"
-    workspace = gw_root().parent
+    workspace = gw_root().parent.resolve()
     agent_ws = workspace / "agent_workspace"
-    system_skills = workspace / "system_skills"
-    skills = workspace / "skills"
     agent_ws.mkdir(parents=True, exist_ok=True)
-    net_rule = "(allow network-outbound)" if _network_allowed_for_ai_worker() else ""
+
+    net_rule = "(allow network-outbound) (allow network-inbound)" if _network_allowed_for_ai_worker() else ""
+    home = Path.home().resolve()
+    sys_prefix = Path(sys.prefix).resolve()
+    gw = gw_root().resolve()
+    llm = llm_root().resolve()
+
     profile = f'''(version 1)
 (deny default)
 (import "system.sb")
 (allow process*)
-(allow file-read* (subpath "{workspace}"))
-(allow file-read* (subpath "{system_skills}"))
-(allow file-read* (subpath "{skills}"))
-(allow file-write* (subpath "{agent_ws}"))
-(allow file-write* (subpath "{gw_root() / 'logs'}"))
-(allow file-write* (subpath "{llm_root() / 'logs'}"))
 {net_rule}
+
+; Blanket deny all access to the user's home directory to prevent secret scraping
+(deny file-read* file-write* (subpath "{home}"))
+
+; Allow reading the python environment
+(allow file-read* (subpath "{sys_prefix}"))
+
+; Allow reading the application source code (read-only)
+(allow file-read* (subpath "{workspace}"))
+
+; EXPLICITLY DENY the gateway directory where Sheriff secrets are kept
+(deny file-read* file-write* (subpath "{gw}"))
+
+; Allow full access to the designated agent workspace
+(allow file-read* file-write* (subpath "{agent_ws}"))
+
+; Allow full access to LLM logs and state
+(allow file-read* file-write* (subpath "{llm}"))
+
+; Allow temp directories needed by node/npm/python
+(allow file-read* file-write* (subpath "/private/tmp"))
+(allow file-read* file-write* (subpath "/private/var/folders"))
 '''
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(profile, encoding="utf-8")
@@ -172,12 +192,13 @@ def _linux_sandbox_profile() -> Path:
     agent_ws = (workspace / "agent_workspace").resolve()
     skill_root = (workspace / "skills").resolve()
     system_skill_root = (workspace / "system_skills").resolve()
-    logs_gw = (gw_root() / "logs").resolve()
-    logs_llm = (llm_root() / "logs").resolve()
+    gw = gw_root().resolve()
+    llm = llm_root().resolve()
+    sys_prefix = Path(sys.prefix).resolve()
+    home = Path.home().resolve()
 
     agent_ws.mkdir(parents=True, exist_ok=True)
-    logs_gw.mkdir(parents=True, exist_ok=True)
-    logs_llm.mkdir(parents=True, exist_ok=True)
+    (llm / "logs").mkdir(parents=True, exist_ok=True)
 
     args = [
         "--die-with-parent",
@@ -190,16 +211,29 @@ def _linux_sandbox_profile() -> Path:
         "--proc", "/proc",
         "--dev", "/dev",
         "--tmpfs", "/tmp",
-        "--ro-bind", str(workspace), str(workspace),
-        "--ro-bind", str(skill_root), str(skill_root),
-        "--ro-bind", str(system_skill_root), str(system_skill_root),
-        "--bind", str(agent_ws), str(agent_ws),
-        "--bind", str(logs_gw), str(logs_gw),
-        "--bind", str(logs_llm), str(logs_llm),
-        "--chdir", str(workspace),
+
+        # Hide the user's entire home directory by mounting an empty tmpfs over it
+        "--tmpfs", str(home),
     ]
     if _network_allowed_for_ai_worker():
         args.insert(2, "--share-net")
+
+    # Re-bind only what is needed from home
+    if sys_prefix != Path("/usr"):
+        args.extend(["--ro-bind", str(sys_prefix), str(sys_prefix)])
+
+    args.extend([
+        # Bind the sheriffclaw workspace read-only back into the hidden home dir
+        "--ro-bind", str(workspace), str(workspace),
+
+        # Overlay a tmpfs on the gateway directory so secrets db cannot be read
+        "--tmpfs", str(gw),
+
+        # Bind specific paths the agent is allowed to write to
+        "--bind", str(agent_ws), str(agent_ws),
+        "--bind", str(llm), str(llm),
+        "--chdir", str(agent_ws),  # Force agent to start inside its sandbox jail
+    ])
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("\n".join(args), encoding="utf-8")
     return p

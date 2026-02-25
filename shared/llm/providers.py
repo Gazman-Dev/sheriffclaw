@@ -50,7 +50,14 @@ class _CodexCliBase:
 
     @staticmethod
     def _render_prompt(messages: list[dict[str, Any]]) -> str:
-        lines: list[str] = ["Conversation history:"]
+        lines: list[str] = [
+            "System: You are the AI Agent for Sheriff Claw.",
+            "System: You are running in an environment where you DO have outbound internet access. You can use curl, python, etc., to fetch data.",
+            "System: To request secrets or permissions from the user, you can interact with the Sheriff API by executing the local `sheriff-ctl` command in your shell.",
+            "System: Example to request a secret: `sheriff-ctl call sheriff-requests requests.create_or_update --json '{\"type\": \"secret\", \"key\": \"github_token\", \"one_liner\": \"Need token to clone repo\"}'`",
+            "System: The user will approve or deny requests securely through their Sheriff channel.",
+            "Conversation history:"
+        ]
         for msg in messages[-20:]:
             role = str(msg.get("role", "user"))
             content = str(msg.get("content", ""))
@@ -128,7 +135,8 @@ class _CodexCliBase:
             "--skip-git-repo-check",
             "--full-auto",
             "--sandbox",
-            "workspace-write",
+            "none",  # Disabled internal sandbox so OS-level Sheriff sandbox takes over
+            "--search", # Enables live internet search capability for the agent
             "--model",
             model,
             prompt,

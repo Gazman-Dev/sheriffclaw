@@ -131,12 +131,10 @@ class _CodexCliBase:
 
         cmd = [
             "codex",
+            "--search",
+            "--dangerously-bypass-approvals-and-sandbox",
             "exec",
             "--skip-git-repo-check",
-            "--full-auto",
-            "--sandbox",
-            "none",  # Disabled internal sandbox so OS-level Sheriff sandbox takes over
-            "--search", # Enables live internet search capability for the agent
             "--model",
             model,
             prompt,

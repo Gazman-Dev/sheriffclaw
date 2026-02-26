@@ -50,7 +50,7 @@ class _CodexCliBase:
 
     @staticmethod
     def _render_prompt(messages: list[dict[str, Any]]) -> str:
-        lines: list[str] =[
+        lines: list[str] = [
             "System: You are the AI Agent for Sheriff Claw.",
             "System: You are running inside a strict OS-level sandbox. Your entire file system access is restricted.",
             "System: You CANNOT read or write files in the user's home directory. You ONLY have access to your workspace.",
@@ -59,14 +59,17 @@ class _CodexCliBase:
             "System: If you need a secret (like an API key, DB credential, etc.), you MUST request it from the user via the Sheriff API.",
             "System: To request a secret via Sheriff API, execute: `sheriff-ctl call sheriff-requests requests.create_or_update --json '{\"type\": \"secret\", \"key\": \"<name_of_secret>\", \"one_liner\": \"<why you need it>\"}'`",
             "System: After requesting a secret, STOP and politely ask the user to approve it in their Sheriff channel.",
-            "System: CORE COMMANDS ALWAYS AVAILABLE TO YOU:",
+            "System: CORE COMMANDS ALWAYS AVAILABLE TO YOU (Run via `tools.exec`):",
             "System:   - `python skills/search_skills/run.py \"query\"`: Searches your available peripheral skills.",
-            "System: If a user asks you to do something you don't know how to do, use `tools.exec` to run `python skills/search_skills/run.py \"query\"` first.",
+            "System:   - `python skills/search_memory/run.py \"query\"`: Search past conversations you have had with the user.",
+            "System:   - `python skills/search_topics/run.py \"query\"`: Search facts, rules, and concepts in your topic database.",
+            "System: If a user asks you to do something you don't know how to do, use `search_skills` first.",
+            "System: If the user refers to something you spoke about in the past, use `search_memory`.",
             "Conversation history:"
         ]
-        for msg in messages[-20:]:
-            role = str(msg.get("role", "user"))
-            content = str(msg.get("content", ""))
+        for m in messages[-20:]:
+            role = str(m.get("role", "user"))
+            content = str(m.get("content", ""))
             lines.append(f"[{role}] {content}")
         lines.append("\nReply as the assistant to the last user message.")
         return "\n".join(lines)
@@ -142,7 +145,7 @@ class _CodexCliBase:
         if env_extra:
             env.update({k: v for k, v in env_extra.items() if v is not None})
 
-        cmd =[
+        cmd = [
             "codex",
             "--search",
             "--dangerously-bypass-approvals-and-sandbox",

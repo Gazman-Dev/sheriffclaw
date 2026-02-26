@@ -10,6 +10,12 @@ from shared.llm.registry import resolve_model
 from shared.skills.loader import SkillLoader
 from shared.proc_rpc import ProcClient
 
+# Memory Imports
+from shared.memory.store import TopicStore
+from shared.memory.embedding import LocalSemanticEmbeddingProvider
+from shared.memory.semantic_index import HnswlibSemanticIndex
+from shared.memory.runtime import sleep
+
 
 class WorkerRuntime:
     def __init__(self):
@@ -21,6 +27,15 @@ class WorkerRuntime:
         self.memory_dir = self.workspace_root / ".memory"
         self.memory_dir.mkdir(parents=True, exist_ok=True)
         self.session_file = self.memory_dir / "session.json"
+
+        # Initialize semantic indexes
+        self.embedder = LocalSemanticEmbeddingProvider()
+        self.topics_index = HnswlibSemanticIndex(self.memory_dir / "semantic", name="topics", dim=self.embedder.dim)
+        self.conv_index = HnswlibSemanticIndex(self.memory_dir / "semantic", name="conversations", dim=self.embedder.dim)
+        self.topic_store = TopicStore(self.memory_dir / "topics.json")
+
+        self.topics_index.load()
+        self.conv_index.load()
 
         self.skill_loader = SkillLoader(
             user_root=self.workspace_root / "skills",
@@ -35,7 +50,7 @@ class WorkerRuntime:
             try:
                 data = json.loads(self.session_file.read_text(encoding="utf-8"))
                 if data.get("session_handle") == handle:
-                    return data.get("conversation_buffer",[])
+                    return data.get("conversation_buffer", [])
             except Exception:
                 pass
         return []
@@ -46,63 +61,81 @@ class WorkerRuntime:
             encoding="utf-8"
         )
 
-    @staticmethod
-    def _last_tool_result(history: list[dict]) -> str:
-        for entry in reversed(history):
-            if entry.get("role") == "tool":
-                return str(entry.get("content", ""))
-        return "none"
+    async def user_message(
+            self,
+            session_handle: str,
+            text: str,
+            model_ref: str | None,
+            emit_event,
+            provider_name: str | None = None,
+            api_key: str = "",
+            base_url: str = "",
+            codex_state_b64: str = "",
+    ):
+        history = self._load_session(session_handle)
+        history.append({"role": "user", "content": text})
 
-    async def _scenario_message(self, history: list[dict], text: str, model: str, emit_event) -> str:
-        stripped = text.strip()
-        lower = stripped.lower()
-
-        if lower.startswith("scenario secret "):
-            handle = stripped.split(maxsplit=2)[2]
-            await emit_event(
-                "tool.call",
-                {"tool_name": "secure.secret.ensure", "payload": {"handle": handle}, "reason": "scenario-secret"},
+        # AUTOMATIC SLEEP / MEMORY CONSOLIDATION
+        # If conversation is long, index the old parts and keep the last 10 turns
+        if len(history) > 20:
+            emit_event("memory.compaction", {"status": "starting"})
+            result = sleep(
+                conversation_buffer=history,
+                now=None,
+                topic_store=self.topic_store,
+                embedding_provider=self.embedder,
+                topics_index=self.topics_index,
+                conversations_index=self.conv_index,
+                keep_tail_turns=10
             )
-            return f"Scenario[{model}] requested secret handle: {handle}"
+            history = result["trimmed_conversation"]
 
-        if lower.startswith("scenario exec "):
-            tool_name = stripped.split(maxsplit=2)[2]
-            await emit_event(
-                "tool.call",
-                {
-                    "tool_name": "tools.exec",
-                    "payload": {"argv":[tool_name, "--version"], "taint": False},
-                    "reason": "scenario-exec",
-                },
-            )
-            return f"Scenario[{model}] requested tool execution: {tool_name}"
+        model = resolve_model(model_ref)
+        selected_provider = provider_name or ("test" if model.startswith("test/") else "stub")
+        provider = self._provider(selected_provider, api_key, base_url, codex_state_b64)
 
-        if lower.startswith("scenario web "):
-            host = stripped.split(maxsplit=2)[2]
-            await emit_event(
-                "tool.call",
-                {"tool_name": "secure.web.request", "payload": {"host": host, "path": "/", "method": "GET"}, "reason": "scenario-web"},
-            )
-            return f"Scenario[{model}] requested web access: {host}"
+        answer = await provider.generate(history, model=model)
 
-        if lower == "scenario last tool":
-            return f"Scenario[{model}] last tool result: {self._last_tool_result(history)}"
+        await emit_event("assistant.delta", {"text": answer})
+        await emit_event("assistant.final", {"text": answer})
 
-        return f"Scenario[{model}] echo: {text}"
+        history.append({"role": "assistant", "content": answer})
+        self._save_session(session_handle, history)
+        self.sessions[session_handle] = history
 
-    def _rpc_client(self, service: str) -> ProcClient:
-        cli = self._rpc_clients.get(service)
-        if cli is None:
-            cli = ProcClient(service)
-            self._rpc_clients[service] = cli
-        return cli
+    async def tool_result(self, session_handle: str, tool_name: str, result: dict) -> None:
+        history = self._load_session(session_handle)
+        history.append({"role": "tool", "name": tool_name, "content": str(result)})
+        self._save_session(session_handle, history)
+        self.sessions[session_handle] = history
 
-    async def _sheriff_call(self, service: str, op: str, payload: dict):
-        if not service.startswith("sheriff-"):
-            raise ValueError("sheriff_call service must start with sheriff-")
-        cli = self._rpc_client(service)
-        _, res = await cli.request(op, payload)
-        return res.get("result", {})
+    async def skill_run(self, name: str, payload: dict, emit_event) -> dict:
+        self.skills = self.skill_loader.load()
+        loaded = self.skills.get(name)
+        if not loaded:
+            raise ValueError(f"unknown skill: {name}")
+
+        cmd = loaded.command
+        argv = payload.get("argv", [])
+        stdin_data = payload.get("stdin", "")
+        if argv:
+            cmd = f"{cmd} {' '.join(argv)}"
+
+        cwd = str((self.workspace_root / "agent_workspace").resolve())
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdin=asyncio.subprocess.PIPE if stdin_data else None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd
+        )
+
+        stdout, stderr = await proc.communicate(input=stdin_data.encode("utf-8") if stdin_data else None)
+        return {
+            "stdout": stdout.decode("utf-8", errors="replace"),
+            "stderr": stderr.decode("utf-8", errors="replace"),
+            "code": proc.returncode
+        }
 
     def _provider(self, provider: str, api_key: str, base_url: str = "", codex_state_b64: str = ""):
         key = f"{provider}:{api_key}:{base_url}:{hash(codex_state_b64)}"
@@ -124,85 +157,3 @@ class WorkerRuntime:
 
     async def session_close(self, session_handle: str) -> None:
         self.sessions.pop(session_handle, None)
-
-    async def user_message(
-            self,
-            session_handle: str,
-            text: str,
-            model_ref: str | None,
-            emit_event,
-            provider_name: str | None = None,
-            api_key: str = "",
-            base_url: str = "",
-            codex_state_b64: str = "",
-    ):
-        history = self._load_session(session_handle)
-        history.append({"role": "user", "content": text})
-        model = resolve_model(model_ref)
-
-        if model.startswith("scenario/"):
-            answer = await self._scenario_message(history, text, model, emit_event)
-        else:
-            lower = text.lower()
-            if "tool" in lower:
-                await emit_event("tool.call", {"tool_name": "tools.exec", "payload": {"argv": ["echo", "tool-invoked"], "taint": False}, "reason": "trigger word"})
-            selected_provider = provider_name or ("test" if model.startswith("test/") else "stub")
-            provider = self._provider(selected_provider, api_key, base_url, codex_state_b64)
-            answer = await provider.generate(history, model=model)
-            state_b64 = getattr(provider, "last_codex_state_b64", "")
-            if state_b64:
-                await emit_event("provider.state", {"codex_state_b64": state_b64})
-
-        await emit_event("assistant.delta", {"text": answer})
-        await emit_event("assistant.final", {"text": answer})
-
-        history.append({"role": "assistant", "content": answer})
-        self._save_session(session_handle, history)
-        self.sessions[session_handle] = history
-
-    async def tool_result(self, session_handle: str, tool_name: str, result: dict) -> None:
-        history = self._load_session(session_handle)
-        history.append({"role": "tool", "name": tool_name, "content": str(result)})
-        self._save_session(session_handle, history)
-        self.sessions[session_handle] = history
-
-    async def list_skills(self) -> list[str]:
-        self.skills = self.skill_loader.load()
-        return sorted(self.skills.keys())
-
-    @staticmethod
-    def _sandboxed_path(base: Path, raw: str) -> Path:
-        p = (base / raw).resolve()
-        if not str(p).startswith(str(base.resolve())):
-            raise ValueError("path outside sandbox")
-        return p
-
-    async def skill_run(self, name: str, payload: dict, emit_event) -> dict:
-        self.skills = self.skill_loader.load()
-        loaded = self.skills.get(name)
-        if not loaded:
-            raise ValueError(f"unknown skill: {name}")
-
-        cmd = loaded.command
-        argv = payload.get("argv",[])
-        stdin_data = payload.get("stdin", "")
-
-        if argv:
-            cmd = f"{cmd} {' '.join(argv)}"
-
-        cwd = str((self.workspace_root / "agent_workspace").resolve())
-
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdin=asyncio.subprocess.PIPE if stdin_data else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=cwd
-        )
-
-        stdout, stderr = await proc.communicate(input=stdin_data.encode("utf-8") if stdin_data else None)
-        return {
-            "stdout": stdout.decode("utf-8", errors="replace"),
-            "stderr": stderr.decode("utf-8", errors="replace"),
-            "code": proc.returncode
-        }

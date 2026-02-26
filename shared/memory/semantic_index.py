@@ -23,14 +23,14 @@ class SemanticIndex(ABC):
 
 
 class HnswlibSemanticIndex(SemanticIndex):
-    # Default dimension updated to 384 for sentence-transformers
-    def __init__(self, base_dir: Path, dim: int = 384, space: str = "cosine"):
+    def __init__(self, base_dir: Path, name: str = "index", dim: int = 384, space: str = "cosine"):
         self.base_dir = base_dir
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.dim = dim
         self.space = space
-        self.index_path = self.base_dir / "index.bin"
-        self.meta_path = self.base_dir / "meta.json"
+        self.name = name
+        self.index_path = self.base_dir / f"{name}.bin"
+        self.meta_path = self.base_dir / f"{name}_meta.json"
         self.topic_to_int: dict[str, int] = {}
         self.int_to_topic: dict[int, str] = {}
         self.next_id = 0
@@ -60,7 +60,7 @@ class HnswlibSemanticIndex(SemanticIndex):
 
     def search(self, query_vector: list[float], k: int) -> list[tuple[str, float]]:
         if not self._initialized or len(self.topic_to_int) == 0:
-            return[]
+            return []
         kk = min(k, len(self.topic_to_int))
         labels, distances = self.index.knn_query(np.array([query_vector], dtype=np.float32), k=kk)
         out: list[tuple[str, float]] = []
@@ -68,8 +68,6 @@ class HnswlibSemanticIndex(SemanticIndex):
             topic_id = self.int_to_topic.get(int(int_id))
             if topic_id is None:
                 continue
-            # Normalize to similarity in [0..1], higher is better.
-            # For cosine space, hnswlib returns cosine distance ~= (1 - cosine_similarity).
             score = float(max(0.0, min(1.0, 1.0 - distance)))
             out.append((topic_id, score))
         return out

@@ -1,0 +1,6 @@
+{
+  "skill_id": "search_topics",
+  "description": "Searches for structured topics, facts, and rules in the long-term topic database.",
+  "command": "python skills/search_topics/run.py",
+  "tags": ["facts", "topics", "rules", "knowledge"]
+}

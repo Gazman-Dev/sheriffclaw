@@ -70,7 +70,7 @@ class SheriffGatewayService:
         p = gw_root() / "state" / "debug.agent.jsonl"
         if not p.exists():
             raise RuntimeError("debug.agent.jsonl missing")
-        lines = [ln for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        lines =[ln for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
         if not lines:
             raise RuntimeError("debug.agent.jsonl is empty")
         first = lines[0]
@@ -86,13 +86,14 @@ class SheriffGatewayService:
 
     async def _process_message(self, principal_id: str, payload, emit_event):
         text = payload.get("text", "")
-        session = self.sessions.get(principal_id)
-        if not session:
-            _, opened = await self.ai.request("agent.session.open", {"session_id": principal_id})
-            session = opened["result"]["session_handle"]
-            self.sessions[principal_id] = session
 
-        append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "user", "content": text})
+        # UNIFY SESSION: Ignore multi-user routing. Always use primary_session.
+        session = "primary_session"
+        if not self.sessions.get(session):
+            _, opened = await self.ai.request("agent.session.open", {"session_id": session})
+            self.sessions[session] = opened["result"]["session_handle"]
+
+        append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl", {"role": "user", "content": text})
 
         debug_mode = self._debug_mode_enabled()
         provider_name = "stub"
@@ -112,7 +113,7 @@ class SheriffGatewayService:
             if vault_known_locked:
                 msg = "🔒 Sheriff vault is locked. Run /unlock <master_password> first."
                 await emit_event("assistant.final", {"text": msg})
-                append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
+                append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl", {"role": "assistant", "content": msg})
                 return {"status": "locked", "session_handle": session}
 
         if unlocked.get("ok") is True and unlocked.get("result", {}).get("unlocked"):
@@ -121,7 +122,7 @@ class SheriffGatewayService:
                 if not debug_mode:
                     msg = "Sheriff could not read LLM provider from vault."
                     await emit_event("assistant.final", {"text": msg})
-                    append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
+                    append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl", {"role": "assistant", "content": msg})
                     return {"status": "provider_error", "session_handle": session}
             else:
                 provider_name = prov.get("result", {}).get("provider") or provider_name
@@ -134,7 +135,7 @@ class SheriffGatewayService:
                     if not api_key and not debug_mode:
                         msg = "OpenAI API key missing. Run: sheriff configure-llm --provider openai-codex"
                         await emit_event("assistant.final", {"text": msg})
-                        append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
+                        append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl", {"role": "assistant", "content": msg})
                         return {"status": "llm_key_missing", "session_handle": session}
 
                 _, cstate = await self.secrets.request("secrets.codex_state.get", {})
@@ -144,7 +145,7 @@ class SheriffGatewayService:
             msg = self._pop_debug_message()
             out_text = msg.get("text") or msg.get("content") or json.dumps(msg, ensure_ascii=False)
             await emit_event("assistant.final", {"text": out_text})
-            append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": out_text})
+            append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl", {"role": "assistant", "content": out_text})
             return {"status": "debug", "session_handle": session}
 
         stream, final = await self.ai.request("agent.session.user_message", {"session_handle": session, "text": text, "model_ref": payload.get("model_ref"), "provider_name": provider_name, "api_key": api_key, "base_url": base_url, "codex_state_b64": codex_state_b64}, stream_events=True)
@@ -187,7 +188,7 @@ class SheriffGatewayService:
             err = final_res.get("error") or "unknown_error"
             msg = f"AI worker error: {err}"
             await emit_event("assistant.final", {"text": msg})
-            append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
+            append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl", {"role": "assistant", "content": msg})
             return {"status": "ai_error", "session_handle": session}
 
         if not saw_final:
@@ -196,7 +197,7 @@ class SheriffGatewayService:
             else:
                 msg = "AI produced no final response."
             await emit_event("assistant.final", {"text": msg})
-            append_jsonl(gw_root() / "state" / "transcripts" / f"{session.replace(':','_')}.jsonl", {"role": "assistant", "content": msg})
+            append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl", {"role": "assistant", "content": msg})
 
         return {"status": "done", "session_handle": session}
 
@@ -279,16 +280,16 @@ class SheriffGatewayService:
     async def notify_request_resolved(self, payload, emit_event, req_id):
         if not self.sessions:
             return {"status": "no_session"}
-        session_handle = next(reversed(self.sessions.values()))
+        session_handle = "primary_session"
         result = {"type": payload.get("type"), "key": payload.get("key"), "status": payload.get("status")}
         await self.ai.request(
             "agent.session.tool_result",
             {"session_handle": session_handle, "tool_name": "requests.resolved", "result": result},
         )
         append_jsonl(
-            gw_root() / "state" / "transcripts" / f"{session_handle.replace(':','_')}.jsonl",
+            gw_root() / "state" / "transcripts" / f"{session_handle}.jsonl",
             {"role": "tool", "name": "requests.resolved", "content": result},
-        )
+            )
         return {"status": "notified", "session_handle": session_handle}
 
     def ops(self):

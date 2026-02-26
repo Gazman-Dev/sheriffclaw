@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import uuid
+import json
+import asyncio
 from pathlib import Path
 
 from shared.llm.providers import ChatGPTSubscriptionCodexProvider, OpenAICodexProvider, StubProvider, TestProvider
@@ -13,15 +15,36 @@ class WorkerRuntime:
     def __init__(self):
         self.sessions: dict[str, list[dict]] = {}
         self.providers: dict[str, object] = {}
-        workspace_root = Path.cwd()
-        self.workspace_root = workspace_root
+        self.workspace_root = Path.cwd()
+
+        # Setup agent-owned persistent memory layer
+        self.memory_dir = self.workspace_root / ".memory"
+        self.memory_dir.mkdir(parents=True, exist_ok=True)
+        self.session_file = self.memory_dir / "session.json"
+
         self.skill_loader = SkillLoader(
-            user_root=workspace_root / "skills",
-            system_root=workspace_root / "system_skills",
+            user_root=self.workspace_root / "skills",
+            system_root=self.workspace_root / "system_skills",
         )
-        (workspace_root / "agent_workspace").mkdir(parents=True, exist_ok=True)
+        (self.workspace_root / "agent_workspace").mkdir(parents=True, exist_ok=True)
         self.skills = self.skill_loader.load()
         self._rpc_clients: dict[str, ProcClient] = {}
+
+    def _load_session(self, handle: str) -> list[dict]:
+        if self.session_file.exists():
+            try:
+                data = json.loads(self.session_file.read_text(encoding="utf-8"))
+                if data.get("session_handle") == handle:
+                    return data.get("conversation_buffer",[])
+            except Exception:
+                pass
+        return []
+
+    def _save_session(self, handle: str, buffer: list[dict]) -> None:
+        self.session_file.write_text(
+            json.dumps({"session_handle": handle, "conversation_buffer": buffer}, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
 
     @staticmethod
     def _last_tool_result(history: list[dict]) -> str:
@@ -48,7 +71,7 @@ class WorkerRuntime:
                 "tool.call",
                 {
                     "tool_name": "tools.exec",
-                    "payload": {"argv": [tool_name, "--version"], "taint": False},
+                    "payload": {"argv":[tool_name, "--version"], "taint": False},
                     "reason": "scenario-exec",
                 },
             )
@@ -95,25 +118,25 @@ class WorkerRuntime:
         return self.providers[key]
 
     async def session_open(self, session_id: str | None) -> str:
-        handle = session_id or str(uuid.uuid4())
-        self.sessions.setdefault(handle, [])
+        handle = "primary_session"
+        self.sessions[handle] = self._load_session(handle)
         return handle
 
     async def session_close(self, session_handle: str) -> None:
         self.sessions.pop(session_handle, None)
 
     async def user_message(
-        self,
-        session_handle: str,
-        text: str,
-        model_ref: str | None,
-        emit_event,
-        provider_name: str | None = None,
-        api_key: str = "",
-        base_url: str = "",
-        codex_state_b64: str = "",
+            self,
+            session_handle: str,
+            text: str,
+            model_ref: str | None,
+            emit_event,
+            provider_name: str | None = None,
+            api_key: str = "",
+            base_url: str = "",
+            codex_state_b64: str = "",
     ):
-        history = self.sessions.setdefault(session_handle, [])
+        history = self._load_session(session_handle)
         history.append({"role": "user", "content": text})
         model = resolve_model(model_ref)
 
@@ -132,10 +155,16 @@ class WorkerRuntime:
 
         await emit_event("assistant.delta", {"text": answer})
         await emit_event("assistant.final", {"text": answer})
+
         history.append({"role": "assistant", "content": answer})
+        self._save_session(session_handle, history)
+        self.sessions[session_handle] = history
 
     async def tool_result(self, session_handle: str, tool_name: str, result: dict) -> None:
-        self.sessions.setdefault(session_handle, []).append({"role": "tool", "name": tool_name, "content": str(result)})
+        history = self._load_session(session_handle)
+        history.append({"role": "tool", "name": tool_name, "content": str(result)})
+        self._save_session(session_handle, history)
+        self.sessions[session_handle] = history
 
     async def list_skills(self) -> list[str]:
         self.skills = self.skill_loader.load()
@@ -154,15 +183,26 @@ class WorkerRuntime:
         if not loaded:
             raise ValueError(f"unknown skill: {name}")
 
-        impl = getattr(loaded, "implementation_module", loaded)
-        if "path" in payload and isinstance(payload["path"], str):
-            payload = {**payload, "path": str(self._sandboxed_path(self.workspace_root, payload["path"]))}
+        cmd = loaded.command
+        argv = payload.get("argv",[])
+        stdin_data = payload.get("stdin", "")
 
-        context = {
-            "workspace_root": str(self.workspace_root),
-            "sandbox_root": str((self.workspace_root / "agent_workspace").resolve()),
-            "skill_root": str(getattr(loaded, "root", self.workspace_root)),
-            "skill_source": getattr(loaded, "source", "user"),
-            "sheriff_call": self._sheriff_call,
+        if argv:
+            cmd = f"{cmd} {' '.join(argv)}"
+
+        cwd = str((self.workspace_root / "agent_workspace").resolve())
+
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdin=asyncio.subprocess.PIPE if stdin_data else None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd
+        )
+
+        stdout, stderr = await proc.communicate(input=stdin_data.encode("utf-8") if stdin_data else None)
+        return {
+            "stdout": stdout.decode("utf-8", errors="replace"),
+            "stderr": stderr.decode("utf-8", errors="replace"),
+            "code": proc.returncode
         }
-        return await impl.run(payload, emit_event=emit_event, context=context)

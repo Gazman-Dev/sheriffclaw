@@ -1,0 +1,6 @@
+{
+  "skill_id": "summarize",
+  "description": "Summarize input text into a short single-line summary",
+  "command": "python skills/summarize/run.py",
+  "tags": ["summarize", "text", "shorten"]
+}

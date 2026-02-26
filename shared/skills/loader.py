@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import importlib.util
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,9 +8,10 @@ from pathlib import Path
 @dataclass
 class LoadedSkill:
     name: str
-    interface_module: object
-    implementation_module: object
-    source: str  # system|user
+    description: str
+    command: str
+    tags: list[str]
+    source: str
     root: Path
 
 
@@ -18,15 +19,6 @@ class SkillLoader:
     def __init__(self, user_root: Path, system_root: Path | None = None):
         self.user_root = user_root
         self.system_root = system_root
-
-    @staticmethod
-    def _load_module(mod_name: str, file_path: Path):
-        spec = importlib.util.spec_from_file_location(mod_name, file_path)
-        if spec is None or spec.loader is None:
-            return None
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
 
     def _discover_in_root(self, root: Path, source: str) -> dict[str, LoadedSkill]:
         out: dict[str, LoadedSkill] = {}
@@ -36,27 +28,23 @@ class SkillLoader:
         for skill_dir in root.iterdir():
             if not skill_dir.is_dir():
                 continue
-            interface_py = skill_dir / "interface.py"
-            impl_py = skill_dir / "implementation.py"
-
-            if not (interface_py.exists() and impl_py.exists()):
+            manifest_path = skill_dir / "manifest.json"
+            if not manifest_path.exists():
                 continue
 
-            interface_mod = self._load_module(f"skills_{source}_{skill_dir.name}_iface", interface_py)
-            impl_mod = self._load_module(f"skills_{source}_{skill_dir.name}_impl", impl_py)
-            if interface_mod is None or impl_mod is None:
+            try:
+                raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+                name = raw.get("skill_id", skill_dir.name)
+                out[name] = LoadedSkill(
+                    name=name,
+                    description=raw.get("description", ""),
+                    command=raw.get("command", f"bash {skill_dir.name}/run.sh"),
+                    tags=raw.get("tags",[]),
+                    source=source,
+                    root=skill_dir,
+                )
+            except Exception:
                 continue
-            if not hasattr(impl_mod, "run"):
-                continue
-
-            name = getattr(interface_mod, "SKILL_NAME", getattr(impl_mod, "SKILL_NAME", skill_dir.name))
-            out[name] = LoadedSkill(
-                name=name,
-                interface_module=interface_mod,
-                implementation_module=impl_mod,
-                source=source,
-                root=skill_dir,
-            )
         return out
 
     def load(self) -> dict[str, LoadedSkill]:
@@ -64,7 +52,6 @@ class SkillLoader:
         if self.system_root is not None:
             skills.update(self._discover_in_root(self.system_root, "system"))
 
-        # user skills can override only if same name is not system
         user_skills = self._discover_in_root(self.user_root, "user")
         for k, v in user_skills.items():
             if k not in skills:

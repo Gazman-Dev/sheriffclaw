@@ -1,5 +1,5 @@
 from pathlib import Path
-
+import json
 import pytest
 
 from shared.skills.loader import SkillLoader
@@ -12,29 +12,15 @@ def test_loader_prefers_system_skill(tmp_path):
     system.mkdir(parents=True)
     user.mkdir(parents=True)
 
-    (system / "interface.py").write_text("SKILL_NAME='demo'\n", encoding="utf-8")
-    (system / "implementation.py").write_text(
-        "async def run(payload, emit_event=None, context=None):\n    return {'source':'system'}\n",
-        encoding="utf-8",
-    )
-    (user / "interface.py").write_text("SKILL_NAME='demo'\n", encoding="utf-8")
-    (user / "implementation.py").write_text(
-        "async def run(payload, emit_event=None, context=None):\n    return {'source':'user'}\n",
-        encoding="utf-8",
-    )
+    (system / "manifest.json").write_text(json.dumps({"skill_id": "demo", "command": "sys"}), encoding="utf-8")
+    (user / "manifest.json").write_text(json.dumps({"skill_id": "demo", "command": "usr"}), encoding="utf-8")
 
     loader = SkillLoader(user_root=tmp_path / "skills", system_root=tmp_path / "system_skills")
     skills = loader.load()
+
+    assert "demo" in skills
     assert skills["demo"].source == "system"
-
-
-def test_loader_requires_interface_and_implementation(tmp_path):
-    user = tmp_path / "skills" / "legacy"
-    user.mkdir(parents=True)
-    (user / "skill.py").write_text("# ignored in new format\n", encoding="utf-8")
-    loader = SkillLoader(user_root=tmp_path / "skills", system_root=tmp_path / "system_skills")
-    skills = loader.load()
-    assert "legacy" not in skills
+    assert skills["demo"].command == "sys"
 
 
 def test_sandboxed_path_blocks_escape(tmp_path):

@@ -12,9 +12,20 @@ import sys
 import time
 import warnings
 from pathlib import Path
+
+# Platform-specific terminal control:
+# - termios/tty are POSIX-only (not available on Windows)
+# - select exists on Windows but is primarily for sockets; still safe to import
 import select
-import termios
-import tty
+
+try:
+    import termios  # type: ignore
+    import tty  # type: ignore
+    HAS_TERMIOS = True
+except Exception:  # Windows / non-POSIX
+    termios = None  # type: ignore
+    tty = None  # type: ignore
+    HAS_TERMIOS = False
 
 # requests is imported lazily in onboarding activation flow to avoid noisy startup warnings.
 

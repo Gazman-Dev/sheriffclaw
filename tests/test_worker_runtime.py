@@ -1,14 +1,18 @@
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock
 from shared.worker.worker_runtime import WorkerRuntime
 
 
 @pytest.mark.asyncio
-async def test_worker_runtime_basic_chat():
+async def test_worker_runtime_basic_chat(tmp_path):
     runtime = WorkerRuntime()
+    runtime.memory_dir = tmp_path / ".memory"
+    runtime.memory_dir.mkdir()
+    runtime.session_file = runtime.memory_dir / "session.json"
+
     session = await runtime.session_open("s1")
 
-    events = []
+    events =[]
 
     async def emit(event, payload):
         events.append((event, payload))
@@ -16,7 +20,7 @@ async def test_worker_runtime_basic_chat():
     await runtime.user_message(session, "hello computer", None, emit)
 
     deltas = [e for e, p in events if e == "assistant.delta"]
-    finals = [p for e, p in events if e == "assistant.final"]
+    finals =[p for e, p in events if e == "assistant.final"]
 
     assert len(deltas) > 0
     assert len(finals) == 1
@@ -24,11 +28,15 @@ async def test_worker_runtime_basic_chat():
 
 
 @pytest.mark.asyncio
-async def test_worker_runtime_triggers_tool_on_keyword():
+async def test_worker_runtime_triggers_tool_on_keyword(tmp_path):
     runtime = WorkerRuntime()
+    runtime.memory_dir = tmp_path / ".memory"
+    runtime.memory_dir.mkdir()
+    runtime.session_file = runtime.memory_dir / "session.json"
+
     session = await runtime.session_open("s1")
 
-    events = []
+    events =[]
 
     async def emit(event, payload):
         events.append((event, payload))
@@ -38,76 +46,70 @@ async def test_worker_runtime_triggers_tool_on_keyword():
     tool_calls = [p for e, p in events if e == "tool.call"]
     assert len(tool_calls) == 1
     assert tool_calls[0]["tool_name"] == "tools.exec"
-    assert tool_calls[0]["payload"]["argv"] == ["echo", "tool-invoked"]
+    assert tool_calls[0]["payload"]["argv"] ==["echo", "tool-invoked"]
 
 
 @pytest.mark.asyncio
-async def test_worker_skill_execution(monkeypatch):
+async def test_worker_skill_execution(monkeypatch, tmp_path):
     runtime = WorkerRuntime()
+    runtime.workspace_root = tmp_path
+    (tmp_path / "agent_workspace").mkdir(parents=True)
+    runtime.memory_dir = tmp_path / ".memory"
+    runtime.memory_dir.mkdir()
+    runtime.session_file = runtime.memory_dir / "session.json"
 
     class MockSkill:
-        async def run(self, payload, emit_event=None, context=None):
-            return {"worked": True, "sandbox_root": context.get("sandbox_root")}
+        command = "echo 'worked'"
 
     monkeypatch.setattr(runtime.skill_loader, "load", lambda: {"test_skill": MockSkill()})
 
     result = await runtime.skill_run("test_skill", {}, None)
-    assert result["worked"] is True
-    assert "agent_workspace" in result["sandbox_root"]
+    assert "worked" in result["stdout"]
+    assert result["code"] == 0
 
 
 @pytest.mark.asyncio
-async def test_worker_scenario_secret_flow_emits_tool_call():
+async def test_worker_scenario_secret_flow_emits_tool_call(tmp_path):
     runtime = WorkerRuntime()
+    runtime.memory_dir = tmp_path / ".memory"
+    runtime.memory_dir.mkdir()
+    runtime.session_file = runtime.memory_dir / "session.json"
+
     session = await runtime.session_open("s2")
 
-    events = []
+    events =[]
 
     async def emit(event, payload):
         events.append((event, payload))
 
     await runtime.user_message(session, "scenario secret gh_token", "scenario/default", emit)
 
-    tool_calls = [p for e, p in events if e == "tool.call"]
+    tool_calls =[p for e, p in events if e == "tool.call"]
     assert len(tool_calls) == 1
     assert tool_calls[0]["tool_name"] == "secure.secret.ensure"
     assert tool_calls[0]["payload"]["handle"] == "gh_token"
 
 
 @pytest.mark.asyncio
-async def test_worker_scenario_last_tool_reads_history():
+async def test_worker_scenario_last_tool_reads_history(tmp_path):
     runtime = WorkerRuntime()
+    runtime.memory_dir = tmp_path / ".memory"
+    runtime.memory_dir.mkdir()
+    runtime.session_file = runtime.memory_dir / "session.json"
+
     session = await runtime.session_open("s3")
     await runtime.tool_result(session, "secure.secret.ensure", {"status": "needs_secret", "handle": "gh_token"})
 
-    events = []
+    events =[]
 
     async def emit(event, payload):
         events.append((event, payload))
 
     await runtime.user_message(session, "scenario last tool", "scenario/default", emit)
 
-    finals = [p for e, p in events if e == "assistant.final"]
+    finals =[p for e, p in events if e == "assistant.final"]
     assert len(finals) == 1
     assert "needs_secret" in finals[0]["text"]
-
-
-@pytest.mark.asyncio
-async def test_worker_skill_context_exposes_sheriff_call(monkeypatch):
-    runtime = WorkerRuntime()
-
-    async def fake_run(payload, emit_event=None, context=None):
-        fn = context["sheriff_call"]
-        return {"callable": callable(fn), "source": context["skill_source"]}
-
-    impl = type("Impl", (), {})()
-    impl.run = fake_run
-    loaded = type("Loaded", (), {"implementation_module": impl, "root": "/tmp", "source": "system"})
-    monkeypatch.setattr(runtime.skill_loader, "load", lambda: {"s": loaded})
-
-    out = await runtime.skill_run("s", {}, None)
-    assert out["callable"] is True
-    assert out["source"] == "system"
 
 
 @pytest.mark.asyncio

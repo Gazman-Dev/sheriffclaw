@@ -23,7 +23,8 @@ class SemanticIndex(ABC):
 
 
 class HnswlibSemanticIndex(SemanticIndex):
-    def __init__(self, base_dir: Path, dim: int, space: str = "cosine"):
+    # Default dimension updated to 384 for sentence-transformers
+    def __init__(self, base_dir: Path, dim: int = 384, space: str = "cosine"):
         self.base_dir = base_dir
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.dim = dim
@@ -59,7 +60,7 @@ class HnswlibSemanticIndex(SemanticIndex):
 
     def search(self, query_vector: list[float], k: int) -> list[tuple[str, float]]:
         if not self._initialized or len(self.topic_to_int) == 0:
-            return []
+            return[]
         kk = min(k, len(self.topic_to_int))
         labels, distances = self.index.knn_query(np.array([query_vector], dtype=np.float32), k=kk)
         out: list[tuple[str, float]] = []

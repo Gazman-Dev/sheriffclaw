@@ -50,7 +50,7 @@ class _CodexCliBase:
 
     @staticmethod
     def _render_prompt(messages: list[dict[str, Any]]) -> str:
-        lines: list[str] = [
+        lines: list[str] =[
             "System: You are the AI Agent for Sheriff Claw.",
             "System: You are running inside a strict OS-level sandbox. Your entire file system access is restricted.",
             "System: You CANNOT read or write files in the user's home directory. You ONLY have access to your workspace.",
@@ -59,6 +59,9 @@ class _CodexCliBase:
             "System: If you need a secret (like an API key, DB credential, etc.), you MUST request it from the user via the Sheriff API.",
             "System: To request a secret via Sheriff API, execute: `sheriff-ctl call sheriff-requests requests.create_or_update --json '{\"type\": \"secret\", \"key\": \"<name_of_secret>\", \"one_liner\": \"<why you need it>\"}'`",
             "System: After requesting a secret, STOP and politely ask the user to approve it in their Sheriff channel.",
+            "System: CORE COMMANDS ALWAYS AVAILABLE TO YOU:",
+            "System:   - `python skills/search_skills/run.py \"query\"`: Searches your available peripheral skills.",
+            "System: If a user asks you to do something you don't know how to do, use `tools.exec` to run `python skills/search_skills/run.py \"query\"` first.",
             "Conversation history:"
         ]
         for msg in messages[-20:]:
@@ -139,7 +142,7 @@ class _CodexCliBase:
         if env_extra:
             env.update({k: v for k, v in env_extra.items() if v is not None})
 
-        cmd = [
+        cmd =[
             "codex",
             "--search",
             "--dangerously-bypass-approvals-and-sandbox",

@@ -33,7 +33,7 @@ class WorkerModelAdapter(ModelAdapter):
                 tools_str += json.dumps(t, ensure_ascii=False) + "\n"
 
         # Convert internal Phase4 request to Provider-compatible message list
-        messages = []
+        messages =[]
         for i, msg in enumerate(request.get("input",[])):
             role = msg["role"]
             content = ""
@@ -200,9 +200,12 @@ class WorkerRuntime:
 
     def _sheriff_call_sync(self, svc: str, op: str, payload: dict, main_loop: asyncio.AbstractEventLoop) -> dict:
         """Synchronous wrapper for internal RPC calls made during the tool loop."""
-        client = self._get_rpc(svc)
-        _, res = asyncio.run_coroutine_threadsafe(client.request(op, payload), main_loop).result()
-        return res.get("result", {})
+        async def _call():
+            client = self._get_rpc(svc)
+            _, res = await client.request(op, payload)
+            return res.get("result", {})
+
+        return asyncio.run_coroutine_threadsafe(_call(), main_loop).result()
 
     async def tool_result(self, session_handle: str, tool_name: str, result: dict) -> None:
         history = self._load_session(session_handle)

@@ -123,6 +123,8 @@ async def test_sheriff_call_uses_proc_client(monkeypatch):
     monkeypatch.setattr(runtime, "_get_rpc", lambda svc: fake)
 
     main_loop = asyncio.get_running_loop()
-    out = runtime._sheriff_call_sync("sheriff-requests", "requests.get", {"x": 1}, main_loop)
+
+    # Must run the sync wrapper in a separate thread to avoid deadlocking the test loop
+    out = await asyncio.to_thread(runtime._sheriff_call_sync, "sheriff-requests", "requests.get", {"x": 1}, main_loop)
     assert out["ok"] is True
     fake.request.assert_called_with("requests.get", {"x": 1})

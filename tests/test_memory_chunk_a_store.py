@@ -1,3 +1,5 @@
+import pytest
+pytest.importorskip("hnswlib")
 from shared.memory.store import TopicStore
 from shared.memory.types import EdgeType, Topic, TopicTime
 

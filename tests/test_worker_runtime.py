@@ -1,4 +1,5 @@
 import pytest
+pytest.importorskip("hnswlib")
 from unittest.mock import AsyncMock
 from shared.worker.worker_runtime import WorkerRuntime
 

@@ -1,4 +1,5 @@
 import pytest
+pytest.importorskip("hnswlib")
 from shared.worker.worker_runtime import WorkerRuntime
 
 @pytest.mark.asyncio

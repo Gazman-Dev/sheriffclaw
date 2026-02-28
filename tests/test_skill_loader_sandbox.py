@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import pytest
+pytest.importorskip("hnswlib")
 
 from shared.skills.loader import SkillLoader
 from shared.worker.worker_runtime import WorkerRuntime

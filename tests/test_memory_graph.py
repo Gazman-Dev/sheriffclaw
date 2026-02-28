@@ -1,4 +1,5 @@
 import pytest
+pytest.importorskip("hnswlib")
 from datetime import datetime, timedelta, timezone
 
 from shared.memory.store import TopicStore

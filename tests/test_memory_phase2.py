@@ -1,3 +1,5 @@
+import pytest
+pytest.importorskip("hnswlib")
 from datetime import datetime, timezone
 
 from shared.memory.embedding import DeterministicHashEmbeddingProvider

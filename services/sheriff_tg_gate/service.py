@@ -34,9 +34,19 @@ class SheriffTgGateService:
             return _Resp()
         return requests.post(url, json=payload, timeout=timeout)
 
+    async def _secrets(self, op: str, payload: dict):
+        _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})
+        outer = res.get("result", {})
+        if isinstance(outer, dict) and "result" in outer:
+            if not outer.get("ok", True):
+                return {}
+            inner = outer.get("result", {})
+            return inner if isinstance(inner, dict) else {}
+        return outer if isinstance(outer, dict) else {}
+
     async def _get_bot_token(self) -> str:
-        _, res = await self.gateway.request("gateway.secrets.call", {"op": "secrets.get_gate_bot_token", "payload": {}})
-        return res.get("result", {}).get("token", "")
+        res = await self._secrets("secrets.get_gate_bot_token", {})
+        return res.get("token", "")
 
     async def _send_telegram(self, text: str):
         if self.debug_mode:
@@ -47,9 +57,8 @@ class SheriffTgGateService:
             if not token:
                 return
 
-            _, res = await self.gateway.request("gateway.secrets.call",
-                                                {"op": "secrets.activation.status", "payload": {"bot_role": "sheriff"}})
-            user_id = res.get("result", {}).get("user_id")
+            res = await self._secrets("secrets.activation.status", {"bot_role": "sheriff"})
+            user_id = res.get("user_id")
             if not user_id:
                 return
 
@@ -88,31 +97,31 @@ class SheriffTgGateService:
         return {"status": "sent"}
 
     async def submit_secret(self, payload, emit_event, req_id):
-        _, res = await self.gateway.request("gateway.secrets.call", {"op": "secrets.set_secret", "payload": payload})
-        return res.get("result", {})
+        return await self._secrets("secrets.set_secret", payload)
 
     async def inbound_message(self, payload, emit_event, req_id):
         user_id = str(payload.get("user_id", ""))
         text = (payload.get("text") or "").strip()
         role = "sheriff"
 
-        _, res = await self.gateway.request("gateway.secrets.call",
-                                            {"op": "secrets.activation.status", "payload": {"bot_role": role}})
-        bound = res.get("result", {}).get("user_id")
+        unl = await self._secrets("secrets.is_unlocked", {})
+        if not unl.get("unlocked"):
+            return {"status": "locked"}
+
+        res = await self._secrets("secrets.activation.status", {"bot_role": role})
+        bound = res.get("user_id")
 
         if bound and str(bound) == user_id:
             return {"status": "accepted", "user_id": user_id}
 
         if text.startswith("activate "):
             code = text.split(" ", 1)[1].strip().lower()
-            _, claim = await self.gateway.request("gateway.secrets.call", {"op": "secrets.activation.claim",
-                                                                           "payload": {"bot_role": role, "code": code}})
-            if claim.get("result", {}).get("ok"):
-                return {"status": "activated", "user_id": claim["result"]["user_id"]}
+            claim = await self._secrets("secrets.activation.claim", {"bot_role": role, "code": code})
+            if claim.get("ok"):
+                return {"status": "activated", "user_id": claim.get("user_id")}
 
-        _, c = await self.gateway.request("gateway.secrets.call", {"op": "secrets.activation.create",
-                                                                   "payload": {"bot_role": role, "user_id": user_id}})
-        code = c.get("result", {}).get("code")
+        c = await self._secrets("secrets.activation.create", {"bot_role": role, "user_id": user_id})
+        code = c.get("code")
         return {"status": "activation_required", "activation_code": code}
 
     async def apply_callback(self, payload, emit_event, req_id):

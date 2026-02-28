@@ -6,13 +6,13 @@ from services.sheriff_tg_gate.service import SheriffTgGateService
 class FakeRPC:
     def __init__(self, responses=None):
         self.responses = list(responses or [])
-        self.calls = []
+        self.calls =[]
 
     async def request(self, op, payload):
         self.calls.append((op, payload))
         if self.responses:
             return self.responses.pop(0)
-        return (None, {"result": {}})
+        return (None, {"result": {"ok": True, "result": {}}})
 
 
 @pytest.fixture
@@ -20,7 +20,11 @@ def tg_gate_svc(tmp_path, monkeypatch):
     monkeypatch.setattr("services.sheriff_tg_gate.service.gw_root", lambda: tmp_path)
     svc = SheriffTgGateService()
     svc.policy = FakeRPC()
-    svc.gateway = FakeRPC()
+    # The default FakeRPC now needs to return {"result": {"ok": True, "result": {}}}
+    svc.gateway = FakeRPC(responses=[
+        (None, {"result": {"ok": True, "result": {"unlocked": True}}}),
+        (None, {"result": {"ok": True, "result": {"user_id": "123"}}}),
+    ])
     return svc
 
 
@@ -34,12 +38,12 @@ async def test_gate_applies_callback(tg_gate_svc):
     }, None, "r1")
 
     assert res["status"] == "recorded"
-    assert tg_gate_svc.policy.calls == [("policy.apply_callback", {"approval_id": "123", "action": "allow"})]
+    assert tg_gate_svc.policy.calls ==[("policy.apply_callback", {"approval_id": "123", "action": "allow"})]
 
 
 @pytest.mark.asyncio
 async def test_gate_submits_secret(tg_gate_svc):
-    tg_gate_svc.gateway = FakeRPC(responses=[(None, {"result": {"status": "saved"}})])
+    tg_gate_svc.gateway = FakeRPC(responses=[(None, {"result": {"ok": True, "result": {"status": "saved"}}})])
 
     res = await tg_gate_svc.submit_secret({
         "handle": "gh",
@@ -47,7 +51,7 @@ async def test_gate_submits_secret(tg_gate_svc):
     }, None, "r1")
 
     assert res["status"] == "saved"
-    assert tg_gate_svc.gateway.calls == [
+    assert tg_gate_svc.gateway.calls ==[
         ("gateway.secrets.call", {"op": "secrets.set_secret", "payload": {"handle": "gh", "value": "123"}})]
 
 
@@ -57,8 +61,8 @@ async def test_gate_logs_requests(tg_gate_svc, tmp_path):
 
     tg_gate_svc.gateway = FakeRPC(
         responses=[
-            (None, {"result": {"token": ""}}),
-            (None, {"result": {"user_id": ""}}),
+            (None, {"result": {"ok": True, "result": {"token": ""}}}),
+            (None, {"result": {"ok": True, "result": {"user_id": ""}}}),
         ]
     )
 

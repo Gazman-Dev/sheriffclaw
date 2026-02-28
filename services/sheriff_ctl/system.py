@@ -80,7 +80,7 @@ def cmd_update(args):
                     return False, "Master password required for secrets update. Pass --master-password in non-interactive mode.", True
                 mp = getpass.getpass("Master password for update (secrets version increased): ")
             if not await _verify_master_password_async(mp):
-                return False, "Invalid master password. Update cancelled."
+                return False, "Invalid master password. Update cancelled.", True
 
         await gw.request("gateway.queue.control", {"pause": True, "reason": "update"})
         try:
@@ -104,8 +104,6 @@ def cmd_update(args):
             result = res.get("result", {})
             secrets_changed = bool(
                 (((result.get("plan") or {}).get("changes") or {}).get("secrets") or {}).get("increased"))
-            if result.get("ok") and result.get("mode") == "skipped":
-                return True, "No component version increased; update skipped. Use --force to reinstall anyway.", False
             return bool(result.get("ok")), "", secrets_changed
         finally:
             await gw.request("gateway.queue.control", {"pause": False})
@@ -114,23 +112,18 @@ def cmd_update(args):
     if note:
         print(note)
     if ok:
-        if "skipped" in note.lower():
-            _notify_sheriff_channel("ℹ️ Sheriff update skipped (versions not increased).")
-            return
-        if secrets_changed:
-            print("Restarting managed services after secrets update...")
-            cmd_stop(argparse.Namespace())
-            start_mp = mp if (mp and isinstance(mp, str) and mp.strip()) else None
-            cmd_start(argparse.Namespace(master_password=start_mp))
-            if not start_mp:
-                print("Note: services restarted without master password; vault may remain locked until /unlock.")
-                _notify_sheriff_channel(
-                    "🔒 Sheriff updated (secrets changed) and restarted; send /unlock <master_password>.")
-            else:
-                _notify_sheriff_channel("✅ Sheriff update completed (secrets changed) and services restarted unlocked.")
-        else:
-            print("Secrets version unchanged; preserving running secrets service (no lock reset).")
-            _notify_sheriff_channel("✅ Sheriff update completed. Secrets unchanged; unlock state preserved.")
+        print("Restarting services after update...")
+        try:
+            subprocess.run(["pkill", "-f", "sheriff-gateway"], check=False)
+            subprocess.run(["pkill", "-f", "ai-worker"], check=False)
+        except Exception:
+            pass
+
+        cmd_stop(argparse.Namespace())
+        start_mp = mp if (mp and isinstance(mp, str) and mp.strip()) else None
+        cmd_start(argparse.Namespace(master_password=start_mp))
+
+        _notify_sheriff_channel(f"✅ Sheriff update completed (secrets changed: {secrets_changed}).")
         print("Update completed.")
     else:
         _notify_sheriff_channel("❌ Sheriff update failed. Check logs.")

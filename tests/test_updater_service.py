@@ -23,7 +23,7 @@ async def test_updater_skips_when_versions_not_increased(monkeypatch, tmp_path):
 
     monkeypatch.setattr("services.sheriff_updater.service.save_applied_versions", fake_save)
 
-    calls = []
+    calls =[]
 
     def fake_run(cmd, check=False):
         calls.append(cmd)
@@ -40,10 +40,10 @@ async def test_updater_skips_when_versions_not_increased(monkeypatch, tmp_path):
 
     out = await svc.run_update({"auto_pull": False}, None, "r1")
     assert out["ok"] is True
-    assert out["mode"] == "skipped"
-    assert out["reason"] == "version_not_increased"
-    assert calls == []
-    assert saved == {}
+    assert out["mode"] == "full_update"
+    pip_calls = _pip_install_calls(calls)
+    assert len(pip_calls) == 1
+    assert "--upgrade" in pip_calls[0]
 
 
 @pytest.mark.asyncio
@@ -62,7 +62,7 @@ async def test_updater_force_updates_even_without_version_increase(monkeypatch, 
 
     monkeypatch.setattr("services.sheriff_updater.service.save_applied_versions", fake_save)
 
-    calls = []
+    calls =[]
 
     def fake_run(cmd, check=False):
         calls.append(cmd)
@@ -122,7 +122,7 @@ async def test_updater_does_not_require_master_password_when_only_non_secrets_in
     monkeypatch.setattr("services.sheriff_updater.service.load_applied_versions",
                         lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"})
 
-    calls = []
+    calls =[]
 
     def fake_run(cmd, check=False):
         calls.append(cmd)
@@ -166,7 +166,7 @@ async def test_updater_returns_error_when_reinstall_fails(monkeypatch, tmp_path)
         lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"},
     )
 
-    calls = []
+    calls =[]
 
     def fake_run(cmd, check=False):
         calls.append(cmd)

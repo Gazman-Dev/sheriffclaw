@@ -22,12 +22,11 @@ class SheriffUpdaterService:
         target_versions = load_target_versions(self.repo_root)
         applied_versions = load_applied_versions()
         changes = diff_versions(target_versions, applied_versions)
-        any_increased = any(bool(v.get("increased")) for v in changes.values())
         return {
             "target_versions": target_versions,
             "applied_versions": applied_versions,
             "changes": changes,
-            "should_update": bool(force or any_increased),
+            "should_update": True,
             "needs_master_password": bool(changes.get("secrets", {}).get("increased")),
             "force": force,
         }
@@ -43,8 +42,6 @@ class SheriffUpdaterService:
             subprocess.run(["git", "-C", str(self.repo_root), "pull", "--ff-only"], check=False)  # noqa: S603
 
         plan = self._build_plan(force=force)
-        if not plan["should_update"]:
-            return {"ok": True, "mode": "skipped", "reason": "version_not_increased", "plan": plan}
 
         if plan["needs_master_password"]:
             master_password = payload.get("master_password") or ""
@@ -52,7 +49,7 @@ class SheriffUpdaterService:
                 return {"ok": False, "error": "master_password_required", "plan": plan}
 
         # Force reinstall so removed/renamed package files from previous versions are cleaned up.
-        pip_cmd = [
+        pip_cmd =[
             sys.executable,
             "-m",
             "pip",

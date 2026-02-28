@@ -3,10 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="${ROOT_DIR}/.venv/bin/sheriff-ctl"
-PY="${ROOT_DIR}/.venv/bin/python"
-
-[ -x "$BIN" ] || { echo "missing $BIN"; exit 1; }
-[ -x "$PY" ] || { echo "missing $PY"; exit 1; }
+PY="${ROOT_DIR}/.venv/bin/python"[ -x "$BIN" ] || { echo "missing $BIN"; exit 1; }[ -x "$PY" ] || { echo "missing $PY"; exit 1; }
 
 "${ROOT_DIR}/.venv/bin/pip" install -q "$ROOT_DIR"
 
@@ -46,9 +43,10 @@ SECRETS_OK_OUT="$TMP_ROOT/update_secrets_ok.out"
 # First update applies 1.0.0 -> update state
 "$BIN" update --master-password masterpass --no-pull >/dev/null
 
-# No version bump: should skip, no password required
+# No version bump: should skip, no password required.
+# NOW: ALWAYS updates, so it should read "Update completed".
 "$BIN" update --no-pull > "$SKIP_OUT"
-grep -q 'update skipped' "$SKIP_OUT"
+grep -q 'Update completed' "$SKIP_OUT"
 
 # Force update: should run even unchanged, no password required
 "$BIN" update --no-pull --force > "$FORCE_OUT"

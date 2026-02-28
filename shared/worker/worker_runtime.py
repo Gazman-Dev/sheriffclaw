@@ -19,13 +19,14 @@ from shared.skills.loader import SkillLoader
 
 
 class WorkerModelAdapter(ModelAdapter):
-    def __init__(self, provider, model_name: str):
+    def __init__(self, provider, model_name: str, main_loop: asyncio.AbstractEventLoop):
         self.provider = provider
         self.model_name = model_name
+        self.main_loop = main_loop
 
     def create_response(self, request: dict) -> dict:
         # Convert internal Phase4 request to Provider-compatible message list
-        messages = []
+        messages =[]
         for msg in request.get("input", []):
             role = msg["role"]
             content = ""
@@ -35,16 +36,10 @@ class WorkerModelAdapter(ModelAdapter):
                 content = str(msg["content"])
             messages.append({"role": role, "content": content})
 
-        # We run the async provider in a thread to keep the sync Adapter interface
-        # but in a real production environment we would make run_turn async.
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # If we're already in a loop, we use a future
-            resp_text = asyncio.run_coroutine_threadsafe(
-                self.provider.generate(messages, model=self.model_name), loop
-            ).result()
-        else:
-            resp_text = asyncio.run(self.provider.generate(messages, model=self.model_name))
+        # We run the async provider in the main loop to keep the sync Adapter interface
+        resp_text = asyncio.run_coroutine_threadsafe(
+            self.provider.generate(messages, model=self.model_name), self.main_loop
+        ).result()
 
         # Check for tool-call patterns in text if the provider doesn't support native tool calls
         # For Phase 4 demo, we assume the AI outputs JSON or specific markers.
@@ -54,7 +49,7 @@ class WorkerModelAdapter(ModelAdapter):
                 call_data = json.loads(raw_json)
                 return {
                     "type": "tool_calls",
-                    "tool_calls": [{
+                    "tool_calls":[{
                         "id": str(uuid.uuid4()),
                         "name": call_data.get("name"),
                         "arguments": call_data.get("arguments", {})
@@ -111,7 +106,7 @@ class WorkerRuntime:
                     return data.get("conversation_buffer", [])
             except Exception:
                 pass
-        return []
+        return[]
 
     def _save_session(self, handle: str, buffer: list[dict]) -> None:
         self.session_file.write_text(
@@ -136,6 +131,11 @@ class WorkerRuntime:
         selected_provider = provider_name or ("test" if model.startswith("test/") else "stub")
         provider = self._provider(selected_provider, api_key, base_url, codex_state_b64)
 
+        main_loop = asyncio.get_running_loop()
+
+        def sync_skill_run(name: str, payload: dict) -> dict:
+            return asyncio.run_coroutine_threadsafe(self.skill_run(name, payload, emit_event), main_loop).result()
+
         # Setup Phase 4 Runtime Stores
         stores = RuntimeStores(
             topic_store=self.topic_store,
@@ -143,14 +143,15 @@ class WorkerRuntime:
             semantic_index=self.topics_index,
             wake_packet=None,  # Loaded if sleep/wake triggered
             skills_root=self.repo_root / "skills",
-            skill_runner=self.skill_run,
+            skill_runner=sync_skill_run,
             repo_tools={
                 "requests.create_or_update": lambda args: self._sheriff_call_sync("sheriff-requests",
-                                                                                  "requests.create_or_update", args)
+                                                                                  "requests.create_or_update", args,
+                                                                                  main_loop)
             }
         )
 
-        adapter = WorkerModelAdapter(provider, model)
+        adapter = WorkerModelAdapter(provider, model, main_loop)
         config = Phase4RuntimeConfig(model=model)
 
         # Execute turn through the tool-calling loop
@@ -166,11 +167,10 @@ class WorkerRuntime:
         self._save_session(session_handle, result["updated_buffer"])
         self.sessions[session_handle] = result["updated_buffer"]
 
-    def _sheriff_call_sync(self, svc: str, op: str, payload: dict) -> dict:
+    def _sheriff_call_sync(self, svc: str, op: str, payload: dict, main_loop: asyncio.AbstractEventLoop) -> dict:
         """Synchronous wrapper for internal RPC calls made during the tool loop."""
         client = self._get_rpc(svc)
-        loop = asyncio.get_event_loop()
-        _, res = asyncio.run_coroutine_threadsafe(client.request(op, payload), loop).result()
+        _, res = asyncio.run_coroutine_threadsafe(client.request(op, payload), main_loop).result()
         return res.get("result", {})
 
     async def tool_result(self, session_handle: str, tool_name: str, result: dict) -> None:
@@ -186,7 +186,7 @@ class WorkerRuntime:
             return {"error": f"unknown skill: {name}"}
 
         cmd = loaded.command
-        argv = payload.get("argv", [])
+        argv = payload.get("argv",[])
         stdin_data = payload.get("stdin", "")
         if argv:
             cmd = f"{cmd} {' '.join(argv)}"

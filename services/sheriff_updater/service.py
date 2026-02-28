@@ -51,7 +51,17 @@ class SheriffUpdaterService:
             if not master_password:
                 return {"ok": False, "error": "master_password_required", "plan": plan}
 
-        pip_cmd = [sys.executable, "-m", "pip", "install", "-q", str(self.repo_root)]
+        # Force reinstall so removed/renamed package files from previous versions are cleaned up.
+        pip_cmd = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            "--upgrade",
+            "--force-reinstall",
+            str(self.repo_root),
+        ]
         proc = subprocess.run(pip_cmd, check=False)  # noqa: S603
         if proc.returncode != 0:
             return {"ok": False, "error": "pip_install_failed", "code": proc.returncode, "plan": plan}

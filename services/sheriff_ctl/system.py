@@ -23,10 +23,13 @@ from shared.proc_rpc import ProcClient
 
 def _wipe_all_state() -> None:
     base = gw_root().parent
-    for name in ("gw", "llm"):
+    for name in ("gw", "llm", "agent_workspace", ".memory"):
         target = base / name
         if target.exists():
-            shutil.rmtree(target, ignore_errors=True)
+            if target.is_dir():
+                shutil.rmtree(target, ignore_errors=True)
+            else:
+                target.unlink(missing_ok=True)
 
 
 def cmd_factory_reset(args):
@@ -46,6 +49,17 @@ def cmd_factory_reset(args):
         _stop_service(svc)
     _wipe_all_state()
     _clear_telegram_unlock_channel()
+
+    try:
+        repo_root = Path(__file__).resolve().parents[3]
+        if (repo_root / ".git").exists():
+            print("Resetting source code to origin/main...")
+            subprocess.run(["git", "-C", str(repo_root), "fetch", "origin"], check=False)
+            subprocess.run(["git", "-C", str(repo_root), "reset", "--hard", "origin/main"], check=False)
+            subprocess.run(["git", "-C", str(repo_root), "clean", "-fd"], check=False)
+    except Exception as e:
+        print(f"Note: git reset encountered an error: {e}")
+
     print("Factory reset complete. All Sheriff/Agent state removed.")
 
 

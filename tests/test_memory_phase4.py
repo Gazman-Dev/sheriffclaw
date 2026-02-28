@@ -12,6 +12,19 @@ from shared.memory.store import TopicStore
 from shared.memory.types import Topic, TopicTime
 
 
+class _HistoryAwareAdapter:
+    def create_response(self, request: dict) -> dict:
+        saw_prior_assistant = False
+        for msg in request.get("input", []):
+            if msg.get("role") != "assistant":
+                continue
+            chunks = msg.get("content", [])
+            if chunks and chunks[0].get("text") == "2":
+                saw_prior_assistant = True
+                break
+        return {"type": "message", "content": "history-ok" if saw_prior_assistant else "history-missing"}
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -109,3 +122,35 @@ def test_phase4_sleep_wake_integration(tmp_path):
     assert out["maybe_wake_packet"] is not None
     assert any(e.get("type") == "sleep" for e in out["logs"]["events"])
     assert any(e.get("type") == "wake" for e in out["logs"]["events"])
+
+
+def test_phase4_includes_conversation_history_in_model_input(tmp_path):
+    store = TopicStore(tmp_path / "topics.json")
+    embedder = DeterministicHashEmbeddingProvider(dim=64)
+    index = HnswlibSemanticIndex(tmp_path / "semantic", dim=embedder.dim)
+    index.load()
+
+    stores = RuntimeStores(
+        topic_store=store,
+        embedding_provider=embedder,
+        semantic_index=index,
+        wake_packet=None,
+        skills_root=Path("skills"),
+        skill_runner=_skill_runner,
+        repo_tools={},
+    )
+
+    out = run_turn(
+        conversation_buffer=[
+            {"role": "user", "content": "1"},
+            {"role": "assistant", "content": "2"},
+            {"role": "user", "content": "3"},
+        ],
+        user_msg="4",
+        now=_now(),
+        stores=stores,
+        config=Phase4RuntimeConfig(token_sleep_threshold=10000),
+        model_adapter=_HistoryAwareAdapter(),
+    )
+
+    assert out["assistant_msg"] == "history-ok"

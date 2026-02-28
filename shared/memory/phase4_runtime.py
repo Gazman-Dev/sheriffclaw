@@ -280,6 +280,21 @@ def _to_input_message(role: str, text: str) -> dict:
     return {"role": role, "content": [{"type": "input_text", "text": text}]}
 
 
+def _buffer_to_input_messages(conversation_buffer: list[dict]) -> list[dict]:
+    msgs: list[dict] = []
+    for item in conversation_buffer:
+        role = item.get("role")
+        if role not in {"user", "assistant", "tool"}:
+            continue
+        content = item.get("content", "")
+        if isinstance(content, str):
+            text = content
+        else:
+            text = json.dumps(content, ensure_ascii=False)
+        msgs.append(_to_input_message(role, text))
+    return msgs
+
+
 def _make_request(model: str, reasoning_effort: str, system_prompt: str, messages: list[dict],
                   tool_schemas: list[dict]) -> dict:
     return {
@@ -354,7 +369,8 @@ def run_turn(
 
     tool_schemas = _tool_schemas()
 
-    req_messages = [_to_input_message("user", user_msg)]
+    # Include the running conversation buffer so the model can use prior context.
+    req_messages = _buffer_to_input_messages(working_buffer)
 
     assistant_msg = ""
     for _ in range(config.max_tool_rounds):

@@ -1,19 +1,21 @@
+# File: tests/test_sheriff_entry.py
+
 import argparse
 
-from services.sheriff_ctl import ctl
+from services.sheriff_ctl import chat, ctl
 
 
 def test_main_sheriff_debug_routes_to_cmd_debug(monkeypatch):
     called = {}
 
     def fake_cmd_debug(args):
-        called["value"] = args.value
+        called["debug_args"] = args.debug_args
 
     monkeypatch.setattr(ctl, "cmd_debug", fake_cmd_debug)
     monkeypatch.setattr(ctl, "cmd_entry", lambda args: (_ for _ in ()).throw(AssertionError("cmd_entry should not be called")))
 
     ctl.main_sheriff(["--debug", "on"])
-    assert called["value"] == "on"
+    assert called["debug_args"] == ["on"]
 
 
 def test_main_sheriff_message_routes_to_cmd_entry(monkeypatch):
@@ -35,8 +37,8 @@ def test_cmd_entry_one_shot_message_routes_to_chat(monkeypatch):
     def fake_chat(args):
         called["one_shot"] = args.one_shot
 
-    monkeypatch.setattr(ctl, "cmd_chat", fake_chat)
-    ctl.cmd_entry(argparse.Namespace(message=["hello", "there"]))
+    monkeypatch.setattr(chat, "cmd_chat", fake_chat)
+    chat.cmd_entry(argparse.Namespace(message=["hello", "there"]))
     assert called["one_shot"] == "hello there"
 
 
@@ -46,26 +48,26 @@ def test_cmd_entry_one_shot_slash_routes_to_chat(monkeypatch):
     def fake_chat(args):
         called["one_shot"] = args.one_shot
 
-    monkeypatch.setattr(ctl, "cmd_chat", fake_chat)
-    ctl.cmd_entry(argparse.Namespace(message=["/status"]))
+    monkeypatch.setattr(chat, "cmd_chat", fake_chat)
+    chat.cmd_entry(argparse.Namespace(message=["/status"]))
     assert called["one_shot"] == "/status"
 
 
 def test_cmd_entry_not_onboarded_runs_onboard(monkeypatch):
     called = {}
-    monkeypatch.setattr(ctl, "_is_onboarded", lambda: False)
+    monkeypatch.setattr(chat, "_is_onboarded", lambda: False)
 
     def fake_onboard(args):
         called["keep_unchanged"] = args.keep_unchanged
 
-    monkeypatch.setattr(ctl, "cmd_onboard", fake_onboard)
+    monkeypatch.setattr(chat, "cmd_onboard", fake_onboard)
 
-    ctl.cmd_entry(argparse.Namespace(message=[]))
+    chat.cmd_entry(argparse.Namespace(message=[]))
     assert called["keep_unchanged"] is False
 
 
 def test_cmd_entry_menu_onboard_keep_yes(monkeypatch):
-    monkeypatch.setattr(ctl, "_is_onboarded", lambda: True)
+    monkeypatch.setattr(chat, "_is_onboarded", lambda: True)
     answers = iter(["onboard", ""])  # default yes
     monkeypatch.setattr("builtins.input", lambda _: next(answers))
 
@@ -74,14 +76,14 @@ def test_cmd_entry_menu_onboard_keep_yes(monkeypatch):
     def fake_onboard(args):
         called["keep_unchanged"] = args.keep_unchanged
 
-    monkeypatch.setattr(ctl, "cmd_onboard", fake_onboard)
+    monkeypatch.setattr(chat, "cmd_onboard", fake_onboard)
 
-    ctl.cmd_entry(argparse.Namespace(message=[]))
+    chat.cmd_entry(argparse.Namespace(message=[]))
     assert called["keep_unchanged"] is True
 
 
 def test_cmd_entry_menu_onboard_keep_no(monkeypatch):
-    monkeypatch.setattr(ctl, "_is_onboarded", lambda: True)
+    monkeypatch.setattr(chat, "_is_onboarded", lambda: True)
     answers = iter(["onboard", "n"])
     monkeypatch.setattr("builtins.input", lambda _: next(answers))
 
@@ -90,54 +92,54 @@ def test_cmd_entry_menu_onboard_keep_no(monkeypatch):
     def fake_onboard(args):
         called["keep_unchanged"] = args.keep_unchanged
 
-    monkeypatch.setattr(ctl, "cmd_onboard", fake_onboard)
+    monkeypatch.setattr(chat, "cmd_onboard", fake_onboard)
 
-    ctl.cmd_entry(argparse.Namespace(message=[]))
+    chat.cmd_entry(argparse.Namespace(message=[]))
     assert called["keep_unchanged"] is False
 
 
 def test_cmd_entry_menu_restart_bad_password(monkeypatch):
-    monkeypatch.setattr(ctl, "_is_onboarded", lambda: True)
+    monkeypatch.setattr(chat, "_is_onboarded", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "restart")
     monkeypatch.setattr("getpass.getpass", lambda _: "bad")
-    monkeypatch.setattr(ctl, "_verify_master_password", lambda mp: False)
+    monkeypatch.setattr(chat, "_verify_master_password", lambda mp: False)
 
     called = {"stop": 0, "start": 0}
-    monkeypatch.setattr(ctl, "cmd_stop", lambda args: called.__setitem__("stop", called["stop"] + 1))
-    monkeypatch.setattr(ctl, "cmd_start", lambda args: called.__setitem__("start", called["start"] + 1))
+    monkeypatch.setattr(chat, "cmd_stop", lambda args: called.__setitem__("stop", called["stop"] + 1))
+    monkeypatch.setattr(chat, "cmd_start", lambda args: called.__setitem__("start", called["start"] + 1))
 
-    ctl.cmd_entry(argparse.Namespace(message=[]))
+    chat.cmd_entry(argparse.Namespace(message=[]))
     assert called["stop"] == 0
     assert called["start"] == 0
 
 
 def test_cmd_entry_menu_restart_good_password(monkeypatch):
-    monkeypatch.setattr(ctl, "_is_onboarded", lambda: True)
+    monkeypatch.setattr(chat, "_is_onboarded", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "restart")
     monkeypatch.setattr("getpass.getpass", lambda _: "good")
-    monkeypatch.setattr(ctl, "_verify_master_password", lambda mp: True)
+    monkeypatch.setattr(chat, "_verify_master_password", lambda mp: True)
 
     called = {"stop": 0, "start": 0}
-    monkeypatch.setattr(ctl, "cmd_stop", lambda args: called.__setitem__("stop", called["stop"] + 1))
-    monkeypatch.setattr(ctl, "cmd_start", lambda args: called.__setitem__("start", called["start"] + 1))
+    monkeypatch.setattr(chat, "cmd_stop", lambda args: called.__setitem__("stop", called["stop"] + 1))
+    monkeypatch.setattr(chat, "cmd_start", lambda args: called.__setitem__("start", called["start"] + 1))
 
-    ctl.cmd_entry(argparse.Namespace(message=[]))
+    chat.cmd_entry(argparse.Namespace(message=[]))
     assert called["stop"] == 1
     assert called["start"] == 1
 
 
 def test_cmd_entry_menu_update(monkeypatch):
-    monkeypatch.setattr(ctl, "_is_onboarded", lambda: True)
+    monkeypatch.setattr(chat, "_is_onboarded", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "update")
     called = {"update": 0}
-    monkeypatch.setattr(ctl, "cmd_update", lambda args: called.__setitem__("update", called["update"] + 1))
+    monkeypatch.setattr(chat, "cmd_update", lambda args: called.__setitem__("update", called["update"] + 1))
 
-    ctl.cmd_entry(argparse.Namespace(message=[]))
+    chat.cmd_entry(argparse.Namespace(message=[]))
     assert called["update"] == 1
 
 
 def test_cmd_entry_menu_factory_reset(monkeypatch):
-    monkeypatch.setattr(ctl, "_is_onboarded", lambda: True)
+    monkeypatch.setattr(chat, "_is_onboarded", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "factory reset")
     called = {"factory_reset": 0}
 
@@ -145,7 +147,7 @@ def test_cmd_entry_menu_factory_reset(monkeypatch):
         called["factory_reset"] += 1
         assert args.yes is False
 
-    monkeypatch.setattr(ctl, "cmd_factory_reset", fake_factory_reset)
+    monkeypatch.setattr(chat, "cmd_factory_reset", fake_factory_reset)
 
-    ctl.cmd_entry(argparse.Namespace(message=[]))
+    chat.cmd_entry(argparse.Namespace(message=[]))
     assert called["factory_reset"] == 1

@@ -179,6 +179,19 @@ def _skill_tools(stores: RuntimeStores):
     }
 
 
+def _requests_tools(stores: RuntimeStores):
+    def r_create(args: dict) -> dict:
+        # This calls back into the gateway which routes to sheriff-requests
+        # The store's repo_tools contains the wrapped RPC call
+        handler = stores.repo_tools.get("requests.create_or_update")
+        if handler:
+            return handler(args)
+        return {"error": "requests service unavailable"}
+
+    return {
+        "requests.create_or_update": r_create,
+    }
+
 def _tool_schemas() -> list[dict]:
     return [
         {"type": "function", "name": "topics.search", "description": "Search topics", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "k": {"type": "integer"}}, "required": ["query"]}},
@@ -192,6 +205,7 @@ def _tool_schemas() -> list[dict]:
         {"type": "function", "name": "repo.list_files", "description": "List repo files", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}}}},
         {"type": "function", "name": "repo.read_file", "description": "Read file", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
         {"type": "function", "name": "repo.write_file", "description": "Write file", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
+        {"type": "function", "name": "requests.create_or_update", "description": "Request a secret or permission from the user", "parameters": {"type": "object", "properties": {"type": {"type": "string", "enum": ["secret", "domain", "tool"]}, "key": {"type": "string"}, "one_liner": {"type": "string"}}, "required": ["type", "key", "one_liner"]}},
         {"type": "function", "name": "repo.run_tests", "description": "Run tests", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}}},
     ]
 
@@ -268,6 +282,7 @@ def run_turn(
     tool_handlers.update(_topic_tools(stores.topic_store))
     tool_handlers.update(_memory_tools(stores))
     tool_handlers.update(_skill_tools(stores))
+    tool_handlers.update(_requests_tools(stores))
     tool_handlers.update(stores.repo_tools)
 
     tool_schemas = _tool_schemas()

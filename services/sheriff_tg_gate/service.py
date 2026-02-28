@@ -38,19 +38,23 @@ class SheriffTgGateService:
         return res.get("result", {}).get("token", "")
 
     async def _send_telegram(self, text: str):
-        token = await self._get_bot_token()
-        if not token:
-            return
+        if self.debug_mode:
+            token = "debug-token"
+            user_id = "debug-user"
+        else:
+            token = await self._get_bot_token()
+            if not token:
+                return
 
-        _, res = await self.gateway.request("gateway.secrets.call", {"op": "secrets.activation.status", "payload": {"bot_role": "sheriff"}})
-        user_id = res.get("result", {}).get("user_id")
-        if not user_id:
-            return
+            _, res = await self.gateway.request("gateway.secrets.call", {"op": "secrets.activation.status", "payload": {"bot_role": "sheriff"}})
+            user_id = res.get("result", {}).get("user_id")
+            if not user_id:
+                return
 
         try:
             self._send_http(
                 f"https://api.telegram.org/bot{token}/sendMessage",
-                payload={"chat_id": int(user_id), "text": text, "disable_web_page_preview": True},
+                payload={"chat_id": int(str(user_id).strip() or "0"), "text": text, "disable_web_page_preview": True},
                 timeout=10,
             )
         except Exception:

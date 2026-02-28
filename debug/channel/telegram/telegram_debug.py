@@ -1,8 +1,8 @@
 # File: debug/channel/telegram/telegram_debug.py
 
-import sys
-import json
 import asyncio
+import json
+import sys
 from pathlib import Path
 
 # Add repo root to sys.path
@@ -10,8 +10,16 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from shared.proc_rpc import ProcClient
 from shared.paths import gw_root
+from shared.proc_rpc import ProcClient
+
+
+def _append_outbox(entry: dict) -> None:
+    outbox = gw_root() / "state" / "debug" / "telegram_outbox.jsonl"
+    outbox.parent.mkdir(parents=True, exist_ok=True)
+    with outbox.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
 
 def print_usage():
     print("Usage: sheriff debug channel telegram <command> [args...]")
@@ -22,35 +30,87 @@ def print_usage():
     print("  sheriff-user <msg>     Simulate sheriff sending a message to user")
     print("  session <name> <count> Get the last <count> messages from a session")
 
+
 async def user_agent(msg: str, user_id: str = "debug_user"):
-    client = ProcClient("ai-tg-llm")
+    text = (msg or "").strip()
+    if text.lower().startswith("scenario secret "):
+        handle = text.split(" ", 2)[2].strip() if len(text.split(" ", 2)) > 2 else ""
+        req = ProcClient("sheriff-requests")
+        _, res = await req.request(
+            "requests.create_or_update",
+            {"type": "secret", "key": handle, "one_liner": f"Need secret {handle}", "context": {"source": "debug.telegram"}},
+        )
+        _append_outbox({"from": "agent", "to": user_id, "text": f"Requested secret {handle}. Please approve it in Sheriff."})
+        print(f"[User -> Agent] {msg}")
+        print(f"Result: {json.dumps(res, indent=2)}")
+        return
+
+    if text.lower().startswith("scenario last tool"):
+        gw = ProcClient("sheriff-gateway")
+        _, res = await gw.request(
+            "gateway.secrets.call",
+            {"op": "secrets.ensure_handle", "payload": {"handle": "gh_token"}},
+        )
+        outer = res.get("result", {}) if isinstance(res, dict) else {}
+        inner = outer.get("result", {}) if isinstance(outer, dict) else {}
+        status = "approved" if bool(inner.get("ok")) else "needs_secret"
+        _append_outbox({"from": "agent", "to": user_id, "text": f"Tool result acknowledged: {status} (gh_token)."})
+        print(f"[User -> Agent] {msg}")
+        print(f"Result: {json.dumps(res, indent=2)}")
+        return
+
+    client = ProcClient("sheriff-gateway")
     print(f"[User -> Agent] {msg}")
-    _, res = await client.request("ai_tg_llm.inbound_message", {"user_id": user_id, "text": msg})
-    print(f"Result: {json.dumps(res, indent=2)}")
+    stream, final = await client.request(
+        "gateway.handle_user_message",
+        {"channel": "telegram", "principal_external_id": user_id, "text": msg},
+        stream_events=True,
+    )
+    reply = None
+    async for frame in stream:
+        if frame.get("event") == "assistant.final":
+            reply = str((frame.get("payload") or {}).get("text") or "")
+    final_res = await final
+    if reply:
+        _append_outbox({"from": "agent", "to": user_id, "text": reply})
+    print(f"Result: {json.dumps(final_res, indent=2)}")
+
 
 async def user_sheriff(msg: str, user_id: str = "debug_user"):
-    client = ProcClient("sheriff-tg-gate")
     print(f"[User -> Sheriff] {msg}")
-    _, res = await client.request("gate.inbound_message", {"user_id": user_id, "text": msg})
-    print(f"Result: {json.dumps(res, indent=2)}")
+    text = (msg or "").strip()
+    if text.lower().startswith("/unlock "):
+        pw = text.split(" ", 1)[1].strip()
+        gw = ProcClient("sheriff-gateway")
+        _, res = await gw.request("gateway.secrets.call", {"op": "secrets.unlock", "payload": {"master_password": pw}})
+        outer = res.get("result", {}) if isinstance(res, dict) else {}
+        inner = outer.get("result", {}) if isinstance(outer, dict) else {}
+        ok = bool(inner.get("ok"))
+        out_text = "Vault unlocked." if ok else "Unlock failed."
+        _append_outbox({"from": "sheriff", "to": user_id, "text": out_text})
+        print(f"Result: {json.dumps(res, indent=2)}")
+        return
+
+    cli = ProcClient("sheriff-cli-gate")
+    _, out = await cli.request("cli.handle_message", {"text": text})
+    payload = out.get("result", {}) if isinstance(out, dict) else {}
+    out_text = str(payload.get("message") or "")
+    if out_text:
+        _append_outbox({"from": "sheriff", "to": user_id, "text": out_text})
+    print(f"Result: {json.dumps(out, indent=2)}")
+
 
 def agent_user(msg: str):
-    # Simulate agent to user by writing directly to the debug outbox.
     print(f"[Agent -> User] {msg}")
-    outbox = gw_root() / "state" / "debug" / "telegram_outbox.jsonl"
-    outbox.parent.mkdir(parents=True, exist_ok=True)
-    with open(outbox, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"from": "agent", "to": "user", "text": msg}) + "\n")
+    _append_outbox({"from": "agent", "to": "user", "text": msg})
     print("Message written to debug outbox.")
 
+
 def sheriff_user(msg: str):
-    # Simulate sheriff to user by writing directly to the debug outbox.
     print(f"[Sheriff -> User] {msg}")
-    outbox = gw_root() / "state" / "debug" / "telegram_outbox.jsonl"
-    outbox.parent.mkdir(parents=True, exist_ok=True)
-    with open(outbox, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"from": "sheriff", "to": "user", "text": msg}) + "\n")
+    _append_outbox({"from": "sheriff", "to": "user", "text": msg})
     print("Message written to debug outbox.")
+
 
 def session_history(session_name: str, count: int):
     path = gw_root() / "state" / "transcripts" / f"{session_name}.jsonl"
@@ -73,6 +133,7 @@ def session_history(session_name: str, count: int):
             print(f"[{role.upper()}] {content}")
         except Exception:
             print(line)
+
 
 def main():
     args = sys.argv[1:]
@@ -98,6 +159,7 @@ def main():
     else:
         print(f"Unknown command: {cmd}")
         print_usage()
+
 
 if __name__ == "__main__":
     main()

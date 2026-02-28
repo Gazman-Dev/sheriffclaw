@@ -20,6 +20,17 @@ class StubProvider:
 class TestProvider:
     async def generate(self, messages: list[dict], model: str = "test") -> str:
         last = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
+        low = last.lower()
+
+        if "scenario secret" in low:
+            handle = low.split("scenario secret")[-1].strip() or "gh_token"
+            return f'TOOL_CALL: {{"name": "secure.secret.ensure", "arguments": {{"handle": "{handle}"}}}}'
+        if "scenario exec" in low:
+            cmd = low.split("scenario exec")[-1].strip() or "python"
+            return f'TOOL_CALL: {{"name": "tools.exec", "arguments": {{"argv": ["{cmd}"]}}}}'
+        if "please use a tool" in low:
+            return 'TOOL_CALL: {"name": "tools.exec", "arguments": {"argv": ["echo", "tool-invoked"]}}'
+
         return f"TestBot[{model}]: {last}" if last else f"TestBot[{model}]: ready"
 
 
@@ -49,19 +60,21 @@ class _CodexCliBase:
 
     @staticmethod
     def _render_prompt(messages: list[dict[str, Any]]) -> str:
-        lines: list[str] = [
+        lines: list[str] =[
             "System: You are the AI Agent for Sheriff Claw.",
             "System: You run in a sandbox. You cannot access the user's host files or secrets directly.",
             "System: If you need a secret (API key, etc.) or permission for a domain/tool, you MUST use the Sheriff Request API.",
             "System: ",
             "System: TO REQUEST PERMISSION OR SECRETS:",
-            "System: Call the tool `requests.create_or_update` with a JSON payload.",
-            "System: Example for a secret: {\"type\": \"secret\", \"key\": \"github_token\", \"one_liner\": \"I need this to sync the repository updates.\"}",
-            "System: Example for a domain: {\"type\": \"domain\", \"key\": \"api.github.com\", \"one_liner\": \"I need to fetch the latest issues.\"}",
+            "System: You MUST use the exact format below in your final output to trigger the tool:",
+            "System: TOOL_CALL: {\"name\": \"requests.create_or_update\", \"arguments\": {\"type\": \"secret\", \"key\": \"github_token\", \"one_liner\": \"I need this to sync the repository updates.\"}}",
             "System: ",
-            "System: After calling the tool, you MUST STOP and tell the user: 'I have requested permission for [X]. Please approve it in your Sheriff Telegram channel.'",
+            "System: Example for a domain:",
+            "System: TOOL_CALL: {\"name\": \"requests.create_or_update\", \"arguments\": {\"type\": \"domain\", \"key\": \"api.github.com\", \"one_liner\": \"I need to fetch the latest issues.\"}}",
+            "System: ",
+            "System: After outputting the TOOL_CALL, you MUST STOP and tell the user: 'I have requested permission for [X]. Please approve it in your Sheriff Telegram channel.'",
             "System: Do NOT attempt to guess secrets or bypass security.",
-            "System: CORE COMMANDS ALWAYS AVAILABLE TO YOU (Run via `tools.exec`):",
+            "System: CORE COMMANDS ALWAYS AVAILABLE TO YOU (Run via standard shell commands):",
             "System:   - `python skills/search_skills/run.py \"query\"`: Searches your available peripheral skills.",
             "System:   - `python skills/search_memory/run.py \"query\"`: Search past conversations you have had with the user.",
             "System:   - `python skills/search_topics/run.py \"query\"`: Search facts, rules, and concepts in your topic database.",
@@ -151,7 +164,7 @@ class _CodexCliBase:
         if env_extra:
             env.update({k: v for k, v in env_extra.items() if v is not None})
 
-        cmd = [
+        cmd =[
             "codex",
             "--search",
             "--dangerously-bypass-approvals-and-sandbox",

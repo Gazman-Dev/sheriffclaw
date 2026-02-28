@@ -25,15 +25,26 @@ class WorkerModelAdapter(ModelAdapter):
         self.main_loop = main_loop
 
     def create_response(self, request: dict) -> dict:
+        tools = request.get("tools",[])
+        tools_str = ""
+        if tools:
+            tools_str = "You have access to the following native tools. To call a tool, output EXACTLY:\nTOOL_CALL: {\"name\": \"<tool_name>\", \"arguments\": {<args>}}\n\nTools available:\n"
+            for t in tools:
+                tools_str += json.dumps(t, ensure_ascii=False) + "\n"
+
         # Convert internal Phase4 request to Provider-compatible message list
-        messages =[]
-        for msg in request.get("input", []):
+        messages = []
+        for i, msg in enumerate(request.get("input",[])):
             role = msg["role"]
             content = ""
             if isinstance(msg["content"], list):
                 content = msg["content"][0].get("text", "")
             else:
                 content = str(msg["content"])
+
+            if role == "system" and i == 0 and tools_str:
+                content = tools_str + "\n" + content
+
             messages.append({"role": role, "content": content})
 
         # We run the async provider in the main loop to keep the sync Adapter interface
@@ -45,17 +56,32 @@ class WorkerModelAdapter(ModelAdapter):
         # For Phase 4 demo, we assume the AI outputs JSON or specific markers.
         if "TOOL_CALL:" in resp_text:
             try:
-                raw_json = resp_text.split("TOOL_CALL:")[1].strip()
-                call_data = json.loads(raw_json)
-                return {
-                    "type": "tool_calls",
-                    "tool_calls":[{
-                        "id": str(uuid.uuid4()),
-                        "name": call_data.get("name"),
-                        "arguments": call_data.get("arguments", {})
-                    }]
-                }
-            except:
+                marker_idx = resp_text.find("TOOL_CALL:")
+                json_start = resp_text.find("{", marker_idx)
+                if json_start != -1:
+                    brace_count = 0
+                    json_end = -1
+                    for i in range(json_start, len(resp_text)):
+                        if resp_text[i] == "{":
+                            brace_count += 1
+                        elif resp_text[i] == "}":
+                            brace_count -= 1
+                            if brace_count == 0:
+                                json_end = i + 1
+                                break
+                    if json_end != -1:
+                        raw_json = resp_text[json_start:json_end]
+                        call_data = json.loads(raw_json)
+                        if "name" in call_data and "arguments" in call_data:
+                            return {
+                                "type": "tool_calls",
+                                "tool_calls":[{
+                                    "id": str(uuid.uuid4()),
+                                    "name": call_data.get("name"),
+                                    "arguments": call_data.get("arguments", {})
+                                }]
+                            }
+            except Exception:
                 pass
 
         return {"type": "message", "content": resp_text}
@@ -159,6 +185,11 @@ class WorkerRuntime:
             run_turn,
             history, text, "now", stores, config, adapter
         )
+
+        # Emit any tools that were executed for Gateway/Observability
+        for ev in result.get("logs", {}).get("events",[]):
+            if ev.get("type") == "tool_call":
+                await emit_event("tool.call", {"tool_name": ev["name"], "payload": ev["args"]})
 
         answer = result["assistant_msg"]
         await emit_event("assistant.delta", {"text": answer})

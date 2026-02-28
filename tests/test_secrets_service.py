@@ -1,7 +1,7 @@
 import pytest
-from unittest.mock import MagicMock
+
 from services.sheriff_secrets.service import SheriffSecretsService
-from shared.paths import gw_root
+
 
 @pytest.fixture
 def mock_paths(tmp_path, monkeypatch):
@@ -9,6 +9,7 @@ def mock_paths(tmp_path, monkeypatch):
     # Redirect gw_root to a temp dir so state/secrets.enc writes there
     monkeypatch.setattr("services.sheriff_secrets.service.gw_root", lambda: tmp_path)
     return tmp_path
+
 
 @pytest.mark.asyncio
 async def test_secrets_service_flow(mock_paths):
@@ -37,6 +38,7 @@ async def test_secrets_service_flow(mock_paths):
     await svc.set_secret({"handle": "gh", "value": "token"}, None, "req-5")
     secret_resp = await svc.get_secret({"handle": "gh"}, None, "req-6")
     assert secret_resp["value"] == "token"
+
 
 @pytest.mark.asyncio
 async def test_secrets_lock(mock_paths):

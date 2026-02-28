@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import os
-import platform
-import shutil
 import sys
 from pathlib import Path
 
@@ -109,7 +107,7 @@ def _linux_sandbox_profile() -> Path:
     agent_ws.mkdir(parents=True, exist_ok=True)
     (llm / "logs").mkdir(parents=True, exist_ok=True)
 
-    args =[
+    args = [
         "--die-with-parent",
         "--unshare-all",
         "--ro-bind", "/usr", "/usr",

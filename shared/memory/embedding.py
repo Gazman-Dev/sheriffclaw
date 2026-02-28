@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import hashlib
+from abc import ABC, abstractmethod
 
 
 class EmbeddingProvider(ABC):
@@ -65,4 +65,4 @@ class DeterministicHashEmbeddingProvider(EmbeddingProvider):
         return [v / norm for v in vec]
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        return[self._embed_one(t) for t in texts]
+        return [self._embed_one(t) for t in texts]

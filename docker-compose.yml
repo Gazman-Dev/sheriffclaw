@@ -6,4 +6,4 @@ services:
     volumes:
       - .:/workspace
     working_dir: /workspace
-    command: ["bash", "-lc", "chmod +x scripts/test.sh && scripts/test.sh"]
+    command: [ "bash", "-lc", "chmod +x scripts/test.sh && scripts/test.sh" ]

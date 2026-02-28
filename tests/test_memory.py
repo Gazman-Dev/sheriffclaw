@@ -1,6 +1,8 @@
 import pytest
+
 pytest.importorskip("hnswlib")
 from shared.worker.worker_runtime import WorkerRuntime
+
 
 @pytest.mark.asyncio
 async def test_worker_session_open_close(tmp_path):
@@ -16,6 +18,7 @@ async def test_worker_session_open_close(tmp_path):
     await runtime.session_close(handle)
     assert "primary_session" not in runtime.sessions
 
+
 @pytest.mark.asyncio
 async def test_worker_generates_primary_session_for_empty(tmp_path):
     runtime = WorkerRuntime()
@@ -26,6 +29,7 @@ async def test_worker_generates_primary_session_for_empty(tmp_path):
     handle = await runtime.session_open(None)
     assert handle == "primary_session"
     assert handle in runtime.sessions
+
 
 @pytest.mark.asyncio
 async def test_worker_history_accumulation(tmp_path):
@@ -52,6 +56,7 @@ async def test_worker_history_accumulation(tmp_path):
     persisted = runtime._load_session(handle)
     assert len(persisted) == 2
     assert persisted[0]["role"] == "user"
+
 
 @pytest.mark.asyncio
 async def test_tool_result_appending(tmp_path):

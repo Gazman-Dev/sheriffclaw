@@ -1,5 +1,7 @@
 from pathlib import Path
+
 import pytest
+
 pytest.importorskip("hnswlib")
 
 from shared.memory.skill_routing import SkillManifestLoader, route_skills

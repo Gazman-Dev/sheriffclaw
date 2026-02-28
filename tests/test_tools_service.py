@@ -1,6 +1,8 @@
-import pytest
 import sys
 from unittest.mock import AsyncMock
+
+import pytest
+
 from services.sheriff_tools.service import SheriffToolsService
 
 
@@ -15,7 +17,8 @@ def tools_svc(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_exec_tool_allowed(tools_svc):
     tools_svc.policy.request.return_value = (None, {"result": {"decision": "ALLOW"}})
-    result = await tools_svc.exec_tool({"principal_id": "u1", "argv": [sys.executable, "-c", "print('ok')"]}, None, "r1")
+    result = await tools_svc.exec_tool({"principal_id": "u1", "argv": [sys.executable, "-c", "print('ok')"]}, None,
+                                       "r1")
     assert result["status"] == "executed"
 
 
@@ -30,7 +33,8 @@ async def test_exec_tool_denied_returns_needs_tool_approval(tools_svc):
 async def test_disclose_output_check_unified_flow(tools_svc):
     # Setup allowed execution
     tools_svc.policy.request.return_value = (None, {"result": {"decision": "ALLOW"}})
-    run_res = await tools_svc.exec_tool({"principal_id": "u1", "argv": [sys.executable, "-c", "print('secret')"], "taint": True}, None, "r1")
+    run_res = await tools_svc.exec_tool(
+        {"principal_id": "u1", "argv": [sys.executable, "-c", "print('secret')"], "taint": True}, None, "r1")
     run_id = run_res["run_id"]
 
     # Test denied disclosure (default)

@@ -6,7 +6,6 @@ import uuid
 from typing import Any
 
 import chromadb
-from chromadb.api.models.Collection import Collection
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
 from shared.paths import gw_root
@@ -287,15 +286,18 @@ class SheriffRequestsService:
                 )
             else:
                 entry_id = row[0]
-                conn.execute("UPDATE catalog_entries SET status='approved', immutable=1, updated_at=? WHERE entry_id=?", (now, entry_id))
+                conn.execute("UPDATE catalog_entries SET status='approved', immutable=1, updated_at=? WHERE entry_id=?",
+                             (now, entry_id))
             request_id = self._resolve_instance(conn, entry_id, {"action": "provide_secret"})
 
         self._upsert_existing_entry("secret", key)
         await self.tg_gate.request(
             "gate.notify_request_resolved",
-            {"event": "request_resolved", "type": "secret", "key": key, "status": "approved", "request_id": request_id, "context": {}},
+            {"event": "request_resolved", "type": "secret", "key": key, "status": "approved", "request_id": request_id,
+             "context": {}},
         )
-        await self.gateway.request("gateway.notify_request_resolved", {"type": "secret", "key": key, "status": "approved"})
+        await self.gateway.request("gateway.notify_request_resolved",
+                                   {"type": "secret", "key": key, "status": "approved"})
         return {"status": "approved", "type": "secret", "key": key}
 
     async def _resolve_policy_item(self, entry_type: str, key: str, action: str) -> dict[str, str]:
@@ -317,7 +319,8 @@ class SheriffRequestsService:
             raise ValueError("unsupported action")
 
         with self._conn() as conn:
-            row = conn.execute("SELECT entry_id FROM catalog_entries WHERE type=? AND key=?", (entry_type, key)).fetchone()
+            row = conn.execute("SELECT entry_id FROM catalog_entries WHERE type=? AND key=?",
+                               (entry_type, key)).fetchone()
             now = self._now_ms()
             if row is None:
                 entry_id = str(uuid.uuid4())
@@ -327,15 +330,18 @@ class SheriffRequestsService:
                 )
             else:
                 entry_id = row[0]
-                conn.execute("UPDATE catalog_entries SET status=?, immutable=?, updated_at=? WHERE entry_id=?", (status, immutable, now, entry_id))
+                conn.execute("UPDATE catalog_entries SET status=?, immutable=?, updated_at=? WHERE entry_id=?",
+                             (status, immutable, now, entry_id))
             request_id = self._resolve_instance(conn, entry_id, {"action": action})
 
         self._upsert_existing_entry(entry_type, key)
         await self.tg_gate.request(
             "gate.notify_request_resolved",
-            {"event": "request_resolved", "type": entry_type, "key": key, "status": status, "request_id": request_id, "context": {}},
+            {"event": "request_resolved", "type": entry_type, "key": key, "status": status, "request_id": request_id,
+             "context": {}},
         )
-        await self.gateway.request("gateway.notify_request_resolved", {"type": entry_type, "key": key, "status": status})
+        await self.gateway.request("gateway.notify_request_resolved",
+                                   {"type": entry_type, "key": key, "status": status})
         return {"status": status, "type": entry_type, "key": key}
 
     async def resolve_domain(self, payload, emit_event, req_id):

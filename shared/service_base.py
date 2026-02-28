@@ -26,7 +26,8 @@ class NDJSONService:
         self.ops.setdefault("health", self._health)
 
     async def _meta(self, payload: dict, emit_event, req_id: str) -> dict:
-        return {"name": self.name, "island": self.island, "kind": self.kind, "version": self.version, "ops": sorted(self.ops.keys())}
+        return {"name": self.name, "island": self.island, "kind": self.kind, "version": self.version,
+                "ops": sorted(self.ops.keys())}
 
     async def _health(self, payload: dict, emit_event, req_id: str) -> dict:
         return {"status": "ok"}

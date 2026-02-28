@@ -6,13 +6,12 @@ import json
 import os
 import secrets
 import threading
-import time
 import webbrowser
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
-from urllib.parse import parse_qs, quote_plus, urlencode, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
 
@@ -128,7 +127,8 @@ def run_browser_oauth_login(timeout_seconds: int = 900) -> DeviceAuthTokens:
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             if ok:
-                self.wfile.write(b"<html><body><h2>Sign-in successful. You can return to the terminal.</h2></body></html>")
+                self.wfile.write(
+                    b"<html><body><h2>Sign-in successful. You can return to the terminal.</h2></body></html>")
             else:
                 self.wfile.write(b"<html><body><h2>Sign-in failed. Return to the terminal.</h2></body></html>")
 

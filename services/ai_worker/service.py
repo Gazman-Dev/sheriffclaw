@@ -28,7 +28,8 @@ class AIWorkerService:
         return {"status": "done"}
 
     async def tool_result(self, payload, emit_event, req_id):
-        await self.runtime.tool_result(payload["session_handle"], payload.get("tool_name", "tool"), payload.get("result", {}))
+        await self.runtime.tool_result(payload["session_handle"], payload.get("tool_name", "tool"),
+                                       payload.get("result", {}))
         return {"status": "appended"}
 
     async def skills_list(self, payload, emit_event, req_id):
@@ -42,8 +43,10 @@ class AIWorkerService:
         argv = payload.get("argv", [])
         if not argv:
             raise ValueError("skill name required")
-        result = await self.runtime.skill_run(argv[0], {"argv": argv[1:], "stdin": payload.get("stdin", "")}, emit_event)
-        return {"stdout": result.get("stdout", str(result)), "stderr": result.get("stderr", ""), "code": int(result.get("code", 0))}
+        result = await self.runtime.skill_run(argv[0], {"argv": argv[1:], "stdin": payload.get("stdin", "")},
+                                              emit_event)
+        return {"stdout": result.get("stdout", str(result)), "stderr": result.get("stderr", ""),
+                "code": int(result.get("code", 0))}
 
     def ops(self):
         return {

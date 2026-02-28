@@ -1,12 +1,14 @@
 import pytest
+
 pytest.importorskip("hnswlib")
-import asyncio
 from shared.worker.worker_runtime import WorkerRuntime
+
 
 @pytest.mark.asyncio
 async def test_worker_runtime_tool_trigger():
     runtime = WorkerRuntime()
     events = []
+
     async def emit(ev, pl):
         events.append((ev, pl))
 
@@ -19,10 +21,12 @@ async def test_worker_runtime_tool_trigger():
     assert len(tool_calls) > 0
     assert tool_calls[0][1]["tool_name"] == "tools.exec"
 
+
 @pytest.mark.asyncio
 async def test_worker_runtime_basic_chat():
     runtime = WorkerRuntime()
     events = []
+
     async def emit(ev, pl):
         events.append((ev, pl))
 

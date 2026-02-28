@@ -5,14 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import select
 import sys
 import time
 from pathlib import Path
 
+import select
+
 try:
     import termios  # type: ignore
     import tty  # type: ignore
+
     HAS_TERMIOS = True
 except Exception:  # Windows / non-POSIX
     termios = None  # type: ignore
@@ -24,6 +26,7 @@ from shared.paths import gw_root, llm_root
 from shared.proc_rpc import ProcClient
 
 OPLOG = get_op_logger("ctl")
+
 
 def _island_root(service: str) -> Path:
     return gw_root() if service.startswith("sheriff-") else llm_root()
@@ -102,7 +105,7 @@ def _wait_extra_or_esc_until(deadline_ts: float) -> None:
         tty.setcbreak(fd)
         while time.time() < deadline_ts:
             timeout = min(0.2, max(0.0, deadline_ts - time.time()))
-            r, _, _ = select.select([fd], [],[], timeout)
+            r, _, _ = select.select([fd], [], [], timeout)
             if not r:
                 continue
             ch = os.read(fd, 1)

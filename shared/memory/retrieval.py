@@ -202,5 +202,5 @@ def render_topic_md(topic: dict[str, Any]) -> str:
         lines.append(f"- Aliases: {', '.join(aliases)}")
     t = topic.get("time", {})
     if t.get("first_seen_at") or t.get("last_seen_at"):
-        lines.append(f"- Time: first_seen={t.get('first_seen_at','')}, last_seen={t.get('last_seen_at','')}")
+        lines.append(f"- Time: first_seen={t.get('first_seen_at', '')}, last_seen={t.get('last_seen_at', '')}")
     return "\n".join(lines)

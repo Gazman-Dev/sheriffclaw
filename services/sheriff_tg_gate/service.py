@@ -4,6 +4,7 @@ import json
 import os
 
 import requests
+
 from shared.paths import gw_root
 from shared.proc_rpc import ProcClient
 from shared.transcript import append_jsonl
@@ -46,7 +47,8 @@ class SheriffTgGateService:
             if not token:
                 return
 
-            _, res = await self.gateway.request("gateway.secrets.call", {"op": "secrets.activation.status", "payload": {"bot_role": "sheriff"}})
+            _, res = await self.gateway.request("gateway.secrets.call",
+                                                {"op": "secrets.activation.status", "payload": {"bot_role": "sheriff"}})
             user_id = res.get("result", {}).get("user_id")
             if not user_id:
                 return
@@ -94,7 +96,8 @@ class SheriffTgGateService:
         text = (payload.get("text") or "").strip()
         role = "sheriff"
 
-        _, res = await self.gateway.request("gateway.secrets.call", {"op": "secrets.activation.status", "payload": {"bot_role": role}})
+        _, res = await self.gateway.request("gateway.secrets.call",
+                                            {"op": "secrets.activation.status", "payload": {"bot_role": role}})
         bound = res.get("result", {}).get("user_id")
 
         if bound and str(bound) == user_id:
@@ -102,11 +105,13 @@ class SheriffTgGateService:
 
         if text.startswith("activate "):
             code = text.split(" ", 1)[1].strip().lower()
-            _, claim = await self.gateway.request("gateway.secrets.call", {"op": "secrets.activation.claim", "payload": {"bot_role": role, "code": code}})
+            _, claim = await self.gateway.request("gateway.secrets.call", {"op": "secrets.activation.claim",
+                                                                           "payload": {"bot_role": role, "code": code}})
             if claim.get("result", {}).get("ok"):
                 return {"status": "activated", "user_id": claim["result"]["user_id"]}
 
-        _, c = await self.gateway.request("gateway.secrets.call", {"op": "secrets.activation.create", "payload": {"bot_role": role, "user_id": user_id}})
+        _, c = await self.gateway.request("gateway.secrets.call", {"op": "secrets.activation.create",
+                                                                   "payload": {"bot_role": role, "user_id": user_id}})
         code = c.get("result", {}).get("code")
         return {"status": "activation_required", "activation_code": code}
 

@@ -20,7 +20,8 @@ def test_main_sheriff_message_routes_to_cmd_entry(monkeypatch):
         called["message"] = args.message
 
     monkeypatch.setattr(ctl, "cmd_entry", fake_cmd_entry)
-    monkeypatch.setattr(ctl, "cmd_debug", lambda args: (_ for _ in ()).throw(AssertionError("cmd_debug should not be called")))
+    monkeypatch.setattr(ctl, "cmd_debug",
+                        lambda args: (_ for _ in ()).throw(AssertionError("cmd_debug should not be called")))
 
     ctl.main_sheriff(["hello", "world"])
     assert called["message"] == ["hello", "world"]

@@ -8,11 +8,11 @@ import getpass
 import json
 import time
 
-from shared.proc_rpc import ProcClient
 from services.sheriff_ctl.onboard import cmd_onboard
 from services.sheriff_ctl.service_runner import cmd_start, cmd_stop
 from services.sheriff_ctl.system import cmd_factory_reset, cmd_update
 from services.sheriff_ctl.utils import _is_onboarded, _verify_master_password, _wait_extra_or_esc_until
+from shared.proc_rpc import ProcClient
 
 
 def cmd_entry(args):
@@ -25,14 +25,19 @@ def cmd_entry(args):
         return
 
     if not _is_onboarded():
-        cmd_onboard(argparse.Namespace(master_password=None, llm_provider=None, llm_api_key=None, llm_bot_token=None, gate_bot_token=None, allow_telegram=False, deny_telegram=False, keep_unchanged=False))
+        cmd_onboard(argparse.Namespace(master_password=None, llm_provider=None, llm_api_key=None, llm_bot_token=None,
+                                       gate_bot_token=None, allow_telegram=False, deny_telegram=False,
+                                       keep_unchanged=False))
         return
 
     while True:
         choice = input("Choose: onboard | chat | restart | update | factory reset > ").strip().lower()
         if choice == "onboard":
             keep = input("Keep unchanged as default for prompts? [Y/n]: ").strip().lower()
-            cmd_onboard(argparse.Namespace(master_password=None, llm_provider=None, llm_api_key=None, llm_bot_token=None, gate_bot_token=None, allow_telegram=False, deny_telegram=False, keep_unchanged=(keep not in {"n", "no"})))
+            cmd_onboard(
+                argparse.Namespace(master_password=None, llm_provider=None, llm_api_key=None, llm_bot_token=None,
+                                   gate_bot_token=None, allow_telegram=False, deny_telegram=False,
+                                   keep_unchanged=(keep not in {"n", "no"})))
             return
         if choice == "chat":
             cmd_chat(argparse.Namespace(principal="local-cli", model_ref=None, one_shot=None))

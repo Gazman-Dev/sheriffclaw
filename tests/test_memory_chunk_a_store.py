@@ -1,4 +1,5 @@
 import pytest
+
 pytest.importorskip("hnswlib")
 from shared.memory.store import TopicStore
 from shared.memory.types import EdgeType, Topic, TopicTime
@@ -66,4 +67,4 @@ def test_utility_bump_and_decay_math_fixed_timestamps(tmp_path):
     assert abs(t["stats"]["utility_score"] - expected) < 1e-9
 
     # Pure function check
-    assert abs(TopicStore.decay_utility_value(10.0, 2.0, 0.98) - (10.0 * (0.98**2))) < 1e-9
+    assert abs(TopicStore.decay_utility_value(10.0, 2.0, 0.98) - (10.0 * (0.98 ** 2))) < 1e-9

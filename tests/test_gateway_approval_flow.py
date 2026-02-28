@@ -1,5 +1,7 @@
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
+
 from services.sheriff_gateway.service import SheriffGatewayService
 
 
@@ -24,7 +26,8 @@ async def test_gateway_continues_after_tool_needs_approval():
         return [], {"result": {}}
 
     svc.ai.request.side_effect = mock_ai_request
-    res = await svc.handle_user_message({"channel": "cli", "principal_external_id": "u1", "text": "run unsafe"}, AsyncMock(), "r1")
+    res = await svc.handle_user_message({"channel": "cli", "principal_external_id": "u1", "text": "run unsafe"},
+                                        AsyncMock(), "r1")
     assert res["status"] == "done"
 
 

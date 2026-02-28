@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import os
 import platform
 import shutil
-from pathlib import Path
 
-from shared.proc_rpc import ProcClient
-from shared.service_manager import ServiceManager
 from services.sheriff_ctl.sandbox import (
     _ai_worker_sandbox_profile,
     _ai_worker_user,
@@ -24,8 +20,10 @@ from services.sheriff_ctl.utils import (
     _pid_path,
     _resolve_service_binary,
 )
+from shared.proc_rpc import ProcClient
+from shared.service_manager import ServiceManager
 
-GW_ORDER =[
+GW_ORDER = [
     "sheriff-secrets",
     "sheriff-policy",
     "sheriff-requests",
@@ -36,8 +34,8 @@ GW_ORDER =[
     "sheriff-cli-gate",
     "sheriff-updater",
 ]
-LLM_ORDER =["ai-worker", "ai-tg-llm", "telegram-listener"]
-ALL =[*GW_ORDER, *LLM_ORDER]
+LLM_ORDER = ["ai-worker", "ai-tg-llm", "telegram-listener"]
+ALL = [*GW_ORDER, *LLM_ORDER]
 
 # Daemonized services managed directly by ServiceManager.
 # Keep secrets always-on so unlock state survives normal operation.
@@ -52,24 +50,25 @@ def _service_command(service: str) -> list[str]:
             sb = shutil.which("sandbox-exec")
             if sb:
                 profile = _ai_worker_sandbox_profile()
-                sandboxed =[sb, "-f", str(profile), *base]
+                sandboxed = [sb, "-f", str(profile), *base]
         elif platform.system() == "Linux":
             bwrap = shutil.which("bwrap")
             if bwrap:
                 profile = _linux_sandbox_profile()
-                args =[ln.strip() for ln in profile.read_text(encoding="utf-8").splitlines() if ln.strip()]
+                args = [ln.strip() for ln in profile.read_text(encoding="utf-8").splitlines() if ln.strip()]
                 sandboxed = [bwrap, *args, *base]
 
         if sandboxed is None:
             if _strict_sandbox_required():
-                raise RuntimeError("strict sandbox enabled: ai-worker sandbox runtime missing (need sandbox-exec or bwrap)")
+                raise RuntimeError(
+                    "strict sandbox enabled: ai-worker sandbox runtime missing (need sandbox-exec or bwrap)")
             sandboxed = base
 
         user = _ai_worker_user()
         if user and platform.system() in {"Darwin", "Linux"}:
             sudo = shutil.which("sudo")
             if sudo:
-                sandboxed =[sudo, "-n", "-u", user, *sandboxed]
+                sandboxed = [sudo, "-n", "-u", user, *sandboxed]
 
         return sandboxed
     return base
@@ -128,7 +127,8 @@ def cmd_start(args):
             print("Warning: failed to unlock vault on start (master password rejected).")
             _notify_sheriff_channel("🔒 Sheriff restarted but vault is locked. Send: /unlock <master_password>")
     else:
-        _notify_sheriff_channel("ℹ️ Sheriff services restarted. Vault state unknown; send /unlock <master_password> if needed.")
+        _notify_sheriff_channel(
+            "ℹ️ Sheriff services restarted. Vault state unknown; send /unlock <master_password> if needed.")
 
 
 def cmd_stop(args):

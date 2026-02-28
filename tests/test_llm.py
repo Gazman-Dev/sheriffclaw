@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from shared.llm.providers import OpenAICodexProvider, StubProvider, TestProvider
 from shared.llm.registry import resolve_model

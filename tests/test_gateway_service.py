@@ -1,6 +1,9 @@
+from unittest.mock import AsyncMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+
 from services.sheriff_gateway.service import SheriffGatewayService
+
 
 # Mock ProcClient since we can't spawn real processes in unit tests
 class MockProcClient:
@@ -19,7 +22,8 @@ class MockProcClient:
         if op == "agent.session.user_message":
             # Return a stream generator and a future
             async def _stream():
-                if False: yield {} # make it a generator
+                if False: yield {}  # make it a generator
+
             fut = AsyncMock()
             return _stream(), fut
 
@@ -27,6 +31,7 @@ class MockProcClient:
             return [], {"result": {"status": 200, "body": "web-ok"}}
 
         return [], {"result": {}}
+
 
 @pytest.mark.asyncio
 async def test_gateway_opens_session_and_forwards_message():
@@ -47,10 +52,13 @@ async def test_gateway_opens_session_and_forwards_message():
         return [], {"result": {}}
 
     svc.ai.request = AsyncMock(side_effect=mock_request)
-    svc.secrets.request = AsyncMock(return_value=([], {"ok": True, "result": {"unlocked": True, "provider": "stub", "api_key": ""}}))
+    svc.secrets.request = AsyncMock(
+        return_value=([], {"ok": True, "result": {"unlocked": True, "provider": "stub", "api_key": ""}}))
 
     events = []
-    async def emit(e, p): events.append((e,p))
+
+    async def emit(e, p):
+        events.append((e, p))
 
     await svc.handle_user_message({
         "channel": "cli",
@@ -60,6 +68,7 @@ async def test_gateway_opens_session_and_forwards_message():
 
     # Verify events passed through
     assert ("assistant.delta", {"text": "hi"}) in events
+
 
 @pytest.mark.asyncio
 async def test_gateway_passes_model_ref_to_worker():
@@ -79,7 +88,8 @@ async def test_gateway_passes_model_ref_to_worker():
         return [], {"result": {}}
 
     svc.ai.request = AsyncMock(side_effect=mock_ai_request)
-    svc.secrets.request = AsyncMock(return_value=([], {"ok": True, "result": {"unlocked": True, "provider": "stub", "api_key": ""}}))
+    svc.secrets.request = AsyncMock(
+        return_value=([], {"ok": True, "result": {"unlocked": True, "provider": "stub", "api_key": ""}}))
 
     async def emit(e, p):
         return
@@ -222,13 +232,16 @@ async def test_gateway_routes_web_tool():
         return [], {"result": {}}
 
     svc.ai.request = AsyncMock(side_effect=mock_ai_request)
-    svc.secrets.request = AsyncMock(return_value=([], {"ok": True, "result": {"unlocked": True, "provider": "stub", "api_key": ""}}))
+    svc.secrets.request = AsyncMock(
+        return_value=([], {"ok": True, "result": {"unlocked": True, "provider": "stub", "api_key": ""}}))
 
     # Mock Web response
     svc.web.request = AsyncMock(return_value=([], {"result": {"status": 200}}))
 
     events = []
-    async def emit(e, p): events.append((e,p))
+
+    async def emit(e, p):
+        events.append((e, p))
 
     await svc.handle_user_message({
         "channel": "cli",
@@ -244,6 +257,7 @@ async def test_gateway_routes_web_tool():
     # Check routing to web service
     assert svc.web.request.call_args[0][0] == "web.request"
     assert svc.web.request.call_args[0][1]["host"] == "example.com"
+
 
 @pytest.mark.asyncio
 async def test_gateway_secrets_call_rejects_non_allowlisted_op():

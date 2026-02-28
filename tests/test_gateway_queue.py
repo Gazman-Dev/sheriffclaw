@@ -30,7 +30,8 @@ async def test_handle_user_message_queues_when_paused(monkeypatch):
 
     await svc.queue_control({"pause": True, "reason": "update"}, None, "r1")
 
-    task = asyncio.create_task(svc.handle_user_message({"channel": "cli", "principal_external_id": "u1", "text": "hi"}, None, "r2"))
+    task = asyncio.create_task(
+        svc.handle_user_message({"channel": "cli", "principal_external_id": "u1", "text": "hi"}, None, "r2"))
     await asyncio.sleep(0.1)
     st = await svc.queue_status({}, None, "r3")
     assert st["pending"] >= 1

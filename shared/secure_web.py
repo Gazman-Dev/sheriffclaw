@@ -5,8 +5,8 @@ import os
 import urllib.parse
 import urllib.request
 
-from shared.policy import GatewayPolicy
 from shared.paths import gw_root
+from shared.policy import GatewayPolicy
 
 SECRET_HEADERS = {"authorization", "x-api-key"}
 ALLOWED_HEADERS = {"accept", "content-type", "user-agent"}
@@ -43,10 +43,13 @@ class SecureWebRequester:
         if query:
             url += "?" + urllib.parse.urlencode(query)
         if self.debug_mode:
-            self._append_debug_outbox({"method": method, "url": url, "headers": headers, "query": query, "body": payload.get("body")})
-            return {"status": 200, "headers": {"content-type": "application/json"}, "body": "{\"debug_mock\": true}", "bytes": len("{\"debug_mock\": true}")}
+            self._append_debug_outbox(
+                {"method": method, "url": url, "headers": headers, "query": query, "body": payload.get("body")})
+            return {"status": 200, "headers": {"content-type": "application/json"}, "body": "{\"debug_mock\": true}",
+                    "bytes": len("{\"debug_mock\": true}")}
         data = payload.get("body")
-        data_bytes = None if data is None else (data.encode("utf-8") if isinstance(data, str) else json.dumps(data).encode("utf-8"))
+        data_bytes = None if data is None else (
+            data.encode("utf-8") if isinstance(data, str) else json.dumps(data).encode("utf-8"))
         req = urllib.request.Request(url, method=method, headers=headers, data=data_bytes)
         with urllib.request.urlopen(req, timeout=20) as resp:  # noqa: S310
             body = resp.read()

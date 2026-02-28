@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-import tempfile
-import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -19,7 +19,8 @@ def main() -> None:
 
         conversation = []
         for i in range(20):
-            conversation.append({"role": "user", "content": f"we should prepare the party playlist and food list turn {i}"})
+            conversation.append(
+                {"role": "user", "content": f"we should prepare the party playlist and food list turn {i}"})
             conversation.append({"role": "assistant", "content": f"noted party planning item {i}"})
 
         slept = sleep(conversation, datetime.now(timezone.utc).isoformat(), store, keep_tail_turns=6)

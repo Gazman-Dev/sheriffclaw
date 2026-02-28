@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-import tempfile
-import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -31,7 +31,8 @@ def main() -> None:
                 name="Concert Plan",
                 one_liner="concert agenda and stage plan",
                 aliases=["music ops"],
-                time=TopicTime(first_seen_at="2026-01-01T00:00:00Z", last_seen_at="2026-01-01T00:00:00Z", notable_events=[]),
+                time=TopicTime(first_seen_at="2026-01-01T00:00:00Z", last_seen_at="2026-01-01T00:00:00Z",
+                               notable_events=[]),
             )
         )
         store.create(
@@ -41,7 +42,8 @@ def main() -> None:
                 name="Party Before Sleep",
                 one_liner="party guest list and snacks",
                 aliases=["party"],
-                time=TopicTime(first_seen_at="2026-01-01T00:00:00Z", last_seen_at="2026-01-01T10:00:00Z", notable_events=[]),
+                time=TopicTime(first_seen_at="2026-01-01T00:00:00Z", last_seen_at="2026-01-01T10:00:00Z",
+                               notable_events=[]),
             )
         )
         store.create(
@@ -51,7 +53,8 @@ def main() -> None:
                 name="Party After Sleep",
                 one_liner="party guest list and snacks",
                 aliases=["party"],
-                time=TopicTime(first_seen_at="2026-01-03T00:00:00Z", last_seen_at="2026-01-03T10:00:00Z", notable_events=[]),
+                time=TopicTime(first_seen_at="2026-01-03T00:00:00Z", last_seen_at="2026-01-03T10:00:00Z",
+                               notable_events=[]),
             )
         )
 

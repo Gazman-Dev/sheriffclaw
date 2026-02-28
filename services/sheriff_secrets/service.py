@@ -91,7 +91,7 @@ class SheriffSecretsService:
         return {"ok": bool(user_id), "user_id": user_id}
 
     async def activation_status(self, payload, emit_event, req_id):
-        return {"user_id": self.state.get_bound_user(payload["bot_role"]) }
+        return {"user_id": self.state.get_bound_user(payload["bot_role"])}
 
     async def telegram_webhook_get(self, payload, emit_event, req_id):
         return {"config": self.state.get_telegram_webhook_config()}

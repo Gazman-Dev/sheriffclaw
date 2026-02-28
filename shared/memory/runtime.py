@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-import re
 import uuid
-import json
-from collections import Counter
 from datetime import datetime, timezone
 
 from shared.memory.embedding import EmbeddingProvider
 from shared.memory.semantic_index import SemanticIndex
 from shared.memory.store import TopicStore
-from shared.memory.types import Topic, TopicTime, WakePacket
+from shared.memory.types import WakePacket
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
 
 def _format_conversation_chunk(messages: list[dict]) -> str:
     """Converts a list of messages into a searchable text block."""
@@ -22,6 +21,7 @@ def _format_conversation_chunk(messages: list[dict]) -> str:
         content = m.get("content", "")
         lines.append(f"[{role}]: {content}")
     return "\n".join(lines)
+
 
 def sleep(
         conversation_buffer: list[dict],
@@ -89,6 +89,7 @@ def sleep(
         "trimmed_conversation": tail,
         "indexed_chunks": chunks_indexed,
     }
+
 
 def wake(wake_packet: dict, user_msg: str, now: str | None, topic_store: TopicStore) -> dict:
     # Standard retrieval logic for starting a new session or resuming after sleep

@@ -38,9 +38,11 @@ async def user_agent(msg: str, user_id: str = "debug_user"):
         req = ProcClient("sheriff-requests")
         _, res = await req.request(
             "requests.create_or_update",
-            {"type": "secret", "key": handle, "one_liner": f"Need secret {handle}", "context": {"source": "debug.telegram"}},
+            {"type": "secret", "key": handle, "one_liner": f"Need secret {handle}",
+             "context": {"source": "debug.telegram"}},
         )
-        _append_outbox({"from": "agent", "to": user_id, "text": f"Requested secret {handle}. Please approve it in Sheriff."})
+        _append_outbox(
+            {"from": "agent", "to": user_id, "text": f"Requested secret {handle}. Please approve it in Sheriff."})
         print(f"[User -> Agent] {msg}")
         print(f"Result: {json.dumps(res, indent=2)}")
         return

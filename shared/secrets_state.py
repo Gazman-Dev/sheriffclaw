@@ -321,7 +321,9 @@ class SecretsState:
         )
 
     def clear_llm_auth(self) -> None:
-        self._db_set("llm_auth", {"type": None, "access_token": None, "refresh_token": None, "id_token": None, "obtained_at": None, "expires_at": None})
+        self._db_set("llm_auth",
+                     {"type": None, "access_token": None, "refresh_token": None, "id_token": None, "obtained_at": None,
+                      "expires_at": None})
 
     def get_llm_bot_token(self) -> str:
         return str(self._db_get("llm_bot_token", ""))

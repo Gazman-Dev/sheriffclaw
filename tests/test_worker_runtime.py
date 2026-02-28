@@ -1,4 +1,5 @@
 import pytest
+
 pytest.importorskip("hnswlib")
 from unittest.mock import AsyncMock
 from shared.worker.worker_runtime import WorkerRuntime
@@ -13,7 +14,7 @@ async def test_worker_runtime_basic_chat(tmp_path):
 
     session = await runtime.session_open("s1")
 
-    events =[]
+    events = []
 
     async def emit(event, payload):
         events.append((event, payload))
@@ -21,7 +22,7 @@ async def test_worker_runtime_basic_chat(tmp_path):
     await runtime.user_message(session, "hello computer", None, emit)
 
     deltas = [e for e, p in events if e == "assistant.delta"]
-    finals =[p for e, p in events if e == "assistant.final"]
+    finals = [p for e, p in events if e == "assistant.final"]
 
     assert len(deltas) > 0
     assert len(finals) == 1
@@ -37,7 +38,7 @@ async def test_worker_runtime_triggers_tool_on_keyword(tmp_path):
 
     session = await runtime.session_open("s1")
 
-    events =[]
+    events = []
 
     async def emit(event, payload):
         events.append((event, payload))
@@ -47,7 +48,7 @@ async def test_worker_runtime_triggers_tool_on_keyword(tmp_path):
     tool_calls = [p for e, p in events if e == "tool.call"]
     assert len(tool_calls) == 1
     assert tool_calls[0]["tool_name"] == "tools.exec"
-    assert tool_calls[0]["payload"]["argv"] ==["echo", "tool-invoked"]
+    assert tool_calls[0]["payload"]["argv"] == ["echo", "tool-invoked"]
 
 
 @pytest.mark.asyncio
@@ -78,14 +79,14 @@ async def test_worker_scenario_secret_flow_emits_tool_call(tmp_path):
 
     session = await runtime.session_open("s2")
 
-    events =[]
+    events = []
 
     async def emit(event, payload):
         events.append((event, payload))
 
     await runtime.user_message(session, "scenario secret gh_token", "scenario/default", emit)
 
-    tool_calls =[p for e, p in events if e == "tool.call"]
+    tool_calls = [p for e, p in events if e == "tool.call"]
     assert len(tool_calls) == 1
     assert tool_calls[0]["tool_name"] == "secure.secret.ensure"
     assert tool_calls[0]["payload"]["handle"] == "gh_token"
@@ -101,14 +102,14 @@ async def test_worker_scenario_last_tool_reads_history(tmp_path):
     session = await runtime.session_open("s3")
     await runtime.tool_result(session, "secure.secret.ensure", {"status": "needs_secret", "handle": "gh_token"})
 
-    events =[]
+    events = []
 
     async def emit(event, payload):
         events.append((event, payload))
 
     await runtime.user_message(session, "scenario last tool", "scenario/default", emit)
 
-    finals =[p for e, p in events if e == "assistant.final"]
+    finals = [p for e, p in events if e == "assistant.final"]
     assert len(finals) == 1
     assert "needs_secret" in finals[0]["text"]
 

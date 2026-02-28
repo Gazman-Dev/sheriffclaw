@@ -11,14 +11,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-from shared.paths import gw_root
-from shared.proc_rpc import ProcClient
 from services.sheriff_ctl.service_runner import ALL, cmd_start, cmd_stop, _stop_service
 from services.sheriff_ctl.utils import (
     _clear_telegram_unlock_channel,
     _notify_sheriff_channel,
     _verify_master_password_async,
 )
+from shared.paths import gw_root
+from shared.proc_rpc import ProcClient
 
 
 def _wipe_all_state() -> None:
@@ -88,7 +88,8 @@ def cmd_update(args):
                 },
             )
             result = res.get("result", {})
-            secrets_changed = bool((((result.get("plan") or {}).get("changes") or {}).get("secrets") or {}).get("increased"))
+            secrets_changed = bool(
+                (((result.get("plan") or {}).get("changes") or {}).get("secrets") or {}).get("increased"))
             if result.get("ok") and result.get("mode") == "skipped":
                 return True, "No component version increased; update skipped. Use --force to reinstall anyway.", False
             return bool(result.get("ok")), "", secrets_changed
@@ -109,7 +110,8 @@ def cmd_update(args):
             cmd_start(argparse.Namespace(master_password=start_mp))
             if not start_mp:
                 print("Note: services restarted without master password; vault may remain locked until /unlock.")
-                _notify_sheriff_channel("🔒 Sheriff updated (secrets changed) and restarted; send /unlock <master_password>.")
+                _notify_sheriff_channel(
+                    "🔒 Sheriff updated (secrets changed) and restarted; send /unlock <master_password>.")
             else:
                 _notify_sheriff_channel("✅ Sheriff update completed (secrets changed) and services restarted unlocked.")
         else:

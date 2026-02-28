@@ -88,11 +88,13 @@ class SheriffGatewayService:
                 _, u = await self.secrets.request("secrets.unlock", {"master_password": supplied_mp})
                 if u.get("result", {}).get("ok"):
                     _, unlocked = await self.secrets.request("secrets.is_unlocked", {})
-                    vault_known_locked = unlocked.get("ok") is True and unlocked.get("result", {}).get("unlocked") is False
+                    vault_known_locked = unlocked.get("ok") is True and unlocked.get("result", {}).get(
+                        "unlocked") is False
             if vault_known_locked:
                 msg = "🔒 Sheriff vault is locked. Run /unlock <master_password> first."
                 await emit_event("assistant.final", {"text": msg})
-                append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl", {"role": "assistant", "content": msg})
+                append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl",
+                             {"role": "assistant", "content": msg})
                 return {"status": "locked", "session_handle": session}
 
         if unlocked.get("ok") is True and unlocked.get("result", {}).get("unlocked"):
@@ -101,7 +103,8 @@ class SheriffGatewayService:
                 if not debug_mode:
                     msg = "Sheriff could not read LLM provider from vault."
                     await emit_event("assistant.final", {"text": msg})
-                    append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl", {"role": "assistant", "content": msg})
+                    append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl",
+                                 {"role": "assistant", "content": msg})
                     return {"status": "provider_error", "session_handle": session}
             else:
                 provider_name = prov.get("result", {}).get("provider") or provider_name
@@ -114,13 +117,19 @@ class SheriffGatewayService:
                     if not api_key and not debug_mode:
                         msg = "OpenAI API key missing. Run: sheriff configure-llm --provider openai-codex"
                         await emit_event("assistant.final", {"text": msg})
-                        append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl", {"role": "assistant", "content": msg})
+                        append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl",
+                                     {"role": "assistant", "content": msg})
                         return {"status": "llm_key_missing", "session_handle": session}
 
                 _, cstate = await self.secrets.request("secrets.codex_state.get", {})
                 codex_state_b64 = cstate.get("result", {}).get("bundle_b64") or ""
 
-        stream, final = await self.ai.request("agent.session.user_message", {"session_handle": session, "text": text, "model_ref": payload.get("model_ref"), "provider_name": provider_name, "api_key": api_key, "base_url": base_url, "codex_state_b64": codex_state_b64}, stream_events=True)
+        stream, final = await self.ai.request("agent.session.user_message", {"session_handle": session, "text": text,
+                                                                             "model_ref": payload.get("model_ref"),
+                                                                             "provider_name": provider_name,
+                                                                             "api_key": api_key, "base_url": base_url,
+                                                                             "codex_state_b64": codex_state_b64},
+                                              stream_events=True)
         saw_final = False
         delta_parts: list[str] = []
         event_counts: dict[str, int] = {}
@@ -134,7 +143,10 @@ class SheriffGatewayService:
             if ev == "tool.call":
                 result = await self._route_tool(principal_id, frame.get("payload", {}))
                 await emit_event("tool.result", result)
-                await self.ai.request("agent.session.tool_result", {"session_handle": session, "tool_name": frame["payload"].get("tool_name", "tool"), "result": result})
+                await self.ai.request("agent.session.tool_result", {"session_handle": session,
+                                                                    "tool_name": frame["payload"].get("tool_name",
+                                                                                                      "tool"),
+                                                                    "result": result})
                 continue
             if ev == "assistant.final":
                 saw_final = True
@@ -160,7 +172,8 @@ class SheriffGatewayService:
             err = final_res.get("error") or "unknown_error"
             msg = f"AI worker error: {err}"
             await emit_event("assistant.final", {"text": msg})
-            append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl", {"role": "assistant", "content": msg})
+            append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl",
+                         {"role": "assistant", "content": msg})
             return {"status": "ai_error", "session_handle": session}
 
         if not saw_final:
@@ -169,7 +182,8 @@ class SheriffGatewayService:
             else:
                 msg = "AI produced no final response."
             await emit_event("assistant.final", {"text": msg})
-            append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl", {"role": "assistant", "content": msg})
+            append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl",
+                         {"role": "assistant", "content": msg})
 
         return {"status": "done", "session_handle": session}
 
@@ -177,7 +191,9 @@ class SheriffGatewayService:
         channel = payload.get("channel", "cli")
         principal_id = principal_id_for_channel(channel, payload["principal_external_id"])
         queue_id = str(uuid.uuid4())
-        append_jsonl(gw_root() / "state" / "message_queue.jsonl", {"event": "enqueue", "principal_id": principal_id, "queue_id": queue_id, "text": payload.get("text", "")})
+        append_jsonl(gw_root() / "state" / "message_queue.jsonl",
+                     {"event": "enqueue", "principal_id": principal_id, "queue_id": queue_id,
+                      "text": payload.get("text", "")})
 
         cond = await self._ensure_queue_cond()
         async with cond:
@@ -192,7 +208,8 @@ class SheriffGatewayService:
 
         try:
             out = await self._process_message(principal_id, payload, emit_event)
-            append_jsonl(gw_root() / "state" / "message_queue.jsonl", {"event": "dequeue", "principal_id": principal_id, "queue_id": queue_id})
+            append_jsonl(gw_root() / "state" / "message_queue.jsonl",
+                         {"event": "dequeue", "principal_id": principal_id, "queue_id": queue_id})
             return out
         finally:
             async with cond:
@@ -213,7 +230,8 @@ class SheriffGatewayService:
         if tool_name == "secure.secret.ensure":
             _, res = await self.secrets.request("secrets.ensure_handle", payload)
             if not res.get("ok", True):
-                return {"status": "needs_secret", "handle": payload.get("handle"), "error": res.get("error", "secrets_unavailable")}
+                return {"status": "needs_secret", "handle": payload.get("handle"),
+                        "error": res.get("error", "secrets_unavailable")}
             if res.get("result", {}).get("ok"):
                 return {"status": "available"}
             return {"status": "needs_secret", "handle": payload.get("handle")}
@@ -234,7 +252,8 @@ class SheriffGatewayService:
 
     async def queue_status(self, payload, emit_event, req_id):
         pending = sum(len(v) for v in self._queue.values())
-        return {"paused": self._queue_paused, "pause_reason": self._queue_pause_reason, "processing": len(self._processing), "pending": pending}
+        return {"paused": self._queue_paused, "pause_reason": self._queue_pause_reason,
+                "processing": len(self._processing), "pending": pending}
 
     async def verify_master_password(self, payload, emit_event, req_id):
         master_password = payload.get("master_password") or ""
@@ -261,7 +280,7 @@ class SheriffGatewayService:
         append_jsonl(
             gw_root() / "state" / "transcripts" / f"{session_handle}.jsonl",
             {"role": "tool", "name": "requests.resolved", "content": result},
-            )
+        )
         return {"status": "notified", "session_handle": session_handle}
 
     def ops(self):

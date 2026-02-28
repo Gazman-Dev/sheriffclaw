@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import getpass
 import json
@@ -10,10 +9,7 @@ import os
 import subprocess
 import sys
 import time
-from pathlib import Path
 
-from shared.paths import gw_root
-from shared.proc_rpc import ProcClient
 from services.sheriff_ctl.service_runner import MANAGED_SERVICES, SERVICE_MANAGER
 from services.sheriff_ctl.utils import (
     OPLOG,
@@ -22,6 +18,8 @@ from services.sheriff_ctl.utils import (
     _is_onboarded,
     _save_telegram_unlock_channel,
 )
+from shared.paths import gw_root
+from shared.proc_rpc import ProcClient
 
 
 def cmd_onboard(args):
@@ -144,7 +142,8 @@ def cmd_onboard(args):
                     print("\nBrowser login in progress. Complete login, then press Enter here.")
                     input("Press Enter after finishing login in browser...")
 
-                    st = subprocess.run(["codex", "login", "status"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)  # noqa: S603
+                    st = subprocess.run(["codex", "login", "status"], env=env, stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL, check=False)  # noqa: S603
                     if st.returncode != 0:
                         if proc.poll() is None:
                             proc.terminate()
@@ -182,7 +181,8 @@ def cmd_onboard(args):
     llm_bot = args.llm_bot_token
     if llm_bot is None:
         if keep_unchanged and existing.get("llm_bot_token"):
-            llm_bot = input("Telegram AI bot token (Enter=keep unchanged): ").strip() or existing.get("llm_bot_token", "")
+            llm_bot = input("Telegram AI bot token (Enter=keep unchanged): ").strip() or existing.get("llm_bot_token",
+                                                                                                      "")
         else:
             llm_bot = input("Telegram AI bot token (BotFather): ").strip()
 
@@ -229,11 +229,12 @@ def cmd_onboard(args):
                     timeout=30,
                 )
                 data = resp.json()
-                updates = data.get("result", []) if isinstance(data, dict) else[]
-                OPLOG.info("activation[%s] getUpdates status=%s count=%s offset=%s", role, resp.status_code, len(updates), offset)
+                updates = data.get("result", []) if isinstance(data, dict) else []
+                OPLOG.info("activation[%s] getUpdates status=%s count=%s offset=%s", role, resp.status_code,
+                           len(updates), offset)
             except Exception as e:
                 OPLOG.exception("activation[%s] getUpdates failed: %s", role, e)
-                updates =[]
+                updates = []
 
             for upd in updates:
                 update_id = int(upd.get("update_id", 0))
@@ -260,12 +261,14 @@ def cmd_onboard(args):
                 bound = await _gw_secrets_call("secrets.activation.status", {"bot_role": role}, gw=gw)
                 bound_uid = bound.get("user_id")
                 if bound_uid and str(bound_uid) == user_id:
-                    OPLOG.info("activation[%s] skip update id=%s reason=already_bound user_id=%s", role, update_id, user_id)
+                    OPLOG.info("activation[%s] skip update id=%s reason=already_bound user_id=%s", role, update_id,
+                               user_id)
                     continue
 
                 code = sent_codes.get(user_id)
                 if not code:
-                    c = await _gw_secrets_call("secrets.activation.create", {"bot_role": role, "user_id": user_id}, gw=gw)
+                    c = await _gw_secrets_call("secrets.activation.create", {"bot_role": role, "user_id": user_id},
+                                               gw=gw)
                     code = c.get("code")
                     if not code:
                         OPLOG.warning("activation[%s] failed to create code user_id=%s response=%s", role, user_id, c)
@@ -280,7 +283,8 @@ def cmd_onboard(args):
                             json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
                             timeout=15,
                         )
-                        OPLOG.info("activation[%s] send code chat_id=%s status=%s body=%s", role, chat_id, s.status_code, (s.text or "")[:300])
+                        OPLOG.info("activation[%s] send code chat_id=%s status=%s body=%s", role, chat_id,
+                                   s.status_code, (s.text or "")[:300])
                     except Exception as e:
                         OPLOG.exception("activation[%s] send code failed chat_id=%s err=%s", role, chat_id, e)
 
@@ -300,12 +304,15 @@ def cmd_onboard(args):
                         try:
                             s = requests.post(
                                 f"https://api.telegram.org/bot{token}/sendMessage",
-                                json={"chat_id": ok_chat, "text": "✅ Activated. You can chat now.", "disable_web_page_preview": True},
+                                json={"chat_id": ok_chat, "text": "✅ Activated. You can chat now.",
+                                      "disable_web_page_preview": True},
                                 timeout=15,
                             )
-                            OPLOG.info("activation[%s] send success message chat_id=%s status=%s", role, ok_chat, s.status_code)
+                            OPLOG.info("activation[%s] send success message chat_id=%s status=%s", role, ok_chat,
+                                       s.status_code)
                         except Exception as e:
-                            OPLOG.exception("activation[%s] send success message failed chat_id=%s err=%s", role, ok_chat, e)
+                            OPLOG.exception("activation[%s] send success message failed chat_id=%s err=%s", role,
+                                            ok_chat, e)
                     return True
                 print("Invalid code, try again.")
             else:
@@ -370,7 +377,8 @@ def cmd_onboard(args):
         gate_tok = gate_bot
         if gate_tok is None:
             if keep_unchanged and existing.get("gate_bot_token"):
-                gate_tok = input("Telegram Sheriff bot token (Enter=keep unchanged): ").strip() or existing.get("gate_bot_token", "")
+                gate_tok = input("Telegram Sheriff bot token (Enter=keep unchanged): ").strip() or existing.get(
+                    "gate_bot_token", "")
             else:
                 gate_tok = input("Telegram Sheriff bot token (BotFather): ").strip()
 
@@ -395,7 +403,8 @@ def cmd_onboard(args):
         else:
             if keep_unchanged and "allow_telegram_master_password" in existing:
                 cur = "Y" if existing.get("allow_telegram_master_password") else "N"
-                ans = input(f"Allow sending master password via Telegram to unlock?[y/N] (Enter=keep {cur}): ").strip().lower()
+                ans = input(
+                    f"Allow sending master password via Telegram to unlock?[y/N] (Enter=keep {cur}): ").strip().lower()
                 if not ans:
                     allow_tg = bool(existing.get("allow_telegram_master_password"))
                 else:

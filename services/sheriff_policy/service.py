@@ -20,11 +20,13 @@ class SheriffPolicyService:
         return {"decision": decision}
 
     async def set_decision(self, payload, emit_event, req_id):
-        self.store.set_decision(payload["principal_id"], payload["resource_type"], payload["resource_value"], payload["decision"])
+        self.store.set_decision(payload["principal_id"], payload["resource_type"], payload["resource_value"],
+                                payload["decision"])
         return {"status": "saved"}
 
     async def request_permission(self, payload, emit_event, req_id):
-        return self.gate.request_permission(payload["principal_id"], payload["resource_type"], payload["resource_value"], payload.get("metadata"))
+        return self.gate.request_permission(payload["principal_id"], payload["resource_type"],
+                                            payload["resource_value"], payload.get("metadata"))
 
     async def apply_callback(self, payload, emit_event, req_id):
         item = self.gate.apply_callback(payload["approval_id"], payload["action"])

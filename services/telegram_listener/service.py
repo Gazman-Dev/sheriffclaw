@@ -184,7 +184,8 @@ class TelegramListenerService:
 
         result_obj = (final_res or {}).get("result", {}) if isinstance(final_res, dict) else {}
         status_obj = result_obj.get("status")
-        self.log.info("ai gateway final status=%s has_reply=%s delta_parts=%s", status_obj, bool(reply), len(delta_parts))
+        self.log.info("ai gateway final status=%s has_reply=%s delta_parts=%s", status_obj, bool(reply),
+                      len(delta_parts))
         if status_obj == "locked":
             # Always notify on Sheriff channel too, so user can unlock right there.
             msg = "🔒 Vault is locked. Open the Sheriff bot and send: /unlock <master_password>"

@@ -24,7 +24,9 @@ class SheriffWebService:
     async def request(self, payload, emit_event, req_id):
         principal_id = payload["principal_id"]
         host = payload["host"]
-        _, dec = await self.policy.request("policy.get_decision", {"principal_id": principal_id, "resource_type": "domain", "resource_value": host})
+        _, dec = await self.policy.request("policy.get_decision",
+                                           {"principal_id": principal_id, "resource_type": "domain",
+                                            "resource_value": host})
         decision = dec["result"].get("decision")
         if decision != "ALLOW":
             return {"status": "needs_domain_approval", "host": host}

@@ -1,6 +1,9 @@
-import pytest
 import sys
+
+import pytest
+
 from shared.tools_exec import ToolExecutor
+
 
 def test_tool_exec_rejects_shell_operators(tmp_path):
     executor = ToolExecutor(tmp_path)
@@ -13,6 +16,7 @@ def test_tool_exec_rejects_shell_operators(tmp_path):
     with pytest.raises(ValueError, match="shell tokens"):
         executor.exec(["ls", ";", "rm", "-rf", "/"])
 
+
 def test_tool_exec_runs_subprocess(tmp_path):
     executor = ToolExecutor(tmp_path)
     # FIXED: Use sys.executable for cross-platform safety
@@ -20,6 +24,7 @@ def test_tool_exec_runs_subprocess(tmp_path):
 
     assert res["code"] == 0
     assert "hello world" in res["stdout"]
+
 
 def test_tool_save_load_output(tmp_path):
     executor = ToolExecutor(tmp_path)

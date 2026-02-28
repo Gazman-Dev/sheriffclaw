@@ -39,7 +39,7 @@ class SkillLoader:
                     name=name,
                     description=raw.get("description", ""),
                     command=raw.get("command", f"bash {skill_dir.name}/run.sh"),
-                    tags=raw.get("tags",[]),
+                    tags=raw.get("tags", []),
                     source=source,
                     root=skill_dir,
                 )

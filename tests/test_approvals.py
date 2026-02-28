@@ -1,5 +1,6 @@
 from shared.approvals import ApprovalGate
 
+
 def test_approval_request_lifecycle():
     gate = ApprovalGate()
 
@@ -26,6 +27,7 @@ def test_approval_request_lifecycle():
     # Cannot consume twice
     assert gate.consume_one_off(approval_id) is False
 
+
 def test_approval_deny():
     gate = ApprovalGate()
     req = gate.request_permission("user1", "tool", "exec")
@@ -36,6 +38,7 @@ def test_approval_deny():
     assert approval_id not in gate.pending
     assert approval_id not in gate.one_off
     assert gate.consume_one_off(approval_id) is False
+
 
 def test_unknown_approval_id():
     gate = ApprovalGate()

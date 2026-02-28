@@ -9,7 +9,8 @@ async def test_updater_skips_when_versions_not_increased(monkeypatch, tmp_path):
     repo.mkdir()
     (repo / "versions.json").write_text('{"agent":"1.0.0","sheriff":"1.0.0","secrets":"1.0.0"}\n', encoding="utf-8")
 
-    monkeypatch.setattr("services.sheriff_updater.service.load_applied_versions", lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"})
+    monkeypatch.setattr("services.sheriff_updater.service.load_applied_versions",
+                        lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"})
 
     saved = {}
 
@@ -47,7 +48,8 @@ async def test_updater_force_updates_even_without_version_increase(monkeypatch, 
     repo.mkdir()
     (repo / "versions.json").write_text('{"agent":"1.0.0","sheriff":"1.0.0","secrets":"1.0.0"}\n', encoding="utf-8")
 
-    monkeypatch.setattr("services.sheriff_updater.service.load_applied_versions", lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"})
+    monkeypatch.setattr("services.sheriff_updater.service.load_applied_versions",
+                        lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"})
 
     saved = {}
 
@@ -84,7 +86,8 @@ async def test_updater_requires_master_password_when_secrets_version_increased(m
     repo.mkdir()
     (repo / "versions.json").write_text('{"agent":"1.0.0","sheriff":"1.0.0","secrets":"1.0.1"}\n', encoding="utf-8")
 
-    monkeypatch.setattr("services.sheriff_updater.service.load_applied_versions", lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"})
+    monkeypatch.setattr("services.sheriff_updater.service.load_applied_versions",
+                        lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"})
 
     def fake_run(cmd, check=False):
         class P:
@@ -108,7 +111,8 @@ async def test_updater_does_not_require_master_password_when_only_non_secrets_in
     repo.mkdir()
     (repo / "versions.json").write_text('{"agent":"1.0.1","sheriff":"1.0.0","secrets":"1.0.0"}\n', encoding="utf-8")
 
-    monkeypatch.setattr("services.sheriff_updater.service.load_applied_versions", lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"})
+    monkeypatch.setattr("services.sheriff_updater.service.load_applied_versions",
+                        lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"})
 
     calls = []
 

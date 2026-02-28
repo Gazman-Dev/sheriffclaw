@@ -1,10 +1,13 @@
 import pytest
+
 from services.sheriff_policy.service import SheriffPolicyService
+
 
 @pytest.fixture
 def policy_svc(tmp_path, monkeypatch):
     monkeypatch.setattr("services.sheriff_policy.service.gw_root", lambda: tmp_path)
     return SheriffPolicyService()
+
 
 @pytest.mark.asyncio
 async def test_policy_get_set_decision(policy_svc):
@@ -30,6 +33,7 @@ async def test_policy_get_set_decision(policy_svc):
         "resource_value": "example.com"
     }, None, "r3")
     assert res["decision"] == "ALLOW"
+
 
 @pytest.mark.asyncio
 async def test_policy_fallback_to_default(policy_svc):
@@ -63,6 +67,7 @@ async def test_policy_fallback_to_default(policy_svc):
         "resource_value": "global.com"
     }, None, "r4")
     assert res["decision"] == "DENY"
+
 
 @pytest.mark.asyncio
 async def test_policy_approval_request(policy_svc):

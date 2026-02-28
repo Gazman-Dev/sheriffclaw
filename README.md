@@ -10,7 +10,8 @@ Pre‑Alpha — **Do not install in production yet**
 
 Sheriff Claw lets you use powerful AI agents **without giving them access to your secrets or your system**.
 
-It is a **safe, controlled alternative to Open Claw**, built for people who want real AI power *without* losing control, privacy, or security.
+It is a **safe, controlled alternative to Open Claw**, built for people who want real AI power *without* losing control,
+privacy, or security.
 
 ---
 
@@ -237,7 +238,6 @@ Examples:
 * `/status`
 * `/ yes I agree`
 * `what should I automate next?`
-
 
 ---
 

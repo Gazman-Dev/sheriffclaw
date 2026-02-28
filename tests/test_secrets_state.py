@@ -1,6 +1,7 @@
-import json
 import pytest
+
 from shared.secrets_state import SecretsState
+
 
 def test_secrets_initialize_and_verify(tmp_path, monkeypatch):
     monkeypatch.setenv("SHERIFF_DEBUG", "0")
@@ -13,6 +14,7 @@ def test_secrets_initialize_and_verify(tmp_path, monkeypatch):
     assert state.verify_master_password("correct-horse")
     assert not state.verify_master_password("wrong")
     assert enc_path.exists()
+
 
 def test_secrets_encryption_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setenv("SHERIFF_DEBUG", "0")
@@ -40,6 +42,7 @@ def test_secrets_encryption_roundtrip(tmp_path, monkeypatch):
     assert s2.get_llm_api_key() == "key-123"
     assert s2.get_secret("gh") == "token"
 
+
 def test_locking_clears_memory(tmp_path, monkeypatch):
     monkeypatch.setenv("SHERIFF_DEBUG", "0")
     state = SecretsState(tmp_path / "s.enc", tmp_path / "m.json")
@@ -52,6 +55,7 @@ def test_locking_clears_memory(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match="locked"):
         state.get_secret("k")
+
 
 def test_ensure_handle(tmp_path, monkeypatch):
     monkeypatch.setenv("SHERIFF_DEBUG", "0")

@@ -2,5 +2,11 @@
   "skill_id": "search_memory",
   "description": "Searches past conversation history and transcripts for context and previous mentions.",
   "command": "python skills/search_memory/run.py",
-  "tags": ["history", "memory", "transcripts", "recall", "past"]
+  "tags": [
+    "history",
+    "memory",
+    "transcripts",
+    "recall",
+    "past"
+  ]
 }

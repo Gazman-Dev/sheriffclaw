@@ -10,6 +10,7 @@ def test_no_legacy_skill_py_files():
         if "interface.py" in p.name and p.read_text().strip() and not p.read_text().startswith("#"):
             raise AssertionError(f"legacy interface.py not allowed in code-first paradigm: {p}")
 
+
 def test_skills_have_manifests():
     root = Path("skills")
     for d in root.iterdir():

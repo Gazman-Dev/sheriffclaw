@@ -2,5 +2,10 @@
   "skill_id": "write_docs",
   "description": "Write or improve documentation for modules and features",
   "command": "echo 'write_docs skill not implemented as code yet'",
-  "tags": ["docs", "documentation", "readme", "guide"]
+  "tags": [
+    "docs",
+    "documentation",
+    "readme",
+    "guide"
+  ]
 }

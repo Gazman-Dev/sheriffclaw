@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import sys
 import math
+import sys
 from pathlib import Path
 
 # Add repo root to sys.path so we can import shared modules easily
@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 from shared.skills.loader import SkillLoader
 from shared.memory.embedding import LocalSemanticEmbeddingProvider
 
+
 def cosine_similarity(v1, v2):
     dot = sum(a * b for a, b in zip(v1, v2))
     norm1 = math.sqrt(sum(a * a for a in v1))
@@ -18,6 +19,7 @@ def cosine_similarity(v1, v2):
     if norm1 == 0 or norm2 == 0:
         return 0.0
     return dot / (norm1 * norm2)
+
 
 def main():
     query = " ".join(sys.argv[1:]).strip()
@@ -36,7 +38,7 @@ def main():
 
     query_vec = provider.embed(query)
 
-    results =[]
+    results = []
     for name, skill in skills.items():
         if name == "search_skills":
             continue
@@ -62,6 +64,7 @@ def main():
 
     if not found:
         print("No highly relevant skills found. Consider manually reading files in the skills/ directory.")
+
 
 if __name__ == "__main__":
     main()

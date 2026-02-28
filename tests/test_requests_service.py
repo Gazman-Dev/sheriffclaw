@@ -1,7 +1,7 @@
 import json
+from unittest.mock import AsyncMock
 
 import pytest
-from unittest.mock import AsyncMock
 
 from services.sheriff_requests.service import SheriffRequestsService
 
@@ -48,7 +48,8 @@ class FakeSemanticEmbedding:
 @pytest.fixture
 def requests_svc(tmp_path, monkeypatch):
     monkeypatch.setattr("services.sheriff_requests.service.gw_root", lambda: tmp_path)
-    monkeypatch.setattr("services.sheriff_requests.service.SheriffRequestsService._embedding_function", staticmethod(lambda: FakeSemanticEmbedding()))
+    monkeypatch.setattr("services.sheriff_requests.service.SheriffRequestsService._embedding_function",
+                        staticmethod(lambda: FakeSemanticEmbedding()))
     svc = SheriffRequestsService()
     svc.tg_gate = AsyncMock()
     svc.secrets = AsyncMock()
@@ -61,7 +62,8 @@ def requests_svc(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_fuzzy_semantic_search_uses_chroma(requests_svc):
     await requests_svc.create_or_update(
-        {"type": "secret", "key": "gh_token", "one_liner": "Need GitHub credential for repo sync", "context": {"feature": "sync"}},
+        {"type": "secret", "key": "gh_token", "one_liner": "Need GitHub credential for repo sync",
+         "context": {"feature": "sync"}},
         None,
         "r1",
     )
@@ -124,7 +126,7 @@ async def test_approved_entry_is_immutable_but_resilient(requests_svc):
 
     got = await requests_svc.get({"type": "secret", "key": "gh_token"}, None, "r4")
     assert got["status"] == "approved"
-    assert got["one_liner"] == "Need GitHub token" # Unchanged
+    assert got["one_liner"] == "Need GitHub token"  # Unchanged
 
     # 3. Verify spam reduction: tg_gate.request should have been called only once (for r1)
     # The subsequent call (r3) should not trigger a notification because it's immutable.
@@ -156,6 +158,7 @@ async def test_boot_check_uses_master_policy_file(requests_svc, tmp_path):
 
     out = await requests_svc.boot_check({}, None, "r1")
     assert out["status"] == "master_password_required"
+
 
 @pytest.mark.asyncio
 async def test_boot_check_disabled_policy_returns_ok(requests_svc, tmp_path):

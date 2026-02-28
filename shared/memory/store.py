@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -108,7 +107,8 @@ class TopicStore:
                 topic["aliases"] = merged_aliases
                 topic["one_liner"] = one_liner or topic.get("one_liner", "")
                 topic.setdefault("time", {})["last_seen_at"] = now_iso
-                stats = topic.setdefault("stats", {"utility_score": 0.0, "touch_count": 0, "last_utility_update_at": ""})
+                stats = topic.setdefault("stats",
+                                         {"utility_score": 0.0, "touch_count": 0, "last_utility_update_at": ""})
                 stats["touch_count"] = int(stats.get("touch_count", 0)) + 1
                 topics[idx] = topic
                 self._save(topics)
@@ -116,7 +116,7 @@ class TopicStore:
 
         topic = Topic(
             schema_version=1,
-            topic_id=f"topic-{len(topics)+1}",
+            topic_id=f"topic-{len(topics) + 1}",
             name=name,
             one_liner=one_liner,
             aliases=sorted(set(aliases)),
@@ -129,22 +129,22 @@ class TopicStore:
 
     # Edge CRUD
     def upsert_edge(
-        self,
-        from_topic_id: str,
-        to_topic_id: str,
-        edge_type: EdgeType | str,
-        weight: float,
-        last_updated_at: str,
-        mode: str = "set",
-        max_weight: float = 5.0,
+            self,
+            from_topic_id: str,
+            to_topic_id: str,
+            edge_type: EdgeType | str,
+            weight: float,
+            last_updated_at: str,
+            mode: str = "set",
+            max_weight: float = 5.0,
     ) -> dict:
         et = edge_type.value if isinstance(edge_type, EdgeType) else str(edge_type)
         edges = self._load_edges()
         for i, e in enumerate(edges):
             if (
-                e.get("from_topic_id") == from_topic_id
-                and e.get("to_topic_id") == to_topic_id
-                and e.get("edge_type") == et
+                    e.get("from_topic_id") == from_topic_id
+                    and e.get("to_topic_id") == to_topic_id
+                    and e.get("edge_type") == et
             ):
                 cur = float(e.get("weight", 0.0))
                 if mode == "add":
@@ -182,15 +182,15 @@ class TopicStore:
 
     # Compatibility + higher-level linker used by runtime/tools
     def link_topics(
-        self,
-        from_topic_id: str,
-        to_topic_id: str,
-        edge_type: EdgeType | str,
-        weight: float,
-        now_iso: str,
-        mode: str = "add",
-        bidirectional_relates: bool = True,
-        max_weight: float = 5.0,
+            self,
+            from_topic_id: str,
+            to_topic_id: str,
+            edge_type: EdgeType | str,
+            weight: float,
+            now_iso: str,
+            mode: str = "add",
+            bidirectional_relates: bool = True,
+            max_weight: float = 5.0,
     ) -> dict:
         et = edge_type.value if isinstance(edge_type, EdgeType) else str(edge_type)
         primary = self.upsert_edge(from_topic_id, to_topic_id, et, weight, now_iso, mode=mode, max_weight=max_weight)
@@ -231,9 +231,9 @@ class TopicStore:
             e
             for e in edges
             if not (
-                e.get("from_topic_id") == from_topic_id
-                and e.get("to_topic_id") == to_topic_id
-                and e.get("edge_type") == et
+                    e.get("from_topic_id") == from_topic_id
+                    and e.get("to_topic_id") == to_topic_id
+                    and e.get("edge_type") == et
             )
         ]
         if len(new_edges) == len(edges):

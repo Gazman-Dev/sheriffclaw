@@ -8,7 +8,8 @@ class ApprovalGate:
         self.pending: dict[str, dict] = {}
         self.one_off: set[str] = set()
 
-    def request_permission(self, principal_id: str, resource_type: str, resource_value: str, metadata: dict | None = None) -> dict:
+    def request_permission(self, principal_id: str, resource_type: str, resource_value: str,
+                           metadata: dict | None = None) -> dict:
         approval_id = str(uuid.uuid4())
         item = {
             "approval_id": approval_id,

@@ -1,8 +1,11 @@
 import urllib.request
-import pytest
 from unittest.mock import MagicMock
-from shared.secure_web import SecureWebRequester
+
+import pytest
+
 from shared.policy import GatewayPolicy
+from shared.secure_web import SecureWebRequester
+
 
 def test_request_https_constructs_correct_request(monkeypatch):
     monkeypatch.setenv("SHERIFF_DEBUG", "0")
@@ -22,10 +25,12 @@ def test_request_https_constructs_correct_request(monkeypatch):
 
     # Capture request
     captured_req = None
+
     def capture(req, **kwargs):
         nonlocal captured_req
         captured_req = req
         return mock_urlopen
+
     monkeypatch.setattr(urllib.request, "urlopen", capture)
 
     payload = {
@@ -56,6 +61,7 @@ def test_request_https_constructs_correct_request(monkeypatch):
     assert headers["Authorization"] == "Bearer token123"
     assert "X-Not-Allowed" not in headers  # Not in ALLOWED_HEADERS
 
+
 def test_request_https_enforces_ssrf_policy(monkeypatch):
     monkeypatch.setenv("SHERIFF_DEBUG", "0")
     # With the new flow, SecureWebRequester still calls policy.validate_host,
@@ -63,7 +69,8 @@ def test_request_https_enforces_ssrf_policy(monkeypatch):
     policy = GatewayPolicy()
 
     # Mock validate_host to raise to simulate SSRF detection
-    monkeypatch.setattr(policy, "validate_host", MagicMock(side_effect=ValueError("host resolved to private/link-local address")))
+    monkeypatch.setattr(policy, "validate_host",
+                        MagicMock(side_effect=ValueError("host resolved to private/link-local address")))
 
     requester = SecureWebRequester(policy)
 

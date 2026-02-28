@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
 from shared.memory.embedding import LocalSemanticEmbeddingProvider
 from shared.memory.semantic_index import HnswlibSemanticIndex
 
+
 def main():
     query = " ".join(sys.argv[1:]).strip()
     if not query:
@@ -40,6 +41,7 @@ def main():
         if transcript_file.exists():
             print(transcript_file.read_text(encoding="utf-8"))
             print("-" * 30)
+
 
 if __name__ == "__main__":
     main()

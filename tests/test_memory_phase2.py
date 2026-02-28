@@ -1,4 +1,5 @@
 import pytest
+
 pytest.importorskip("hnswlib")
 from datetime import datetime, timezone
 

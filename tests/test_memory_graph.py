@@ -1,4 +1,5 @@
 import pytest
+
 pytest.importorskip("hnswlib")
 from datetime import datetime, timedelta, timezone
 
@@ -105,7 +106,7 @@ def test_graph_linkage_and_expansion(tmp_path):
     retrieved_ids = [t["topic_id"] for t in res.topics]
 
     assert "A" in retrieved_ids
-    assert "B" in retrieved_ids # Pulled in via 1-hop graph expansion
+    assert "B" in retrieved_ids  # Pulled in via 1-hop graph expansion
 
 
 def test_sleep_co_activation_creates_links(tmp_path):

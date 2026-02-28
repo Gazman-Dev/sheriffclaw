@@ -12,6 +12,7 @@ from shared.memory.semantic_index import HnswlibSemanticIndex
 from shared.memory.store import TopicStore
 from shared.memory.retrieval import render_topic_md
 
+
 def main():
     query = " ".join(sys.argv[1:]).strip()
     if not query:
@@ -43,6 +44,7 @@ def main():
             print(f"[Score: {score:.2f}]")
             print(render_topic_md(topic))
             print("-" * 30)
+
 
 if __name__ == "__main__":
     main()

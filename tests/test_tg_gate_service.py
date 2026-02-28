@@ -1,4 +1,5 @@
 import pytest
+
 from services.sheriff_tg_gate.service import SheriffTgGateService
 
 
@@ -22,6 +23,7 @@ def tg_gate_svc(tmp_path, monkeypatch):
     svc.gateway = FakeRPC()
     return svc
 
+
 @pytest.mark.asyncio
 async def test_gate_applies_callback(tg_gate_svc):
     tg_gate_svc.policy = FakeRPC(responses=[(None, {"result": {"status": "recorded"}})])
@@ -34,6 +36,7 @@ async def test_gate_applies_callback(tg_gate_svc):
     assert res["status"] == "recorded"
     assert tg_gate_svc.policy.calls == [("policy.apply_callback", {"approval_id": "123", "action": "allow"})]
 
+
 @pytest.mark.asyncio
 async def test_gate_submits_secret(tg_gate_svc):
     tg_gate_svc.gateway = FakeRPC(responses=[(None, {"result": {"status": "saved"}})])
@@ -44,7 +47,9 @@ async def test_gate_submits_secret(tg_gate_svc):
     }, None, "r1")
 
     assert res["status"] == "saved"
-    assert tg_gate_svc.gateway.calls == [("gateway.secrets.call", {"op": "secrets.set_secret", "payload": {"handle": "gh", "value": "123"}})]
+    assert tg_gate_svc.gateway.calls == [
+        ("gateway.secrets.call", {"op": "secrets.set_secret", "payload": {"handle": "gh", "value": "123"}})]
+
 
 @pytest.mark.asyncio
 async def test_gate_logs_requests(tg_gate_svc, tmp_path):

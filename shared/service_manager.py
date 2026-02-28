@@ -10,10 +10,10 @@ from pathlib import Path
 
 class ServiceManager:
     def __init__(
-        self,
-        command_for: Callable[[str], list[str]],
-        pid_path_for: Callable[[str], Path],
-        log_paths_for: Callable[[str], tuple[Path, Path]],
+            self,
+            command_for: Callable[[str], list[str]],
+            pid_path_for: Callable[[str], Path],
+            log_paths_for: Callable[[str], tuple[Path, Path]],
     ) -> None:
         self._command_for = command_for
         self._pid_path_for = pid_path_for

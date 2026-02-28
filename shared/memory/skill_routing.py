@@ -21,7 +21,7 @@ class SkillManifestLoader:
         self.skills_root = skills_root
 
     def load(self) -> list[SkillManifest]:
-        manifests: list[SkillManifest] =[]
+        manifests: list[SkillManifest] = []
         if not self.skills_root.exists():
             return manifests
 
@@ -37,7 +37,7 @@ class SkillManifestLoader:
                         name=raw.get("name", skill_dir.name),
                         description=raw.get("description", ""),
                         tags=list(raw.get("tags", [])),
-                        requires_tools=list(raw.get("requires_tools",[])),
+                        requires_tools=list(raw.get("requires_tools", [])),
                         command=str(raw.get("command", "")),
                         default_reasoning_effort=raw.get("default_reasoning_effort", "medium"),
                     )
@@ -58,18 +58,18 @@ class SkillManifestLoader:
 
 
 LIGHT_SKILL_RULES = {
-    "docs":["doc", "docs", "documentation", "readme", "wiki"],
-    "debug":["error", "traceback", "stack trace", "exception", "bug", "failing"],
-    "refactor":["refactor", "rewrite", "restructure", "cleanup"],
+    "docs": ["doc", "docs", "documentation", "readme", "wiki"],
+    "debug": ["error", "traceback", "stack trace", "exception", "bug", "failing"],
+    "refactor": ["refactor", "rewrite", "restructure", "cleanup"],
     "tests": ["test", "tests", "pytest", "failing test"],
 }
 
 DEEP_SKILL_TRIGGERS = {
-    "repo-edit":["edit", "change", "modify", "update file", "across modules"],
+    "repo-edit": ["edit", "change", "modify", "update file", "across modules"],
     "tests": ["run tests", "failing test", "pytest"],
     "docs": ["write docs", "documentation", "wiki", "readme"],
-    "debug":["stack trace", "traceback", "same bug", "exception"],
-    "multi-step":["plan and implement", "step by step", "multi-step", "migrate"],
+    "debug": ["stack trace", "traceback", "same bug", "exception"],
+    "multi-step": ["plan and implement", "step by step", "multi-step", "migrate"],
 }
 
 
@@ -89,7 +89,7 @@ def _score_manifest(query: str, manifest: SkillManifest) -> float:
 
 def _deep_trigger_reasons(query: str) -> list[str]:
     q = query.lower()
-    reasons: list[str] =[]
+    reasons: list[str] = []
     for reason, terms in DEEP_SKILL_TRIGGERS.items():
         if any(t in q for t in terms):
             reasons.append(reason)
@@ -108,4 +108,17 @@ def route_skills(query: str, manifests: list[SkillManifest]) -> tuple[list[Skill
     deep_reasons = _deep_trigger_reasons(query)
     deep = len(deep_reasons) > 0
     if not deep:
-        return light[:2], False,
+        # FIX: Ensure 3 values are returned (added empty list at the end)
+        return light[:2], False, []
+
+    # Complete the deep search logic
+    deep_hits = search_skills(query, manifests, k=5)
+
+    seen = {m.skill_id for m in light[:2]}
+    combined = list(light[:2])
+    for m in deep_hits:
+        if m.skill_id not in seen:
+            combined.append(m)
+            seen.add(m.skill_id)
+
+    return combined[:5], True, deep_reasons

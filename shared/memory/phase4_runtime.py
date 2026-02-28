@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -192,21 +191,88 @@ def _requests_tools(stores: RuntimeStores):
         "requests.create_or_update": r_create,
     }
 
+
 def _tool_schemas() -> list[dict]:
     return [
-        {"type": "function", "name": "topics.search", "description": "Search topics", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "k": {"type": "integer"}}, "required": ["query"]}},
-        {"type": "function", "name": "topics.get", "description": "Get topics by ids", "parameters": {"type": "object", "properties": {"topic_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["topic_ids"]}},
-        {"type": "function", "name": "topics.upsert", "description": "Upsert topic", "parameters": {"type": "object", "properties": {"name": {"type": "string"}, "one_liner": {"type": "string"}, "aliases": {"type": "array", "items": {"type": "string"}}}, "required": ["name", "aliases"]}},
-        {"type": "function", "name": "topics.link", "description": "Link two topics", "parameters": {"type": "object", "properties": {"from_topic_id": {"type": "string"}, "to_topic_id": {"type": "string"}, "edge_type": {"type": "string", "enum": ["RELATES_TO", "DEPENDS_ON", "PART_OF"]}, "weight": {"type": "number"}, "mode": {"type": "string", "enum": ["set", "add"]}}, "required": ["from_topic_id", "to_topic_id"]}},
-        {"type": "function", "name": "memory.sleep", "description": "Compact memory", "parameters": {"type": "object", "properties": {"conversation_buffer": {"type": "array"}, "now": {"type": "string"}, "keep_tail_turns": {"type": "integer"}}, "required": ["conversation_buffer"]}},
-        {"type": "function", "name": "memory.wake", "description": "Wake and retrieve", "parameters": {"type": "object", "properties": {"wake_packet": {"type": "object"}, "user_msg": {"type": "string"}, "now": {"type": "string"}}, "required": ["wake_packet", "user_msg"]}},
-        {"type": "function", "name": "skills.search", "description": "Search skills", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
-        {"type": "function", "name": "skills.run", "description": "Run skill", "parameters": {"type": "object", "properties": {"skill_id": {"type": "string"}, "args": {"type": "object"}}, "required": ["skill_id"]}},
-        {"type": "function", "name": "repo.list_files", "description": "List repo files", "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}}}},
-        {"type": "function", "name": "repo.read_file", "description": "Read file", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
-        {"type": "function", "name": "repo.write_file", "description": "Write file", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
-        {"type": "function", "name": "requests.create_or_update", "description": "Request a secret or permission from the user", "parameters": {"type": "object", "properties": {"type": {"type": "string", "enum": ["secret", "domain", "tool"]}, "key": {"type": "string"}, "one_liner": {"type": "string"}}, "required": ["type", "key", "one_liner"]}},
-        {"type": "function", "name": "repo.run_tests", "description": "Run tests", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}}},
+        {"type": "function", "name": "topics.search", "description": "Search topics",
+         "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "k": {"type": "integer"}},
+                        "required": ["query"]}},
+        {"type": "function", "name": "topics.get", "description": "Get topics by ids",
+         "parameters": {"type": "object", "properties": {"topic_ids": {"type": "array", "items": {"type": "string"}}},
+                        "required": ["topic_ids"]}},
+        {"type": "function", "name": "topics.upsert", "description": "Upsert topic", "parameters": {"type": "object",
+                                                                                                    "properties": {
+                                                                                                        "name": {
+                                                                                                            "type": "string"},
+                                                                                                        "one_liner": {
+                                                                                                            "type": "string"},
+                                                                                                        "aliases": {
+                                                                                                            "type": "array",
+                                                                                                            "items": {
+                                                                                                                "type": "string"}}},
+                                                                                                    "required": ["name",
+                                                                                                                 "aliases"]}},
+        {"type": "function", "name": "topics.link", "description": "Link two topics", "parameters": {"type": "object",
+                                                                                                     "properties": {
+                                                                                                         "from_topic_id": {
+                                                                                                             "type": "string"},
+                                                                                                         "to_topic_id": {
+                                                                                                             "type": "string"},
+                                                                                                         "edge_type": {
+                                                                                                             "type": "string",
+                                                                                                             "enum": [
+                                                                                                                 "RELATES_TO",
+                                                                                                                 "DEPENDS_ON",
+                                                                                                                 "PART_OF"]},
+                                                                                                         "weight": {
+                                                                                                             "type": "number"},
+                                                                                                         "mode": {
+                                                                                                             "type": "string",
+                                                                                                             "enum": [
+                                                                                                                 "set",
+                                                                                                                 "add"]}},
+                                                                                                     "required": [
+                                                                                                         "from_topic_id",
+                                                                                                         "to_topic_id"]}},
+        {"type": "function", "name": "memory.sleep", "description": "Compact memory", "parameters": {"type": "object",
+                                                                                                     "properties": {
+                                                                                                         "conversation_buffer": {
+                                                                                                             "type": "array"},
+                                                                                                         "now": {
+                                                                                                             "type": "string"},
+                                                                                                         "keep_tail_turns": {
+                                                                                                             "type": "integer"}},
+                                                                                                     "required": [
+                                                                                                         "conversation_buffer"]}},
+        {"type": "function", "name": "memory.wake", "description": "Wake and retrieve", "parameters": {"type": "object",
+                                                                                                       "properties": {
+                                                                                                           "wake_packet": {
+                                                                                                               "type": "object"},
+                                                                                                           "user_msg": {
+                                                                                                               "type": "string"},
+                                                                                                           "now": {
+                                                                                                               "type": "string"}},
+                                                                                                       "required": [
+                                                                                                           "wake_packet",
+                                                                                                           "user_msg"]}},
+        {"type": "function", "name": "skills.search", "description": "Search skills",
+         "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+        {"type": "function", "name": "skills.run", "description": "Run skill",
+         "parameters": {"type": "object", "properties": {"skill_id": {"type": "string"}, "args": {"type": "object"}},
+                        "required": ["skill_id"]}},
+        {"type": "function", "name": "repo.list_files", "description": "List repo files",
+         "parameters": {"type": "object", "properties": {"pattern": {"type": "string"}}}},
+        {"type": "function", "name": "repo.read_file", "description": "Read file",
+         "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
+        {"type": "function", "name": "repo.write_file", "description": "Write file",
+         "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+                        "required": ["path", "content"]}},
+        {"type": "function", "name": "requests.create_or_update",
+         "description": "Request a secret or permission from the user", "parameters": {"type": "object", "properties": {
+            "type": {"type": "string", "enum": ["secret", "domain", "tool"]}, "key": {"type": "string"},
+            "one_liner": {"type": "string"}}, "required": ["type", "key", "one_liner"]}},
+        {"type": "function", "name": "repo.run_tests", "description": "Run tests",
+         "parameters": {"type": "object", "properties": {"command": {"type": "string"}}}},
     ]
 
 
@@ -214,7 +280,8 @@ def _to_input_message(role: str, text: str) -> dict:
     return {"role": role, "content": [{"type": "input_text", "text": text}]}
 
 
-def _make_request(model: str, reasoning_effort: str, system_prompt: str, messages: list[dict], tool_schemas: list[dict]) -> dict:
+def _make_request(model: str, reasoning_effort: str, system_prompt: str, messages: list[dict],
+                  tool_schemas: list[dict]) -> dict:
     return {
         "model": model,
         "input": [_to_input_message("system", system_prompt), *messages],

@@ -10,8 +10,6 @@ import tarfile
 from pathlib import Path
 from typing import Any
 
-import requests  # backward-compatible import target for existing tests
-
 
 class StubProvider:
     async def generate(self, messages: list[dict], model: str = "stub") -> str:
@@ -43,7 +41,8 @@ class _CodexCliBase:
         npm = shutil.which("npm")
         if not npm:
             raise RuntimeError("codex CLI missing and npm not found; install @openai/codex manually")
-        proc = subprocess.run([npm, "i", "-g", "@openai/codex"], capture_output=True, text=True, check=False)  # noqa: S603
+        proc = subprocess.run([npm, "i", "-g", "@openai/codex"], capture_output=True, text=True,
+                              check=False)  # noqa: S603
         if proc.returncode != 0 or not shutil.which("codex"):
             msg = (proc.stderr or proc.stdout or "").strip()
             raise RuntimeError(f"failed to lazy-install codex CLI: {msg}")
@@ -86,8 +85,10 @@ class _CodexCliBase:
 
         # Create a RAM disk and mount it at mount_point (best-effort idempotent).
         sectors = str(size_mb * 2048)
-        dev = subprocess.run(["hdiutil", "attach", "-nomount", f"ram://{sectors}"], capture_output=True, text=True, check=True).stdout.strip()  # noqa: S603
-        subprocess.run(["newfs_hfs", "-v", "SheriffCodexRAM", dev], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603
+        dev = subprocess.run(["hdiutil", "attach", "-nomount", f"ram://{sectors}"], capture_output=True, text=True,
+                             check=True).stdout.strip()  # noqa: S603
+        subprocess.run(["newfs_hfs", "-v", "SheriffCodexRAM", dev], check=True, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)  # noqa: S603
         subprocess.run(["mount", "-t", "hfs", dev, str(mount_point)], check=True)  # noqa: S603
 
     @staticmethod
@@ -101,7 +102,8 @@ class _CodexCliBase:
         # macOS: create dedicated RAM disk mount.
         if os.uname().sysname.lower() == "darwin":
             # Place inside llm_root() so the OS sandbox naturally permits read/write
-            p = Path(os.environ.get("SHERIFFCLAW_ROOT", Path.home() / ".sheriffclaw")).resolve() / "llm" / "run" / "codex-ram"
+            p = Path(os.environ.get("SHERIFFCLAW_ROOT",
+                                    Path.home() / ".sheriffclaw")).resolve() / "llm" / "run" / "codex-ram"
             _CodexCliBase._ensure_macos_ramdisk(p)
             return p
 
@@ -138,7 +140,8 @@ class _CodexCliBase:
             pass
 
         # Define the agent workspace explicitly
-        workspace_dir = Path(os.environ.get("SHERIFFCLAW_ROOT", Path.home() / ".sheriffclaw")).resolve() / "agent_workspace"
+        workspace_dir = Path(
+            os.environ.get("SHERIFFCLAW_ROOT", Path.home() / ".sheriffclaw")).resolve() / "agent_workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
 
         env = os.environ.copy()
@@ -192,7 +195,8 @@ class OpenAICodexProvider(_CodexCliBase):
 
 
 class ChatGPTSubscriptionCodexProvider(_CodexCliBase):
-    def __init__(self, access_token: str, base_url: str = "https://chatgpt.com/backend-api/codex", codex_state_b64: str = ""):
+    def __init__(self, access_token: str, base_url: str = "https://chatgpt.com/backend-api/codex",
+                 codex_state_b64: str = ""):
         super().__init__(codex_state_b64=codex_state_b64)
         self.access_token = access_token
         self.base_url = base_url.rstrip("/")

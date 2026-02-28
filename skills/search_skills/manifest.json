@@ -2,5 +2,10 @@
   "skill_id": "search_skills",
   "description": "Searches the available skills using semantic search.",
   "command": "python skills/search_skills/run.py",
-  "tags":["search", "skills", "tools", "help"]
+  "tags": [
+    "search",
+    "skills",
+    "tools",
+    "help"
+  ]
 }

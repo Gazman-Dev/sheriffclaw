@@ -41,7 +41,7 @@ class TelegramListenerService:
                 text = '{"ok":true}'
 
                 def json(self):
-                    return {"ok": True, "result": []}
+                    return {"ok": True, "result":[]}
 
             return _Resp()
         return requests.post(url, json=payload, timeout=timeout)
@@ -55,7 +55,7 @@ class TelegramListenerService:
                 text = '{"ok":true,"result":[]}'
 
                 def json(self):
-                    return {"ok": True, "result": []}
+                    return {"ok": True, "result":[]}
 
             return _Resp()
         return requests.get(url, params=params, timeout=timeout)
@@ -106,15 +106,18 @@ class TelegramListenerService:
         return self._load_unlock_channel().get("token", "")
 
     def _send_message(self, token: str, chat_id: int | str, text: str) -> None:
-        try:
-            r = self._http_post(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                payload={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
-                timeout=20,
-            )
-            self.log.info("sendMessage chat_id=%s status=%s body=%s", chat_id, r.status_code, (r.text or "")[:240])
-        except Exception as e:
-            self.log.exception("sendMessage failed chat_id=%s err=%s", chat_id, e)
+        MAX_LEN = 4000
+        for i in range(0, len(text), MAX_LEN):
+            chunk = text[i:i+MAX_LEN]
+            try:
+                r = self._http_post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    payload={"chat_id": chat_id, "text": chunk, "disable_web_page_preview": True},
+                    timeout=20,
+                )
+                self.log.info("sendMessage chat_id=%s status=%s body=%s", chat_id, r.status_code, (r.text or "")[:240])
+            except Exception as e:
+                self.log.exception("sendMessage failed chat_id=%s err=%s", chat_id, e)
 
     def _ensure_long_polling(self, token: str) -> None:
         if not token or token in self._webhook_cleared:
@@ -165,7 +168,7 @@ class TelegramListenerService:
             stream_events=True,
         )
         reply = None
-        delta_parts: list[str] = []
+        delta_parts: list[str] =[]
         async for frame in stream:
             ev = frame.get("event")
             if ev == "assistant.final":
@@ -245,7 +248,7 @@ class TelegramListenerService:
                 timeout=35,
             )
             data = r.json()
-            updates = data.get("result", []) if isinstance(data, dict) else []
+            updates = data.get("result",[]) if isinstance(data, dict) else[]
             self.log.info("poll role=%s status=%s count=%s offset=%s", role, r.status_code, len(updates), offset)
         except Exception as e:
             self.log.exception("poll failed role=%s err=%s", role, e)

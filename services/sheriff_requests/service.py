@@ -175,6 +175,7 @@ class SheriffRequestsService:
         context_json = json.dumps(context_obj, ensure_ascii=False, sort_keys=True)
         force_notify = payload.get("force_notify", False)
 
+        should_notify = False
         with self._conn() as conn:
             row = conn.execute(
                 "SELECT entry_id, status, immutable, created_at FROM catalog_entries WHERE type=? AND key=?",
@@ -187,25 +188,26 @@ class SheriffRequestsService:
                     "INSERT INTO catalog_entries(entry_id, type, key, status, one_liner, context_json, created_at, updated_at, immutable) VALUES(?, ?, ?, 'requested', ?, ?, ?, ?, 0)",
                     (entry_id, entry_type, key, one_liner, context_json, now, now),
                 )
-                should_update_content = True
+                should_notify = True
                 is_immutable = False
             else:
                 entry_id = row[0]
-                is_immutable = bool(row[2]) or row[1] == "approved"
+                current_status = row[1]
+                is_immutable = bool(row[2]) or current_status == "approved"
                 if is_immutable:
-                    should_update_content = False
+                    should_notify = force_notify
                 else:
+                    should_notify = force_notify or (current_status != "requested")
                     conn.execute(
                         "UPDATE catalog_entries SET status='requested', one_liner=?, context_json=?, updated_at=? WHERE entry_id=?",
                         (one_liner, context_json, now, entry_id),
                     )
-                    should_update_content = True
             request_id = self._insert_request_instance(conn, entry_id)
 
         self._upsert_existing_entry(entry_type, key)
         entry = self._get_entry(entry_type, key)
 
-        if not is_immutable or force_notify:
+        if should_notify:
             await self.tg_gate.request(
                 "gate.notify_request",
                 {
@@ -244,7 +246,7 @@ class SheriffRequestsService:
         ids = result.get("ids", [[]])[0]
         distances = result.get("distances", [[]])[0]
 
-        matches = []
+        matches =[]
         for doc_id, distance in zip(ids, distances):
             entry_type, key = doc_id.split(":", 1)
             entry = self._get_entry(entry_type, key)
@@ -270,6 +272,35 @@ class SheriffRequestsService:
 
     async def resolve_secret(self, payload, emit_event, req_id):
         key = payload["key"]
+        deny = payload.get("deny", False)
+
+        if deny:
+            status = "denied"
+            immutable = 0
+            with self._conn() as conn:
+                row = conn.execute("SELECT entry_id FROM catalog_entries WHERE type='secret' AND key=?", (key,)).fetchone()
+                now = self._now_ms()
+                if row is None:
+                    entry_id = str(uuid.uuid4())
+                    conn.execute(
+                        "INSERT INTO catalog_entries(entry_id, type, key, status, one_liner, context_json, created_at, updated_at, immutable) VALUES(?, 'secret', ?, ?, ?, '{}', ?, ?, ?)",
+                        (entry_id, key, status, f"Secret denied for {key}", now, now, immutable),
+                    )
+                else:
+                    entry_id = row[0]
+                    conn.execute("UPDATE catalog_entries SET status=?, immutable=?, updated_at=? WHERE entry_id=?",
+                                 (status, immutable, now, entry_id))
+                request_id = self._resolve_instance(conn, entry_id, {"action": "deny_secret"})
+
+            self._upsert_existing_entry("secret", key)
+            await self.tg_gate.request(
+                "gate.notify_request_resolved",
+                {"event": "request_resolved", "type": "secret", "key": key, "status": "denied", "request_id": request_id, "context": {}},
+            )
+            await self.gateway.request("gateway.notify_request_resolved",
+                                       {"type": "secret", "key": key, "status": "denied"})
+            return {"status": "denied", "type": "secret", "key": key}
+
         unlocked = await self._secrets("secrets.is_unlocked", {})
         if not unlocked.get("unlocked"):
             return {"status": "master_password_required", "type": "secret", "key": key}

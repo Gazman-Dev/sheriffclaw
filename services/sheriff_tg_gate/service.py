@@ -62,14 +62,17 @@ class SheriffTgGateService:
             if not user_id:
                 return
 
-        try:
-            self._send_http(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                payload={"chat_id": int(str(user_id).strip() or "0"), "text": text, "disable_web_page_preview": True},
-                timeout=10,
-            )
-        except Exception:
-            pass
+        MAX_LEN = 4000
+        for i in range(0, len(text), MAX_LEN):
+            chunk = text[i:i+MAX_LEN]
+            try:
+                self._send_http(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    payload={"chat_id": int(str(user_id).strip() or "0"), "text": chunk, "disable_web_page_preview": True},
+                    timeout=10,
+                )
+            except Exception:
+                pass
 
     async def notify_request(self, payload, emit_event, req_id):
         append_jsonl(self.log_path, payload)
@@ -77,13 +80,23 @@ class SheriffTgGateService:
         req_type = payload.get("type", "action")
         key = payload.get("key", "unknown")
         one_liner = payload.get("one_liner", "No description provided.")
+        context = payload.get("context") or {}
+        title = context.get("title", key)
 
-        msg = (
-            f"🔔 Sheriff Approval Required\n\n"
-            f"The agent asks permission to access {req_type}: {key}\n"
-            f"Reason: {one_liner}\n\n"
-            f"Reply with /allow-{req_type} {key} or /deny-{req_type} {key}"
-        )
+        if req_type == "secret":
+            msg = (
+                f"🔑 Agent requests {title}, so it can:\n"
+                f">> {one_liner}\n\n"
+                f"Please reply: /secret {key} <value>\n"
+                f"Or to reject: /deny-secret {key}"
+            )
+        else:
+            msg = (
+                f"🔔 Sheriff Approval Required\n\n"
+                f"The agent asks permission to access {req_type}: {key}\n"
+                f"Reason: {one_liner}\n\n"
+                f"Reply with /allow-{req_type} {key} or /deny-{req_type} {key}"
+            )
 
         await self._send_telegram(msg)
         return {"status": "sent"}

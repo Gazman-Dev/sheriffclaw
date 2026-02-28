@@ -131,7 +131,7 @@ class SheriffGatewayService:
                                                                              "codex_state_b64": codex_state_b64},
                                               stream_events=True)
         saw_final = False
-        delta_parts: list[str] = []
+        delta_parts: list[str] =[]
         event_counts: dict[str, int] = {}
         new_codex_state_b64 = ""
         async for frame in stream:
@@ -268,6 +268,35 @@ class SheriffGatewayService:
         _, res = await self.secrets.request(op, req_payload)
         return {"ok": bool(res.get("ok", True)), "result": res.get("result", {}), "error": res.get("error")}
 
+    async def _send_llm_telegram(self, text: str):
+        _, res = await self.secrets.request("secrets.get_llm_bot_token", {})
+        token = res.get("result", {}).get("token", "")
+        if not token:
+            return
+
+        _, st = await self.secrets.request("secrets.activation.status", {"bot_role": "llm"})
+        user_id = st.get("result", {}).get("user_id")
+        if not user_id:
+            return
+
+        import requests
+        import asyncio
+
+        def _post_chunk(chunk):
+            try:
+                requests.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": int(str(user_id).strip()), "text": chunk, "disable_web_page_preview": True},
+                    timeout=10
+                )
+            except Exception:
+                pass
+
+        MAX_LEN = 4000
+        for i in range(0, len(text), MAX_LEN):
+            chunk = text[i:i+MAX_LEN]
+            await asyncio.to_thread(_post_chunk, chunk)
+
     async def notify_request_resolved(self, payload, emit_event, req_id):
         if not self.sessions:
             return {"status": "no_session"}
@@ -280,7 +309,28 @@ class SheriffGatewayService:
         append_jsonl(
             gw_root() / "state" / "transcripts" / f"{session_handle}.jsonl",
             {"role": "tool", "name": "requests.resolved", "content": result},
+            )
+
+        async def _emit(ev, p):
+            if ev == "assistant.final":
+                text = p.get("text")
+                if text:
+                    await self._send_llm_telegram(text)
+
+        _, st = await self.secrets.request("secrets.activation.status", {"bot_role": "llm"})
+        user_id = st.get("result", {}).get("user_id") or "system"
+
+        trigger_msg = f"[System: Request for {payload.get('type')} '{payload.get('key')}' is {payload.get('status')}. Acknowledge and proceed.]"
+
+        import asyncio
+        asyncio.create_task(
+            self.handle_user_message(
+                {"channel": "telegram", "principal_external_id": user_id, "text": trigger_msg},
+                _emit,
+                f"sys-trigger-{uuid.uuid4()}"
+            )
         )
+
         return {"status": "notified", "session_handle": session_handle}
 
     def ops(self):

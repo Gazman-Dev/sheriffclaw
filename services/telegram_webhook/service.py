@@ -115,14 +115,17 @@ class TelegramWebhookService:
             self._send_message(token, chat_id, out.get("result", {}).get("message", "ok"))
 
     def _send_message(self, token: str, chat_id: int | str, text: str):
-        try:
-            self._http_post(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                payload={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
-                timeout=20,
-            )
-        except Exception:
-            pass
+        MAX_LEN = 4000
+        for i in range(0, len(text), MAX_LEN):
+            chunk = text[i:i+MAX_LEN]
+            try:
+                self._http_post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    payload={"chat_id": chat_id, "text": chunk, "disable_web_page_preview": True},
+                    timeout=20,
+                )
+            except Exception:
+                pass
 
     async def run_forever(self):
         cfg = await self._load_or_init_cfg()
@@ -161,7 +164,7 @@ class TelegramWebhookService:
                 payload={
                     "url": f"{public_base}{cfg['sheriff_path']}",
                     "secret_token": cfg["sheriff_secret"],
-                    "allowed_updates": ["message"],
+                    "allowed_updates":["message"],
                 },
                 timeout=20,
             )

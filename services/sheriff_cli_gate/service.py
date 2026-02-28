@@ -9,7 +9,7 @@ class SheriffCliGateService:
         self.gateway = ProcClient("sheriff-gateway")
         # Back-compat shim for existing tests/mocks.
         self.secrets = None
-        self.services = [
+        self.services =[
             "sheriff-secrets",
             "sheriff-policy",
             "sheriff-requests",
@@ -58,6 +58,7 @@ class SheriffCliGateService:
                     "/status\n"
                     "/unlock <master_password>\n"
                     "/secret <handle> <value>\n"
+                    "/deny-secret <handle>\n"
                     "/allow-domain <domain> | /deny-domain <domain>\n"
                     "/allow-tool <tool> | /deny-tool <tool>\n"
                     "/allow-output <key> | /deny-output <key>\n"
@@ -66,7 +67,7 @@ class SheriffCliGateService:
             }
 
         if cmd == "status":
-            lines = []
+            lines =[]
             for svc in self.services:
                 cli = ProcClient(svc)
                 try:
@@ -99,6 +100,14 @@ class SheriffCliGateService:
             _, res = await self.requests.request("requests.resolve_secret", {"key": handle, "value": value})
             status = res.get("result", {}).get("status", "unknown")
             return {"kind": "sheriff", "message": f"Secret {handle}: {status}"}
+
+        if cmd == "deny-secret":
+            if not args:
+                return {"kind": "error", "message": "Usage: /deny-secret <key>"}
+            key = " ".join(args)
+            _, res = await self.requests.request("requests.resolve_secret", {"key": key, "deny": True})
+            status = res.get("result", {}).get("status", "unknown")
+            return {"kind": "sheriff", "message": f"Secret {key}: {status}"}
 
         if cmd in {"allow-domain", "deny-domain", "allow-tool", "deny-tool", "allow-output", "deny-output"}:
             if not args:

@@ -25,32 +25,6 @@ from shared.proc_rpc import ProcClient
 
 OPLOG = get_op_logger("ctl")
 
-
-def _debug_mode_path() -> Path:
-    return gw_root() / "state" / "debug_mode.json"
-
-
-def _debug_messages_path() -> Path:
-    return gw_root() / "state" / "debug.agent.jsonl"
-
-
-def _read_debug_mode() -> bool:
-    p = _debug_mode_path()
-    if not p.exists():
-        return False
-    try:
-        obj = json.loads(p.read_text(encoding="utf-8"))
-        return bool(obj.get("enabled", False))
-    except Exception:
-        return False
-
-
-def _write_debug_mode(enabled: bool) -> None:
-    p = _debug_mode_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"enabled": enabled}), encoding="utf-8")
-
-
 def _island_root(service: str) -> Path:
     return gw_root() if service.startswith("sheriff-") else llm_root()
 

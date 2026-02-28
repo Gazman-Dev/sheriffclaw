@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import traceback
 from collections.abc import Awaitable, Callable
@@ -19,6 +20,7 @@ class NDJSONService:
         self.island = island
         self.kind = kind
         self.version = version
+        self.debug_mode = os.environ.get("SHERIFF_DEBUG", "").strip().lower() in {"1", "true", "yes"}
         self.ops = dict(ops)
         self.ops.setdefault("meta", self._meta)
         self.ops.setdefault("health", self._health)

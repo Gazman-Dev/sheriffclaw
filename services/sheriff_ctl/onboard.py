@@ -21,12 +21,12 @@ from services.sheriff_ctl.utils import (
     _gw_secrets_call,
     _is_onboarded,
     _save_telegram_unlock_channel,
-    _write_debug_mode,
 )
 
 
 def cmd_onboard(args):
     print("=== SheriffClaw Onboarding ===")
+    debug_mode = os.environ.get("SHERIFF_DEBUG", "").strip().lower() in {"1", "true", "yes"}
 
     mp = args.master_password
     if mp is None:
@@ -53,6 +53,10 @@ def cmd_onboard(args):
                     mp = a
                     break
                 print("Passwords do not match. Please try again.")
+
+    if debug_mode and mp != "debug":
+        print("Debug mode active: master password forced to 'debug'.")
+        mp = "debug"
 
     llm_prov = args.llm_provider
     llm_key = args.llm_api_key
@@ -443,9 +447,7 @@ def cmd_onboard(args):
         if not ok_unlock:
             print("Warning: services started, but vault unlock failed in running secrets service.")
 
-    debug_mode = bool(getattr(args, "debug_mode", False))
-    _write_debug_mode(debug_mode)
-    print(f"Onboarding complete. Services started and secrets unlocked. Debug mode {'ON' if debug_mode else 'OFF'}.")
+    print("Onboarding complete. Services started and secrets unlocked.")
 
 
 def cmd_configure_llm(args):

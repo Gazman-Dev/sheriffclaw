@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-import json
+import os
 import uuid
 from collections import defaultdict, deque
 
@@ -56,27 +56,6 @@ class SheriffGatewayService:
         self._queue_paused = False
         self._queue_pause_reason = ""
 
-    def _debug_mode_enabled(self) -> bool:
-        p = gw_root() / "state" / "debug_mode.json"
-        if not p.exists():
-            return False
-        try:
-            obj = json.loads(p.read_text(encoding="utf-8"))
-            return bool(obj.get("enabled", False))
-        except Exception:
-            return False
-
-    def _pop_debug_message(self) -> dict:
-        p = gw_root() / "state" / "debug.agent.jsonl"
-        if not p.exists():
-            raise RuntimeError("debug.agent.jsonl missing")
-        lines =[ln for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
-        if not lines:
-            raise RuntimeError("debug.agent.jsonl is empty")
-        first = lines[0]
-        p.write_text(("\n".join(lines[1:]) + ("\n" if len(lines) > 1 else "")), encoding="utf-8")
-        return json.loads(first)
-
     async def _ensure_queue_cond(self):
         import asyncio
 
@@ -95,7 +74,7 @@ class SheriffGatewayService:
 
         append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl", {"role": "user", "content": text})
 
-        debug_mode = self._debug_mode_enabled()
+        debug_mode = os.environ.get("SHERIFF_DEBUG", "").strip().lower() in {"1", "true", "yes"}
         provider_name = "stub"
         api_key = ""
         base_url = ""
@@ -140,13 +119,6 @@ class SheriffGatewayService:
 
                 _, cstate = await self.secrets.request("secrets.codex_state.get", {})
                 codex_state_b64 = cstate.get("result", {}).get("bundle_b64") or ""
-
-        if self._debug_mode_enabled():
-            msg = self._pop_debug_message()
-            out_text = msg.get("text") or msg.get("content") or json.dumps(msg, ensure_ascii=False)
-            await emit_event("assistant.final", {"text": out_text})
-            append_jsonl(gw_root() / "state" / "transcripts" / f"{session}.jsonl", {"role": "assistant", "content": out_text})
-            return {"status": "debug", "session_handle": session}
 
         stream, final = await self.ai.request("agent.session.user_message", {"session_handle": session, "text": text, "model_ref": payload.get("model_ref"), "provider_name": provider_name, "api_key": api_key, "base_url": base_url, "codex_state_b64": codex_state_b64}, stream_events=True)
         saw_final = False

@@ -5,6 +5,7 @@ from shared.paths import gw_root
 
 @pytest.fixture
 def mock_paths(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHERIFF_DEBUG", "0")
     # Redirect gw_root to a temp dir so state/secrets.enc writes there
     monkeypatch.setattr("services.sheriff_secrets.service.gw_root", lambda: tmp_path)
     return tmp_path

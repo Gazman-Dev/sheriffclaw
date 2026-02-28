@@ -5,6 +5,7 @@ from shared.secure_web import SecureWebRequester
 from shared.policy import GatewayPolicy
 
 def test_request_https_constructs_correct_request(monkeypatch):
+    monkeypatch.setenv("SHERIFF_DEBUG", "0")
     policy = GatewayPolicy()
     monkeypatch.setattr(policy, "validate_host", lambda h: None)
 
@@ -56,6 +57,7 @@ def test_request_https_constructs_correct_request(monkeypatch):
     assert "X-Not-Allowed" not in headers  # Not in ALLOWED_HEADERS
 
 def test_request_https_enforces_ssrf_policy(monkeypatch):
+    monkeypatch.setenv("SHERIFF_DEBUG", "0")
     # With the new flow, SecureWebRequester still calls policy.validate_host,
     # but that method now only checks for DNS/SSRF safety.
     policy = GatewayPolicy()
@@ -67,3 +69,22 @@ def test_request_https_enforces_ssrf_policy(monkeypatch):
 
     with pytest.raises(ValueError, match="private/link-local"):
         requester.request_https({"host": "internal.server"}, {})
+
+
+def test_request_https_debug_intercepts_and_mocks(monkeypatch, tmp_path):
+    monkeypatch.setenv("SHERIFF_DEBUG", "1")
+    monkeypatch.setattr("shared.secure_web.gw_root", lambda: tmp_path)
+    policy = GatewayPolicy()
+    monkeypatch.setattr(policy, "validate_host", lambda h: None)
+
+    requester = SecureWebRequester(policy)
+    out = requester.request_https(
+        {"method": "GET", "host": "example.com", "path": "/x", "headers": {"Accept": "application/json"}},
+        {},
+    )
+    assert out["status"] == 200
+    assert out["body"] == "{\"debug_mock\": true}"
+
+    outbox = tmp_path / "state" / "debug" / "web_outbox.jsonl"
+    assert outbox.exists()
+    assert "https://example.com/x" in outbox.read_text(encoding="utf-8")

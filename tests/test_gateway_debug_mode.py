@@ -1,67 +1,56 @@
-import json
+import pytest
 
 from services.sheriff_gateway.service import SheriffGatewayService
 
 
-class _DummyProc:
-    async def request(self, *args, **kwargs):
-        raise AssertionError("ai/secrets proc should not be called in these unit tests")
+class FakeRPC:
+    def __init__(self, handler):
+        self._handler = handler
+
+    async def request(self, op, payload, stream_events=False):
+        return await self._handler(op, payload, stream_events)
 
 
-def _make_service_without_init():
-    svc = SheriffGatewayService.__new__(SheriffGatewayService)
-    svc.ai = _DummyProc()
-    svc.web = _DummyProc()
-    svc.tools = _DummyProc()
-    svc.secrets = _DummyProc()
-    svc.requests = _DummyProc()
-    svc.tg_gate = _DummyProc()
-    svc.sessions = {}
-    return svc
+@pytest.mark.asyncio
+async def test_debug_mode_tolerates_provider_lookup_error(monkeypatch):
+    monkeypatch.setenv("SHERIFF_DEBUG", "1")
+    svc = SheriffGatewayService()
 
+    async def ai_stream():
+        yield {"event": "assistant.final", "payload": {"text": "ok"}}
 
-def test_debug_mode_enabled_reads_file(tmp_path, monkeypatch):
-    svc = _make_service_without_init()
-    state = tmp_path / "state"
-    state.mkdir(parents=True, exist_ok=True)
-    (state / "debug_mode.json").write_text(json.dumps({"enabled": True}), encoding="utf-8")
+    async def ai_request(op, payload, stream_events=False):
+        if op == "agent.session.open":
+            return [], {"result": {"session_handle": "sess-1"}}
+        if op == "agent.session.user_message":
+            async def _final():
+                return {"ok": True, "result": {}}
 
-    monkeypatch.setattr("services.sheriff_gateway.service.gw_root", lambda: tmp_path)
+            return ai_stream(), _final()
+        return [], {"result": {}}
 
-    assert svc._debug_mode_enabled() is True
+    async def secrets_request(op, payload, stream_events=False):
+        if op == "secrets.is_unlocked":
+            return [], {"ok": True, "result": {"unlocked": True}}
+        if op == "secrets.get_llm_provider":
+            return [], {"ok": False, "error": "failed"}
+        if op == "secrets.codex_state.get":
+            return [], {"ok": True, "result": {"bundle_b64": ""}}
+        return [], {"ok": True, "result": {}}
 
+    svc.ai = FakeRPC(ai_request)
+    svc.secrets = FakeRPC(secrets_request)
 
-def test_debug_mode_disabled_when_missing(tmp_path, monkeypatch):
-    svc = _make_service_without_init()
-    monkeypatch.setattr("services.sheriff_gateway.service.gw_root", lambda: tmp_path)
-    assert svc._debug_mode_enabled() is False
+    events = []
 
+    async def emit(ev, payload):
+        events.append((ev, payload))
 
-def test_pop_debug_message_fifo(tmp_path, monkeypatch):
-    svc = _make_service_without_init()
-    state = tmp_path / "state"
-    state.mkdir(parents=True, exist_ok=True)
-    p = state / "debug.agent.jsonl"
-    p.write_text('{"text":"first"}\n{"text":"second"}\n', encoding="utf-8")
+    out = await svc.handle_user_message(
+        {"channel": "cli", "principal_external_id": "u1", "text": "hello"},
+        emit,
+        "r1",
+    )
 
-    monkeypatch.setattr("services.sheriff_gateway.service.gw_root", lambda: tmp_path)
-
-    first = svc._pop_debug_message()
-    assert first["text"] == "first"
-    remaining = p.read_text(encoding="utf-8").strip().splitlines()
-    assert remaining == ['{"text":"second"}']
-
-
-def test_pop_debug_message_empty_raises(tmp_path, monkeypatch):
-    svc = _make_service_without_init()
-    state = tmp_path / "state"
-    state.mkdir(parents=True, exist_ok=True)
-    (state / "debug.agent.jsonl").write_text("", encoding="utf-8")
-
-    monkeypatch.setattr("services.sheriff_gateway.service.gw_root", lambda: tmp_path)
-
-    try:
-        svc._pop_debug_message()
-        assert False, "expected RuntimeError"
-    except RuntimeError as e:
-        assert "empty" in str(e)
+    assert out["status"] == "done"
+    assert ("assistant.final", {"text": "ok"}) in events

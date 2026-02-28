@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
 import sqlite3
 import string
@@ -12,10 +13,15 @@ from shared.crypto import decrypt_text, encrypt_text
 
 
 class SecretsState:
-    def __init__(self, enc_path: Path, verifier_path: Path):
+    def __init__(self, enc_path: Path, verifier_path: Path, *, debug_mode: bool | None = None):
+        self.debug_mode = (
+            debug_mode
+            if debug_mode is not None
+            else os.environ.get("SHERIFF_DEBUG", "").strip().lower() in {"1", "true", "yes"}
+        )
         # enc_path now stores sqlite DB (extension kept for backward compatibility)
-        self.db_path = enc_path
-        self.verifier_path = verifier_path
+        self.db_path = enc_path if not self.debug_mode else enc_path.with_name("secrets.debug.db")
+        self.verifier_path = verifier_path if not self.debug_mode else verifier_path.with_name("master.debug.json")
         self.session_path = verifier_path.parent / "secrets_session.json"
         self._password: str | None = None
         self._load_session_unlock()
@@ -71,9 +77,13 @@ class SecretsState:
 
     def _db_set(self, key: str, value) -> None:
         self._require()
-        assert self._password is not None
-        k_enc = encrypt_text(key, self._password)
-        v_enc = encrypt_text(json.dumps(value), self._password)
+        if self.debug_mode:
+            k_enc = key
+            v_enc = json.dumps(self._sanitize_for_debug(key, value), ensure_ascii=False)
+        else:
+            assert self._password is not None
+            k_enc = encrypt_text(key, self._password)
+            v_enc = encrypt_text(json.dumps(value), self._password)
         with self._db_connect() as conn:
             conn.execute(
                 """
@@ -90,11 +100,16 @@ class SecretsState:
 
     def _db_get(self, key: str, default=None):
         self._require()
-        assert self._password is not None
         with self._db_connect() as conn:
             row = conn.execute("SELECT value_enc FROM kv WHERE key_hash=?", (self._key_hash(key),)).fetchone()
         if not row:
             return default
+        if self.debug_mode:
+            try:
+                return json.loads(str(row[0]))
+            except Exception:
+                return default
+        assert self._password is not None
         try:
             raw = decrypt_text(str(row[0]), self._password)
             return json.loads(raw)
@@ -103,10 +118,17 @@ class SecretsState:
 
     def _db_all(self) -> dict:
         self._require()
-        assert self._password is not None
         out = {}
         with self._db_connect() as conn:
             rows = conn.execute("SELECT key_enc, value_enc FROM kv").fetchall()
+        if self.debug_mode:
+            for k_enc, v_enc in rows:
+                try:
+                    out[str(k_enc)] = json.loads(str(v_enc))
+                except Exception:
+                    continue
+            return out
+        assert self._password is not None
         for k_enc, v_enc in rows:
             try:
                 k = decrypt_text(str(k_enc), self._password)
@@ -164,7 +186,7 @@ class SecretsState:
         self._clear_session_unlock()
 
     def initialize(self, payload: dict) -> None:
-        password = payload["master_password"]
+        password = "debug" if self.debug_mode else payload["master_password"]
         state = self._default_state(payload)
         self.verifier_path.parent.mkdir(parents=True, exist_ok=True)
         self.verifier_path.write_text(json.dumps({"hash": self._hash(password)}), encoding="utf-8")
@@ -183,10 +205,44 @@ class SecretsState:
         self._clear_session_unlock()
 
     def verify_master_password(self, password: str) -> bool:
+        if self.debug_mode:
+            return password == "debug"
         if not self.verifier_path.exists():
             return False
         data = json.loads(self.verifier_path.read_text(encoding="utf-8"))
         return data.get("hash") == self._hash(password)
+
+    @staticmethod
+    def _hash_sensitive_value(value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+    def _sanitize_for_debug(self, key: str, value):
+        sensitive_keys = {"llm_api_key", "llm_bot_token", "gate_bot_token", "codex_cli_state_b64"}
+        if key in sensitive_keys and isinstance(value, str) and value:
+            return self._hash_sensitive_value(value)
+        if key == "secrets" and isinstance(value, dict):
+            out: dict = {}
+            for k, v in value.items():
+                if isinstance(v, str) and v:
+                    out[k] = self._hash_sensitive_value(v)
+                else:
+                    out[k] = v
+            return out
+        if key == "llm_auth" and isinstance(value, dict):
+            out = dict(value)
+            for token_key in ("access_token", "refresh_token", "id_token"):
+                tok = out.get(token_key)
+                if isinstance(tok, str) and tok:
+                    out[token_key] = self._hash_sensitive_value(tok)
+            return out
+        if key == "telegram_webhook" and isinstance(value, dict):
+            out = dict(value)
+            for secret_key in ("llm_secret", "sheriff_secret"):
+                tok = out.get(secret_key)
+                if isinstance(tok, str) and tok:
+                    out[secret_key] = self._hash_sensitive_value(tok)
+            return out
+        return value
 
     def unlock(self, password: str) -> bool:
         if not self.verify_master_password(password):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
+import os
 import shutil
 import subprocess
 import sys
@@ -17,7 +18,6 @@ from services.sheriff_ctl.utils import (
     _clear_telegram_unlock_channel,
     _notify_sheriff_channel,
     _verify_master_password_async,
-    _write_debug_mode,
 )
 
 
@@ -122,15 +122,10 @@ def cmd_update(args):
 
 
 def cmd_debug(args):
-    d_args = getattr(args, "debug_args",[])
+    os.environ["SHERIFF_DEBUG"] = "1"
+    d_args = getattr(args, "debug_args", [])
     if not d_args:
-        print("Usage: sheriff debug [on|off] | [folder] [subfolder][action] [args...]")
-        return
-
-    if len(d_args) == 1 and d_args[0].lower() in {"on", "off"}:
-        enabled = d_args[0].lower() == "on"
-        _write_debug_mode(enabled)
-        print(f"Debug mode {'ON' if enabled else 'OFF'}")
+        print("Usage: sheriff debug [folder] [subfolder] [args...]")
         return
 
     # Dynamic routing for debug paths
@@ -139,7 +134,9 @@ def cmd_debug(args):
     if len(d_args) >= 2:
         script_path = root / "debug" / d_args[0] / d_args[1] / f"{d_args[1]}_debug.py"
         if script_path.exists():
-            subprocess.run([sys.executable, str(script_path)] + d_args[2:])
+            env = os.environ.copy()
+            env["SHERIFF_DEBUG"] = "1"
+            subprocess.run([sys.executable, str(script_path)] + d_args[2:], env=env)
             return
 
     print(f"Debug script not found for path: debug/{d_args[0]}/{d_args[1]}/{d_args[1]}_debug.py")

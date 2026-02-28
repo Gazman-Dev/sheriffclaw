@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 
 import requests
 
@@ -23,6 +24,41 @@ class TelegramListenerService:
         self.offset_path.parent.mkdir(parents=True, exist_ok=True)
         self._webhook_cleared: set[str] = set()
         self._llm_missing_notified = False
+        self.debug_mode = os.environ.get("SHERIFF_DEBUG", "").strip().lower() in {"1", "true", "yes"}
+
+    def _append_debug_outbox(self, item: dict) -> None:
+        p = gw_root() / "state" / "debug" / "telegram_outbox.jsonl"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+    def _http_post(self, url: str, *, payload: dict, timeout: int):
+        if self.debug_mode:
+            self._append_debug_outbox({"method": "POST", "url": url, "json": payload})
+
+            class _Resp:
+                status_code = 200
+                text = '{"ok":true}'
+
+                def json(self):
+                    return {"ok": True, "result": []}
+
+            return _Resp()
+        return requests.post(url, json=payload, timeout=timeout)
+
+    def _http_get(self, url: str, *, params: dict, timeout: int):
+        if self.debug_mode:
+            self._append_debug_outbox({"method": "GET", "url": url, "params": params})
+
+            class _Resp:
+                status_code = 200
+                text = '{"ok":true,"result":[]}'
+
+                def json(self):
+                    return {"ok": True, "result": []}
+
+            return _Resp()
+        return requests.get(url, params=params, timeout=timeout)
 
     async def _secrets(self, op: str, payload: dict):
         _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})
@@ -71,9 +107,9 @@ class TelegramListenerService:
 
     def _send_message(self, token: str, chat_id: int | str, text: str) -> None:
         try:
-            r = requests.post(
+            r = self._http_post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
+                payload={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
                 timeout=20,
             )
             self.log.info("sendMessage chat_id=%s status=%s body=%s", chat_id, r.status_code, (r.text or "")[:240])
@@ -84,9 +120,9 @@ class TelegramListenerService:
         if not token or token in self._webhook_cleared:
             return
         try:
-            r = requests.post(
+            r = self._http_post(
                 f"https://api.telegram.org/bot{token}/deleteWebhook",
-                json={"drop_pending_updates": False},
+                payload={"drop_pending_updates": False},
                 timeout=15,
             )
             self.log.info("deleteWebhook status=%s body=%s", r.status_code, (r.text or "")[:240])
@@ -202,7 +238,7 @@ class TelegramListenerService:
         self._ensure_long_polling(token)
         offset = int(offsets.get(role, 0))
         try:
-            r = requests.get(
+            r = self._http_get(
                 f"https://api.telegram.org/bot{token}/getUpdates",
                 params={"timeout": 25, "allowed_updates": '["message"]', "offset": offset},
                 timeout=35,

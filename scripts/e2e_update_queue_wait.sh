@@ -13,12 +13,9 @@ export SHERIFFCLAW_ROOT="$TMP_ROOT"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 "$C_BIN" onboard --master-password masterpass --llm-provider stub --llm-api-key "" --llm-bot-token "" --gate-bot-token "" --deny-telegram >/dev/null
-"$S_BIN" --debug on >/dev/null
-mkdir -p "$TMP_ROOT/gw/state"
-echo '{"text":"long-op"}' > "$TMP_ROOT/gw/state/debug.agent.jsonl"
 
 # Start one in-flight message (one-shot waits ~10s)
-("$S_BIN" "hello" > "$TMP_ROOT/msg.out") &
+(SHERIFF_DEBUG=1 "$S_BIN" "hello" > "$TMP_ROOT/msg.out") &
 MSG_PID=$!
 sleep 1
 

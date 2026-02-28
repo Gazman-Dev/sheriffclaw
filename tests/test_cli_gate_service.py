@@ -1,7 +1,18 @@
 import pytest
-from unittest.mock import AsyncMock
 
 from services.sheriff_cli_gate.service import SheriffCliGateService
+
+
+class FakeRPC:
+    def __init__(self, responses=None):
+        self.responses = list(responses or [])
+        self.calls = []
+
+    async def request(self, op, payload):
+        self.calls.append((op, payload))
+        if self.responses:
+            return self.responses.pop(0)
+        return (None, {"result": {}})
 
 
 @pytest.mark.asyncio
@@ -22,27 +33,25 @@ async def test_help_command():
 @pytest.mark.asyncio
 async def test_secret_command_routes_to_requests():
     svc = SheriffCliGateService()
-    svc.requests = AsyncMock()
-    svc.requests.request.return_value = (None, {"result": {"status": "approved"}})
+    svc.requests = FakeRPC(responses=[(None, {"result": {"status": "approved"}})])
 
     res = await svc.handle_message({"text": "/secret gh_token abc123"}, None, "r1")
 
     assert res["kind"] == "sheriff"
     assert "approved" in res["message"]
-    svc.requests.request.assert_called_with("requests.resolve_secret", {"key": "gh_token", "value": "abc123"})
+    assert svc.requests.calls == [("requests.resolve_secret", {"key": "gh_token", "value": "abc123"})]
 
 
 @pytest.mark.asyncio
 async def test_allow_tool_command_routes_to_policy_resolution():
     svc = SheriffCliGateService()
-    svc.requests = AsyncMock()
-    svc.requests.request.return_value = (None, {"result": {"status": "approved"}})
+    svc.requests = FakeRPC(responses=[(None, {"result": {"status": "approved"}})])
 
     res = await svc.handle_message({"text": "/allow-tool python"}, None, "r1")
 
     assert res["kind"] == "sheriff"
     assert "approved" in res["message"]
-    svc.requests.request.assert_called_with("requests.resolve_tool", {"key": "python", "action": "always_allow"})
+    assert svc.requests.calls == [("requests.resolve_tool", {"key": "python", "action": "always_allow"})]
 
 
 @pytest.mark.asyncio
@@ -56,17 +65,15 @@ async def test_unlock_command_usage_error():
 @pytest.mark.asyncio
 async def test_unlock_command_success_and_failure():
     svc = SheriffCliGateService()
-    svc.secrets = AsyncMock()
-    svc.requests = AsyncMock()
-    svc.secrets.request.side_effect = [
+    svc.secrets = FakeRPC(responses=[
         (None, {"result": {"ok": False}}),
         (None, {"result": {"ok": True}}),
-    ]
-    svc.requests.request.return_value = (None, {"result": {"ok": True}})
+    ])
+    svc.requests = FakeRPC(responses=[(None, {"result": {"ok": True}}), (None, {"result": {"ok": True}})])
 
     bad = await svc.handle_message({"text": "/unlock wrong"}, None, "r1")
     ok = await svc.handle_message({"text": "/unlock right"}, None, "r2")
 
     assert bad["kind"] == "sheriff" and "failed" in bad["message"].lower()
     assert ok["kind"] == "sheriff" and "unlocked" in ok["message"].lower()
-    svc.secrets.request.assert_any_call("secrets.unlock", {"master_password": "right"})
+    assert ("secrets.unlock", {"master_password": "right"}) in svc.secrets.calls

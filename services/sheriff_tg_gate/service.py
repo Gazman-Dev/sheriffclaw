@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import os
+
 import requests
 from shared.paths import gw_root
 from shared.proc_rpc import ProcClient
@@ -11,6 +14,24 @@ class SheriffTgGateService:
         self.gateway = ProcClient("sheriff-gateway")
         self.policy = ProcClient("sheriff-policy")
         self.log_path = gw_root() / "state" / "gate_events.jsonl"
+        self.debug_mode = os.environ.get("SHERIFF_DEBUG", "").strip().lower() in {"1", "true", "yes"}
+
+    def _send_http(self, url: str, *, payload: dict, timeout: int = 10):
+        if self.debug_mode:
+            p = gw_root() / "state" / "debug" / "telegram_outbox.jsonl"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with p.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"url": url, "json": payload}, ensure_ascii=False) + "\n")
+
+            class _Resp:
+                status_code = 200
+                text = '{"ok":true}'
+
+                def json(self):
+                    return {"ok": True, "result": {"debug_mock": True}}
+
+            return _Resp()
+        return requests.post(url, json=payload, timeout=timeout)
 
     async def _get_bot_token(self) -> str:
         _, res = await self.gateway.request("gateway.secrets.call", {"op": "secrets.get_gate_bot_token", "payload": {}})
@@ -27,10 +48,10 @@ class SheriffTgGateService:
             return
 
         try:
-            requests.post(
+            self._send_http(
                 f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": int(user_id), "text": text, "disable_web_page_preview": True},
-                timeout=10
+                payload={"chat_id": int(user_id), "text": text, "disable_web_page_preview": True},
+                timeout=10,
             )
         except Exception:
             pass

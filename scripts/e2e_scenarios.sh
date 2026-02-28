@@ -44,7 +44,7 @@ run_scenario() {
   fi
 }
 
-scenario_debug_fifo() {
+scenario_debug_outbox() {
   local sbin="${ROOT_DIR}/.venv/bin/sheriff"
   local cbin="${ROOT_DIR}/.venv/bin/sheriff-ctl"
   [ -x "$sbin" ] && [ -x "$cbin" ]
@@ -55,23 +55,8 @@ scenario_debug_fifo() {
   trap 'rm -rf "${tmp_root:-}"' RETURN
 
   "$cbin" onboard --master-password masterpass --llm-provider stub --llm-api-key "" --llm-bot-token "" --gate-bot-token "" --deny-telegram >/dev/null
-  "$sbin" --debug on >/dev/null
-
-  mkdir -p "$tmp_root/gw/state"
-  cat > "$tmp_root/gw/state/debug.agent.jsonl" <<'EOF'
-{"text":"debug-one"}
-{"text":"debug-two"}
-EOF
-
-  local o1 o2 o3
-  o1="$(mktemp)"; o2="$(mktemp)"; o3="$(mktemp)"
-  "$sbin" "hello" > "$o1"
-  "$sbin" "hello" > "$o2"
-  "$sbin" "hello" > "$o3" 2>&1 || true
-
-  grep -q "debug-one" "$o1"
-  grep -q "debug-two" "$o2"
-  ! grep -q "\[AGENT\]" "$o3"
+  SHERIFF_DEBUG=1 "$sbin" debug channel telegram agent-user "debug-outbox-probe" >/dev/null
+  grep -q "debug-outbox-probe" "$tmp_root/gw/state/debug/telegram_outbox.jsonl"
 }
 
 scenario_keep_unchanged_onboard() {
@@ -92,7 +77,7 @@ from pathlib import Path
 from shared.secrets_state import SecretsState
 import os
 root = Path(os.environ['SHERIFFCLAW_ROOT']) / 'gw' / 'state'
-st = SecretsState(root / 'secrets.enc', root / 'master.json')
+st = SecretsState(root / 'secrets.db', root / 'master.json')
 assert st.unlock('masterpass')
 print(st.get_llm_provider())
 PY
@@ -111,13 +96,10 @@ scenario_one_shot_wait_10s() {
   trap 'rm -rf "${tmp_root:-}"' RETURN
 
   "$cbin" onboard --master-password masterpass --llm-provider stub --llm-api-key "" --llm-bot-token "" --gate-bot-token "" --deny-telegram >/dev/null
-  "$sbin" --debug on >/dev/null
-  mkdir -p "$tmp_root/gw/state"
-  echo '{"text":"timing"}' > "$tmp_root/gw/state/debug.agent.jsonl"
 
   local start end elapsed
   start=$(date +%s)
-  "$sbin" "hello" >/dev/null
+  SHERIFF_DEBUG=1 "$sbin" "hello" >/dev/null
   end=$(date +%s)
   elapsed=$((end - start))
   [ "$elapsed" -ge 9 ] && [ "$elapsed" -le 20 ]
@@ -134,9 +116,6 @@ scenario_one_shot_esc_cancel() {
   trap 'rm -rf "${tmp_root:-}"' RETURN
 
   "$cbin" onboard --master-password masterpass --llm-provider stub --llm-api-key "" --llm-bot-token "" --gate-bot-token "" --deny-telegram >/dev/null
-  "$sbin" --debug on >/dev/null
-  mkdir -p "$tmp_root/gw/state"
-  echo '{"text":"esc-test"}' > "$tmp_root/gw/state/debug.agent.jsonl"
 
   local out t cancelled
   out="$(ROOT_DIR="$ROOT_DIR" ${ROOT_DIR}/.venv/bin/python - <<'PY'
@@ -144,7 +123,9 @@ import os, pty, subprocess, time, select
 sbin = os.path.join(os.environ['ROOT_DIR'], '.venv/bin/sheriff')
 start = time.time()
 master, slave = pty.openpty()
-p = subprocess.Popen([sbin, 'hello'], stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+env = dict(os.environ)
+env["SHERIFF_DEBUG"] = "1"
+p = subprocess.Popen([sbin, 'hello'], stdin=slave, stdout=slave, stderr=slave, close_fds=True, env=env)
 os.close(slave)
 buf = b''
 sent = False
@@ -173,7 +154,7 @@ PY
 
 bootstrap_local
 run_scenario "sheriff_entry" "$ROOT_DIR/scripts/e2e_sheriff_entry.sh"
-run_scenario "debug_fifo" scenario_debug_fifo
+run_scenario "debug_outbox" scenario_debug_outbox
 run_scenario "keep_unchanged_onboard" scenario_keep_unchanged_onboard
 run_scenario "one_shot_wait_10s" scenario_one_shot_wait_10s
 run_scenario "one_shot_esc_cancel" scenario_one_shot_esc_cancel

@@ -42,7 +42,6 @@ def build_parser() -> argparse.ArgumentParser:
         ob.add_argument("--llm-bot-token", default=None)
         ob.add_argument("--gate-bot-token", default=None)
         ob.add_argument("--keep-unchanged", action="store_true", help="When re-onboarding, Enter keeps existing values")
-        ob.add_argument("--debug-mode", action="store_true", help="Enable deterministic debug mode after onboarding")
 
         tg_group = ob.add_mutually_exclusive_group()
         tg_group.add_argument("--allow-telegram", action="store_true", help="Non-interactive: Allow telegram unlock")
@@ -107,6 +106,9 @@ def main(argv: list[str] | None = None) -> None:
 
 def main_sheriff(argv: list[str] | None = None) -> None:
     argv = list(argv or sys.argv[1:])
+    if argv and argv[0] == "--debug":
+        os.environ["SHERIFF_DEBUG"] = "1"
+        argv = argv[1:]
 
     # Route full CLI surface through `sheriff` so users don't need sheriff-ctl.
     ctl_commands = {
@@ -131,12 +133,8 @@ def main_sheriff(argv: list[str] | None = None) -> None:
         return
 
     p = argparse.ArgumentParser(prog="sheriff")
-    p.add_argument("--debug", choices=["on", "off"], default=None)
     p.add_argument("message", nargs="*")
     args = p.parse_args(argv)
-    if args.debug is not None:
-        cmd_debug(argparse.Namespace(debug_args=[args.debug]))
-        return
     if len(args.message) == 1 and args.message[0].lower() == "status":
         cmd_status(argparse.Namespace())
         return

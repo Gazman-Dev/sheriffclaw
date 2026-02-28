@@ -1,22 +1,6 @@
-# File: tests/test_ctl_helpers.py
-
-import json
 import types
 
 from services.sheriff_ctl import system, utils
-
-
-def test_debug_mode_read_write_roundtrip(tmp_path, monkeypatch):
-    monkeypatch.setattr(utils, "gw_root", lambda: tmp_path)
-
-    utils._write_debug_mode(True)
-    assert utils._read_debug_mode() is True
-
-    data = json.loads((tmp_path / "state" / "debug_mode.json").read_text(encoding="utf-8"))
-    assert data == {"enabled": True}
-
-    utils._write_debug_mode(False)
-    assert utils._read_debug_mode() is False
 
 
 def test_is_onboarded_with_sqlite_state(tmp_path, monkeypatch):
@@ -32,11 +16,16 @@ def test_is_onboarded_false_when_no_state(tmp_path, monkeypatch):
     assert utils._is_onboarded() is False
 
 
-def test_cmd_debug_updates_state(tmp_path, monkeypatch):
-    monkeypatch.setattr(system, "_write_debug_mode", utils._write_debug_mode)
-    monkeypatch.setattr(utils, "gw_root", lambda: tmp_path)
-    system.cmd_debug(type("A", (), {"debug_args": ["on"]})())
-    assert utils._read_debug_mode() is True
+def test_cmd_debug_without_args_prints_usage(capsys):
+    system.cmd_debug(type("A", (), {"debug_args": []})())
+    out = capsys.readouterr().out
+    assert "Usage: sheriff debug" in out
+
+
+def test_cmd_debug_auto_enables_env(monkeypatch):
+    monkeypatch.delenv("SHERIFF_DEBUG", raising=False)
+    system.cmd_debug(type("A", (), {"debug_args": []})())
+    assert system.os.environ.get("SHERIFF_DEBUG") == "1"
 
 
 def test_wait_extra_until_uses_remaining_sleep(monkeypatch):

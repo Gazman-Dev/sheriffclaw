@@ -79,6 +79,7 @@ async def test_gateway_passes_model_ref_to_worker():
         return [], {"result": {}}
 
     svc.ai.request = AsyncMock(side_effect=mock_ai_request)
+    svc.secrets.request = AsyncMock(return_value=([], {"ok": True, "result": {"unlocked": True, "provider": "stub", "api_key": ""}}))
 
     async def emit(e, p):
         return

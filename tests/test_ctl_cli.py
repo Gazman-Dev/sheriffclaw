@@ -39,7 +39,7 @@ def test_factory_reset_parses():
 def test_debug_parses():
     parser = build_parser()
     args = parser.parse_args(["debug", "on"])
-    assert args.value == "on"
+    assert args.debug_args == ["on"]
 
 
 def test_update_parses():

@@ -37,7 +37,7 @@ async def user_sheriff(msg: str, user_id: str = "debug_user"):
 def agent_user(msg: str):
     # Simulate agent to user by writing directly to the debug outbox.
     print(f"[Agent -> User] {msg}")
-    outbox = gw_root() / "state" / "debug_telegram_outbox.jsonl"
+    outbox = gw_root() / "state" / "debug" / "telegram_outbox.jsonl"
     outbox.parent.mkdir(parents=True, exist_ok=True)
     with open(outbox, "a", encoding="utf-8") as f:
         f.write(json.dumps({"from": "agent", "to": "user", "text": msg}) + "\n")
@@ -46,7 +46,7 @@ def agent_user(msg: str):
 def sheriff_user(msg: str):
     # Simulate sheriff to user by writing directly to the debug outbox.
     print(f"[Sheriff -> User] {msg}")
-    outbox = gw_root() / "state" / "debug_telegram_outbox.jsonl"
+    outbox = gw_root() / "state" / "debug" / "telegram_outbox.jsonl"
     outbox.parent.mkdir(parents=True, exist_ok=True)
     with open(outbox, "a", encoding="utf-8") as f:
         f.write(json.dumps({"from": "sheriff", "to": "user", "text": msg}) + "\n")

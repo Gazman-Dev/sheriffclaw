@@ -1,7 +1,8 @@
 from shared.secrets_state import SecretsState
 
 
-def test_activation_code_flow(tmp_path):
+def test_activation_code_flow(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHERIFF_DEBUG", "0")
     st = SecretsState(tmp_path / "secrets.enc", tmp_path / "master.json")
     st.initialize({"master_password": "mp", "llm_provider": "stub"})
     assert st.unlock("mp")

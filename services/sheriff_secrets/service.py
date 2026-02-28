@@ -7,7 +7,7 @@ from shared.secrets_state import SecretsState
 class SheriffSecretsService:
     def __init__(self) -> None:
         state_dir = gw_root() / "state"
-        self.state = SecretsState(state_dir / "secrets.enc", state_dir / "master.json")
+        self.state = SecretsState(state_dir / "secrets.db", state_dir / "master.json")
 
     async def initialize(self, payload, emit_event, req_id):
         self.state.initialize(payload)

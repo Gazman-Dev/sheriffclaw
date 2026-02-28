@@ -5,17 +5,12 @@ import argparse
 from services.sheriff_ctl import chat, ctl
 
 
-def test_main_sheriff_debug_routes_to_cmd_debug(monkeypatch):
-    called = {}
+def test_main_sheriff_debug_sets_env_and_runs_status(monkeypatch):
+    called = {"status": 0}
+    monkeypatch.setattr(ctl, "cmd_status", lambda args: called.__setitem__("status", called["status"] + 1))
 
-    def fake_cmd_debug(args):
-        called["debug_args"] = args.debug_args
-
-    monkeypatch.setattr(ctl, "cmd_debug", fake_cmd_debug)
-    monkeypatch.setattr(ctl, "cmd_entry", lambda args: (_ for _ in ()).throw(AssertionError("cmd_entry should not be called")))
-
-    ctl.main_sheriff(["--debug", "on"])
-    assert called["debug_args"] == ["on"]
+    ctl.main_sheriff(["--debug", "status"])
+    assert called["status"] == 1
 
 
 def test_main_sheriff_message_routes_to_cmd_entry(monkeypatch):

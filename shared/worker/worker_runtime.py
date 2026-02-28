@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 import json
 import asyncio
+import os
 from pathlib import Path
 
 from shared.llm.providers import ChatGPTSubscriptionCodexProvider, OpenAICodexProvider, StubProvider, TestProvider
@@ -203,6 +204,8 @@ class WorkerRuntime:
         }
 
     def _provider(self, provider: str, api_key: str, base_url: str = "", codex_state_b64: str = ""):
+        if os.environ.get("SHERIFF_DEBUG", "").strip().lower() in {"1", "true", "yes"}:
+            return TestProvider()
         key = f"{provider}:{api_key}:{base_url}:{hash(codex_state_b64)}"
         if key not in self.providers:
             if provider == "test":

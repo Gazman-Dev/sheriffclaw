@@ -67,13 +67,8 @@ ACC_LINE=$(grep -n 'master_password_accepted' "$EVENTS" | head -n1 | cut -d: -f1
 # NOTE: unlocked-state continuity is process-lifecycle dependent in current architecture,
 # so we validate policy/notify transitions above and avoid asserting a second boot_check status here.
 
-# Use debug mode to deterministically verify post-unlock message handling still works.
-"$SHERIFF_BIN" --debug on >/dev/null
-cat > "$STATE/debug.agent.jsonl" <<'EOF'
-{"text":"post-unlock-debug-ok"}
-EOF
-MSG_OUT="$TMP_ROOT/msg.out"
-"$SHERIFF_BIN" "hello after unlock" > "$MSG_OUT"
-grep -q 'post-unlock-debug-ok' "$MSG_OUT"
+# Use debug mode to verify telegram outbox interception is active.
+SHERIFF_DEBUG=1 "$SHERIFF_BIN" debug channel telegram sheriff-user "post-unlock-debug-ok" >/dev/null
+grep -q 'post-unlock-debug-ok' "$STATE/debug/telegram_outbox.jsonl"
 
 echo "E2E telegram-simulated(debug) passed"

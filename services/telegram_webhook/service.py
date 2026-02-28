@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import ssl
 import threading
@@ -18,6 +19,29 @@ class TelegramWebhookService:
         self.ai_gate = ProcClient("ai-tg-llm")
         self.sheriff_gate = ProcClient("sheriff-tg-gate")
         self.cli_gate = ProcClient("sheriff-cli-gate")
+        self.debug_mode = os.environ.get("SHERIFF_DEBUG", "").strip().lower() in {"1", "true", "yes"}
+
+    def _append_debug_outbox(self, item: dict) -> None:
+        from shared.paths import gw_root
+
+        p = gw_root() / "state" / "debug" / "telegram_outbox.jsonl"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+    def _http_post(self, url: str, *, payload: dict, timeout: int):
+        if self.debug_mode:
+            self._append_debug_outbox({"method": "POST", "url": url, "json": payload})
+
+            class _Resp:
+                status_code = 200
+                text = '{"ok":true}'
+
+                def json(self):
+                    return {"ok": True, "result": {"debug_mock": True}}
+
+            return _Resp()
+        return requests.post(url, json=payload, timeout=timeout)
 
     async def _secrets(self, op: str, payload: dict):
         _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})
@@ -90,12 +114,11 @@ class TelegramWebhookService:
             _, out = await self.cli_gate.request("cli.handle_message", {"text": text})
             self._send_message(token, chat_id, out.get("result", {}).get("message", "ok"))
 
-    @staticmethod
-    def _send_message(token: str, chat_id: int | str, text: str):
+    def _send_message(self, token: str, chat_id: int | str, text: str):
         try:
-            requests.post(
+            self._http_post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
+                payload={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
                 timeout=20,
             )
         except Exception:
@@ -123,9 +146,9 @@ class TelegramWebhookService:
         sheriff_token = g.get("token", "")
 
         if llm_token:
-            requests.post(
+            self._http_post(
                 f"https://api.telegram.org/bot{llm_token}/setWebhook",
-                json={
+                payload={
                     "url": f"{public_base}{cfg['llm_path']}",
                     "secret_token": cfg["llm_secret"],
                     "allowed_updates": ["message"],
@@ -133,9 +156,9 @@ class TelegramWebhookService:
                 timeout=20,
             )
         if sheriff_token:
-            requests.post(
+            self._http_post(
                 f"https://api.telegram.org/bot{sheriff_token}/setWebhook",
-                json={
+                payload={
                     "url": f"{public_base}{cfg['sheriff_path']}",
                     "secret_token": cfg["sheriff_secret"],
                     "allowed_updates": ["message"],

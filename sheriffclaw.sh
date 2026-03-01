@@ -204,6 +204,12 @@ setup_venv_and_install() {
     # shellcheck disable=SC1090
     source "$VENV_DIR/bin/activate"
 
+    # macOS can deny os.getcwd() for protected/unavailable paths, and pip calls
+    # os.getcwd() on startup. Force a known-safe working directory first.
+    if ! cd "$SOURCE_DIR" 2>/dev/null; then
+        cd "$INSTALL_DIR"
+    fi
+
     log "Installing SheriffClaw package..."
     python -m pip install --upgrade pip --quiet
     python -m pip install "$SOURCE_DIR" --quiet

@@ -18,6 +18,7 @@ secrets isolation.
 - Secrets and request plane: encrypted secrets state + approval records.
 - Tools/web plane: controlled command/web operations.
 - Worker/LLM plane: agent runtime and provider integrations.
+- File-native orchestration: user turns and responses are coordinated via files in `agent_workspace/`.
 - Integration plane: CLI and Telegram adapters.
 
 ## Entry Points

@@ -24,6 +24,8 @@ class AIWorkerService:
             api_key=payload.get("api_key", ""),
             base_url=payload.get("base_url", ""),
             codex_state_b64=payload.get("codex_state_b64", ""),
+            channel=payload.get("channel", "cli"),
+            principal_external_id=payload.get("principal_external_id", "unknown"),
         )
         return {"status": "done"}
 

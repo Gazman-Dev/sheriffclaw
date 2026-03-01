@@ -124,12 +124,21 @@ class SheriffGatewayService:
                 _, cstate = await self.secrets.request("secrets.codex_state.get", {})
                 codex_state_b64 = cstate.get("result", {}).get("bundle_b64") or ""
 
-        stream, final = await self.ai.request("agent.session.user_message", {"session_handle": session, "text": text,
-                                                                             "model_ref": payload.get("model_ref"),
-                                                                             "provider_name": provider_name,
-                                                                             "api_key": api_key, "base_url": base_url,
-                                                                             "codex_state_b64": codex_state_b64},
-                                              stream_events=True)
+        stream, final = await self.ai.request(
+            "agent.session.user_message",
+            {
+                "session_handle": session,
+                "text": text,
+                "model_ref": payload.get("model_ref"),
+                "provider_name": provider_name,
+                "api_key": api_key,
+                "base_url": base_url,
+                "codex_state_b64": codex_state_b64,
+                "channel": payload.get("channel", "cli"),
+                "principal_external_id": payload.get("principal_external_id", "unknown"),
+            },
+            stream_events=True,
+        )
         saw_final = False
         delta_parts: list[str] =[]
         event_counts: dict[str, int] = {}

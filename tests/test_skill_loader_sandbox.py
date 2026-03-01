@@ -1,11 +1,6 @@
-import json
-
-import pytest
-
-pytest.importorskip("hnswlib")
+﻿import json
 
 from shared.skills.loader import SkillLoader
-from shared.worker.worker_runtime import WorkerRuntime
 
 
 def test_loader_prefers_system_skill(tmp_path):
@@ -23,14 +18,3 @@ def test_loader_prefers_system_skill(tmp_path):
     assert "demo" in skills
     assert skills["demo"].source == "system"
     assert skills["demo"].command == "sys"
-
-
-def test_sandboxed_path_blocks_escape(tmp_path):
-    wr = WorkerRuntime()
-    base = tmp_path / "w"
-    base.mkdir(parents=True)
-    ok = wr._sandboxed_path(base, "a/b.txt")
-    assert str(ok).startswith(str(base.resolve()))
-
-    with pytest.raises(ValueError):
-        wr._sandboxed_path(base, "../../etc/passwd")

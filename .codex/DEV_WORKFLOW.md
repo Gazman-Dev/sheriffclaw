@@ -51,4 +51,3 @@
 ## Platform Notes
 
 - Many integration scripts are bash-focused; on Windows, prefer pytest + direct CLI commands unless using WSL/Git Bash.
-- `hnswlib` is intentionally skipped on Windows by marker in `requirements.txt`.

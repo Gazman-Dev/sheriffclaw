@@ -22,7 +22,7 @@ if [ -d "$ROOT/.venv" ]; then
     cd "$ROOT"
     . .venv/bin/activate
     # Work payload: strengthen testing feedback loop
-    python -m pytest -q tests/test_ctl_cli.py tests/test_memory_phase4.py >> "$LOG_FILE" 2>&1 || true
+    python -m pytest -q tests/test_ctl_cli.py tests/test_worker_runtime.py >> "$LOG_FILE" 2>&1 || true
     ./scripts/qa_cycle.sh >> "$LOG_FILE" 2>&1 || true
   )
 fi

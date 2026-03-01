@@ -28,7 +28,7 @@
 - Secrets state: `shared/secrets_state.py`, crypto in `shared/crypto.py`
 - Policy/approvals: `shared/policy.py`, `shared/permissions_store.py`, `shared/approvals.py`
 - Tool execution: `shared/tools_exec.py`
-- Memory/runtime: `shared/memory/*`, `shared/worker/worker_runtime.py`
+- File-native runtime: `shared/worker/worker_runtime.py` and workspace artifacts under `agent_workspace/`
 - LLM providers: `shared/llm/providers.py`
 
 ## Important Control Flows
@@ -51,5 +51,5 @@
 - CLI and control logic: `tests/test_ctl_*.py`
 - Gateway and approvals: `tests/test_gateway_*.py`, `tests/test_policy*.py`, `tests/test_requests_service.py`
 - Secrets and security: `tests/test_secrets_*.py`, `tests/test_secure_web.py`, `tests/test_tools_exec.py`
-- Worker/runtime/memory: `tests/test_worker_*.py`, `tests/test_memory*.py`
-- Skills: `tests/test_skills_contract.py`, `tests/test_skill_loader_sandbox.py`, `tests/test_skill_routing_phase3.py`
+- Worker/runtime: `tests/test_worker_*.py`
+- Skills: `tests/test_skills_contract.py`, `tests/test_skill_loader_sandbox.py`

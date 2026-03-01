@@ -1,6 +1,2 @@
-chromadb==1.5.1
-sentence-transformers==5.1.2
-cryptography==46.0.5
-
-# Native index – works on macOS/Linux, skipped on Windows
-hnswlib==0.8.0 ; platform_system != "Windows"
+﻿cryptography==46.0.5
+requests==2.32.5

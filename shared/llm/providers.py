@@ -76,8 +76,8 @@ class _CodexCliBase:
             "System: Do NOT attempt to guess secrets or bypass security.",
             "System: CORE COMMANDS ALWAYS AVAILABLE TO YOU (Run via standard shell commands):",
             "System:   - `python skills/search_skills/run.py \"query\"`: Searches your available peripheral skills.",
-            "System:   - `python skills/search_memory/run.py \"query\"`: Search past conversations you have had with the user.",
-            "System:   - `python skills/search_topics/run.py \"query\"`: Search facts, rules, and concepts in your topic database.",
+            "System:   - `python skills/search_memory/run.py \"query\"`: Search workspace files from previous turns.",
+            "System:   - `python skills/search_topics/run.py \"query\"`: Search topic and note files in the workspace.",
             "System: If a user asks you to do something you don't know how to do, use `search_skills` first.",
             "System: If the user refers to something you spoke about in the past, use `search_memory`.",
             "Conversation history:"

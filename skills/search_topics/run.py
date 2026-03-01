@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import sys
+import os
 from pathlib import Path
 
 # Add repo root to sys.path
@@ -7,10 +8,13 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from shared.memory.embedding import LocalSemanticEmbeddingProvider
-from shared.memory.semantic_index import HnswlibSemanticIndex
-from shared.memory.store import TopicStore
-from shared.memory.retrieval import render_topic_md
+def score_text(query: str, text: str) -> float:
+    toks = [t for t in query.lower().split() if t]
+    if not toks:
+        return 0.0
+    low = text.lower()
+    hits = sum(1 for t in toks if t in low)
+    return hits / len(toks)
 
 
 def main():
@@ -19,31 +23,38 @@ def main():
         print("Usage: python run.py <topic_query>")
         sys.exit(1)
 
-    memory_dir = ROOT / ".memory"
-
-    try:
-        provider = LocalSemanticEmbeddingProvider()
-        index = HnswlibSemanticIndex(memory_dir / "semantic", name="topics", dim=provider.dim)
-        index.load()
-        store = TopicStore(memory_dir / "topics.json")
-    except Exception as e:
-        print(f"Error loading topic memory: {e}")
-        sys.exit(1)
-
-    query_vec = provider.embed(query)
-    hits = index.search(query_vec, k=5)
-
-    if not hits:
+    base = Path(os.environ.get("SHERIFFCLAW_ROOT", Path.home() / ".sheriffclaw")).resolve()
+    workspace = base / "agent_workspace"
+    if not workspace.exists():
         print("No topics or facts found.")
         return
 
-    print("--- Topic Database Results ---")
-    for tid, score in hits:
-        topic = store.get(tid)
-        if topic:
-            print(f"[Score: {score:.2f}]")
-            print(render_topic_md(topic))
-            print("-" * 30)
+    rows = []
+    for p in workspace.rglob("*"):
+        if not p.is_file():
+            continue
+        path_low = p.as_posix().lower()
+        if "topic" not in path_low and "summary" not in path_low and p.suffix.lower() not in {".md", ".txt", ".json"}:
+            continue
+        try:
+            content = p.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        s = score_text(query, f"{p.name}\n{content}")
+        if s > 0:
+            rows.append((s, p, content))
+
+    rows.sort(key=lambda x: x[0], reverse=True)
+    if not rows:
+        print("No topics or facts found.")
+        return
+
+    print("--- Topic File Results ---")
+    for score, p, content in rows[:5]:
+        print(f"[Score: {score:.2f}]")
+        print(str(p))
+        print(content[:1200].strip())
+        print("-" * 30)
 
 
 if __name__ == "__main__":

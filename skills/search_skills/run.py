@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import math
 import sys
 from pathlib import Path
 
@@ -9,16 +8,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from shared.skills.loader import SkillLoader
-from shared.memory.embedding import LocalSemanticEmbeddingProvider
 
 
-def cosine_similarity(v1, v2):
-    dot = sum(a * b for a, b in zip(v1, v2))
-    norm1 = math.sqrt(sum(a * a for a in v1))
-    norm2 = math.sqrt(sum(b * b for b in v2))
-    if norm1 == 0 or norm2 == 0:
+def lexical_score(query: str, text: str) -> float:
+    q = [t for t in query.lower().split() if t]
+    if not q:
         return 0.0
-    return dot / (norm1 * norm2)
+    low = text.lower()
+    hits = sum(1 for t in q if t in low)
+    return hits / len(q)
 
 
 def main():
@@ -30,25 +28,13 @@ def main():
     loader = SkillLoader(user_root=ROOT / "skills", system_root=ROOT / "system_skills")
     skills = loader.load()
 
-    try:
-        provider = LocalSemanticEmbeddingProvider()
-    except RuntimeError as e:
-        print(f"Error initializing embedding provider: {e}")
-        sys.exit(1)
-
-    query_vec = provider.embed(query)
-
     results = []
     for name, skill in skills.items():
         if name == "search_skills":
             continue
 
-        text_to_embed = f"{skill.description} {' '.join(skill.tags)}"
-        if not text_to_embed.strip():
-            text_to_embed = skill.name
-
-        desc_vec = provider.embed(text_to_embed)
-        score = cosine_similarity(query_vec, desc_vec)
+        searchable = f"{skill.name} {skill.description} {' '.join(skill.tags)} {skill.command}"
+        score = lexical_score(query, searchable)
         results.append((score, skill))
 
     results.sort(key=lambda x: x[0], reverse=True)
@@ -56,7 +42,7 @@ def main():
     print("--- Skill Search Results ---")
     found = False
     for score, skill in results[:5]:
-        if score > 0.2:
+        if score > 0:
             found = True
             print(f"Skill: {skill.name} (Score: {score:.2f})")
             print(f"Command: {skill.command}")

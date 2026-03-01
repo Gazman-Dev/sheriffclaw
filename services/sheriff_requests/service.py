@@ -5,9 +5,6 @@ import sqlite3
 import uuid
 from typing import Any
 
-import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-
 from shared.paths import gw_root
 from shared.proc_rpc import ProcClient
 
@@ -17,8 +14,6 @@ class SheriffRequestsService:
         state_dir = gw_root() / "state"
         state_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = state_dir / "requests.db"
-        self.vector_dir = state_dir / "requests_vectors"
-        self.vector_dir.mkdir(parents=True, exist_ok=True)
 
         self.tg_gate = ProcClient("sheriff-tg-gate")
         self.policy = ProcClient("sheriff-policy")
@@ -27,11 +22,6 @@ class SheriffRequestsService:
         self.secrets = None
 
         self._init_db()
-        self.chroma = chromadb.PersistentClient(path=str(self.vector_dir))
-        self.collection = self.chroma.get_or_create_collection(
-            name="requests_catalog",
-            embedding_function=self._embedding_function(),
-        )
 
     async def _secrets(self, op: str, payload: dict):
         if self.secrets is not None:
@@ -45,18 +35,6 @@ class SheriffRequestsService:
             inner = outer.get("result", {})
             return inner if isinstance(inner, dict) else {}
         return outer if isinstance(outer, dict) else {}
-
-    @staticmethod
-    def _embedding_function() -> SentenceTransformerEmbeddingFunction:
-        return SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
-
-    @staticmethod
-    def _doc_id(entry_type: str, key: str) -> str:
-        return f"{entry_type}:{key}"
-
-    @staticmethod
-    def _embedding_text(entry: dict[str, Any]) -> str:
-        return f"{entry['type']}\n{entry['key']}\n{entry['one_liner']}\n{entry['context_json']}"
 
     @staticmethod
     def _now_ms() -> int:
@@ -147,26 +125,6 @@ class SheriffRequestsService:
         )
         return request_id
 
-    def _upsert_chroma(self, entry: dict[str, Any]) -> None:
-        doc_id = self._doc_id(entry["type"], entry["key"])
-        self.collection.upsert(
-            ids=[doc_id],
-            documents=[self._embedding_text(entry)],
-            metadatas=[
-                {
-                    "type": entry["type"],
-                    "key": entry["key"],
-                    "status": entry["status"],
-                    "updated_at": int(entry["updated_at"]),
-                }
-            ],
-        )
-
-    def _upsert_existing_entry(self, entry_type: str, key: str) -> None:
-        entry = self._get_entry(entry_type, key)
-        if entry is not None:
-            self._upsert_chroma(entry)
-
     async def create_or_update(self, payload, emit_event, req_id):
         entry_type = payload["type"]
         key = payload["key"]
@@ -204,7 +162,6 @@ class SheriffRequestsService:
                     )
             request_id = self._insert_request_instance(conn, entry_id)
 
-        self._upsert_existing_entry(entry_type, key)
         entry = self._get_entry(entry_type, key)
 
         if should_notify:
@@ -237,29 +194,37 @@ class SheriffRequestsService:
         query = payload.get("query") or ""
         types = payload.get("types")
         k = int(payload.get("k", 8))
+        q_tokens = [t for t in query.lower().split() if t]
+        with self._conn() as conn:
+            if types:
+                placeholders = ",".join("?" for _ in types)
+                rows = conn.execute(
+                    f"SELECT type, key, status, one_liner, context_json, updated_at FROM catalog_entries WHERE type IN ({placeholders})",
+                    tuple(types),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT type, key, status, one_liner, context_json, updated_at FROM catalog_entries"
+                ).fetchall()
 
-        where = None
-        if types:
-            where = {"type": {"$in": list(types)}}
+        def _score(row) -> float:
+            hay = f"{row[0]} {row[1]} {row[3]} {row[4]}".lower()
+            if not q_tokens:
+                return 0.0
+            hit = sum(1 for t in q_tokens if t in hay)
+            return hit / max(len(q_tokens), 1)
 
-        result = self.collection.query(query_texts=[query], n_results=k, where=where)
-        ids = result.get("ids", [[]])[0]
-        distances = result.get("distances", [[]])[0]
-
-        matches =[]
-        for doc_id, distance in zip(ids, distances):
-            entry_type, key = doc_id.split(":", 1)
-            entry = self._get_entry(entry_type, key)
-            if entry is None:
-                continue
+        ranked = sorted(rows, key=lambda r: (_score(r), int(r[5])), reverse=True)
+        matches = []
+        for row in ranked[:k]:
             matches.append(
                 {
-                    "type": entry["type"],
-                    "key": entry["key"],
-                    "status": entry["status"],
-                    "one_liner": entry["one_liner"],
-                    "score": distance,
-                    "updated_at": entry["updated_at"],
+                    "type": row[0],
+                    "key": row[1],
+                    "status": row[2],
+                    "one_liner": row[3],
+                    "score": _score(row),
+                    "updated_at": row[5],
                 }
             )
         return {"matches": matches}
@@ -292,7 +257,6 @@ class SheriffRequestsService:
                                  (status, immutable, now, entry_id))
                 request_id = self._resolve_instance(conn, entry_id, {"action": "deny_secret"})
 
-            self._upsert_existing_entry("secret", key)
             await self.tg_gate.request(
                 "gate.notify_request_resolved",
                 {"event": "request_resolved", "type": "secret", "key": key, "status": "denied", "request_id": request_id, "context": {}},
@@ -321,7 +285,6 @@ class SheriffRequestsService:
                              (now, entry_id))
             request_id = self._resolve_instance(conn, entry_id, {"action": "provide_secret"})
 
-        self._upsert_existing_entry("secret", key)
         await self.tg_gate.request(
             "gate.notify_request_resolved",
             {"event": "request_resolved", "type": "secret", "key": key, "status": "approved", "request_id": request_id,
@@ -365,7 +328,6 @@ class SheriffRequestsService:
                              (status, immutable, now, entry_id))
             request_id = self._resolve_instance(conn, entry_id, {"action": action})
 
-        self._upsert_existing_entry(entry_type, key)
         await self.tg_gate.request(
             "gate.notify_request_resolved",
             {"event": "request_resolved", "type": entry_type, "key": key, "status": status, "request_id": request_id,

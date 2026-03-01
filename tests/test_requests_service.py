@@ -6,50 +6,9 @@ import pytest
 from services.sheriff_requests.service import SheriffRequestsService
 
 
-class FakeSemanticEmbedding:
-    def __call__(self, input):
-        vectors = []
-        for text in input:
-            low = text.lower()
-            githubish = 1.0 if any(token in low for token in ["github", "git", "gh", "repo", "repository"]) else 0.0
-            tokenish = 1.0 if any(token in low for token in ["token", "credential", "secret", "auth"]) else 0.0
-            domainish = 1.0 if any(token in low for token in ["domain", "host", "api."]) else 0.0
-            toolish = 1.0 if any(token in low for token in ["tool", "cli", "command", "exec"]) else 0.0
-            vectors.append([githubish, tokenish, domainish, toolish])
-        return vectors
-
-    def embed_documents(self, input):
-        return self(input)
-
-    def embed_query(self, input):
-        return self(input)
-
-    @staticmethod
-    def name():
-        return "default"
-
-    @staticmethod
-    def is_legacy():
-        return False
-
-    @staticmethod
-    def default_space():
-        return "l2"
-
-    @staticmethod
-    def supported_spaces():
-        return ["l2"]
-
-    @staticmethod
-    def get_config():
-        return {}
-
-
 @pytest.fixture
 def requests_svc(tmp_path, monkeypatch):
     monkeypatch.setattr("services.sheriff_requests.service.gw_root", lambda: tmp_path)
-    monkeypatch.setattr("services.sheriff_requests.service.SheriffRequestsService._embedding_function",
-                        staticmethod(lambda: FakeSemanticEmbedding()))
     svc = SheriffRequestsService()
     svc.tg_gate = AsyncMock()
     svc.secrets = AsyncMock()

@@ -1,6 +1,4 @@
-﻿import json
-from pathlib import Path
-
+﻿
 import pytest
 
 from shared.worker.worker_runtime import WorkerRuntime
@@ -17,8 +15,7 @@ async def test_worker_writes_inbox_file(tmp_path, monkeypatch):
     h = await rt.session_open("s1")
     await rt.user_message(h, "hello", None, emit, channel="telegram", principal_external_id="u1")
 
-    inbox = rt.inbox_dir
-    files = list(inbox.glob("*_user.md"))
+    files = list((rt.conversation_dir / h).glob("*_user.md"))
     assert files, "expected a user turn file"
     body = files[0].read_text(encoding="utf-8")
     assert "hello" in body
@@ -26,22 +23,14 @@ async def test_worker_writes_inbox_file(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_worker_dispatches_ready_manifest_files(tmp_path, monkeypatch):
+async def test_worker_dispatches_preexisting_zerozero_files(tmp_path, monkeypatch):
     monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
     rt = WorkerRuntime()
     h = await rt.session_open("s1")
-    date_token = "20260301"
-
-    msg_file = rt.outbox_dir / f"{h}_{date_token}_01.md"
+    session_dir = rt.conversation_dir / h
+    session_dir.mkdir(parents=True, exist_ok=True)
+    msg_file = session_dir / "00_2026_03_01_13_25_assistant.md"
     msg_file.write_text("from file", encoding="utf-8")
-    manifest = {
-        "session": h,
-        "date": date_token,
-        "files": [str(msg_file)],
-        "final": True,
-        "generated_at": "2026-03-01T00:00:00Z",
-    }
-    rt.ready_manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     events = []
 
@@ -72,6 +61,24 @@ async def test_worker_emits_tool_call_for_test_provider(tmp_path, monkeypatch):
     tool_calls = [p for e, p in events if e == "tool.call"]
     assert tool_calls
     assert tool_calls[0]["tool_name"] == "secure.secret.ensure"
+
+
+@pytest.mark.asyncio
+async def test_worker_writes_assistant_response_file_when_no_ready_manifest(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    rt = WorkerRuntime()
+    h = await rt.session_open("s1")
+    events = []
+
+    async def emit(event, payload):
+        events.append((event, payload))
+
+    await rt.user_message(h, "hello world", None, emit)
+    session_dir = rt.conversation_dir / h
+    assistant_files = list(session_dir.glob("00_*_assistant.md"))
+    assert assistant_files, "expected assistant response file"
+    text = assistant_files[0].read_text(encoding="utf-8")
+    assert "hello world" in text
 
 
 @pytest.mark.asyncio

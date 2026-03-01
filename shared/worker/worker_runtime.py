@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
+import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from shared.llm.providers import ChatGPTSubscriptionCodexProvider, OpenAICodexProvider, StubProvider, TestProvider
@@ -14,8 +16,8 @@ from shared.proc_rpc import ProcClient
 from shared.skills.loader import SkillLoader
 
 
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+def _local_now() -> datetime:
+    return datetime.now().astimezone()
 
 
 class WorkerRuntime:
@@ -33,13 +35,8 @@ class WorkerRuntime:
         self.agent_workspace = base_root() / "agent_workspace"
         self.agent_workspace.mkdir(parents=True, exist_ok=True)
 
-        self.inbox_dir = self.agent_workspace / "inbox"
-        self.outbox_dir = self.agent_workspace / "outbox"
-        self.events_dir = self.agent_workspace / "events"
-        for p in (self.inbox_dir, self.outbox_dir, self.events_dir):
-            p.mkdir(parents=True, exist_ok=True)
-
-        self.ready_manifest_path = self.outbox_dir / "_ready.json"
+        self.conversation_dir = self.agent_workspace / "conversation"
+        self.conversation_dir.mkdir(parents=True, exist_ok=True)
         self.skill_loader = SkillLoader(
             user_root=self.repo_root / "skills",
             system_root=self.repo_root / "system_skills",
@@ -57,11 +54,21 @@ class WorkerRuntime:
         if state is None:
             state = {
                 "tool_results": [],
-                "last_manifest": None,
                 "turn_counter": 0,
+                "sent_files": [],
             }
             self.sessions[handle] = state
         return state
+
+    def _session_dir(self, session: str) -> Path:
+        p = self.conversation_dir / session
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    def _session_system_dir(self, session: str) -> Path:
+        p = self._session_dir(session) / "system"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
 
     def _workspace_snapshot(self, max_entries: int = 200) -> list[str]:
         rows: list[str] = []
@@ -82,28 +89,57 @@ class WorkerRuntime:
                 rows.append(f"F {rel} ({sz} bytes)")
         return rows
 
-    def _build_system_prompt(self, *, session: str, date_token: str, channel: str, principal_id: str, text: str, tool_results: list[dict]) -> str:
+    def _prompt_template_path(self, name: str) -> Path:
+        return self.repo_root / "shared" / "prompts" / name
+
+    def _read_prompt_template(self, name: str, fallback: str) -> str:
+        p = self._prompt_template_path(name)
+        try:
+            return p.read_text(encoding="utf-8")
+        except Exception:
+            return fallback
+
+    @staticmethod
+    def _render_template(template: str, values: dict[str, str]) -> str:
+        out = template
+        for k, v in values.items():
+            out = out.replace(f"{{{{{k}}}}}", v)
+        return out
+
+    def _build_system_prompt(self, *, session: str, date_token: str, channel: str, text: str, tool_results: list[dict]) -> str:
         snapshot = "\n".join(self._workspace_snapshot())
         recent_tools = "\n".join(json.dumps(x, ensure_ascii=False) for x in tool_results[-8:])
-        return (
+        fallback = (
             "You are SheriffClaw orchestrator in a file-native runtime.\n"
             "Do not rely on chat history. Use files as source of truth.\n"
             "You can create, move, and organize files anywhere the OS sandbox allows.\n"
             "When ready for user delivery, ensure files are fully written and atomically renamed to final names.\n"
-            "Then write outbox/_ready.json with: session, date, files[], final, generated_at.\n"
-            f"Only list delivery files whose basename starts with '{session}_{date_token}'.\n"
+            "Then write <session>/_ready.json with: session, date, files[], final, generated_at.\n"
+            "Only list delivery files located under conversation/{{session}}/ and finalized (not .tmp).\n"
             "If you need privileged external actions, use TOOL_CALL.\n"
             "To spawn helper agents use TOOL_CALL with name agents.spawn.\n"
             "Only the main agent can spawn children.\n"
             "\n"
-            f"Current turn metadata:\nchannel={channel}\nprincipal={principal_id}\nsession={session}\n"
-            f"date={date_token}\nuser_text={text}\n"
+            "Current turn metadata:\nchannel={{channel}}\nsession={{session}}\n"
+            "date={{date}}\nuser_text={{user_text}}\n"
             "\n"
             "Workspace snapshot:\n"
-            f"{snapshot or '(empty)'}\n"
+            "{{workspace_snapshot}}\n"
             "\n"
             "Recent tool results:\n"
-            f"{recent_tools or '(none)'}\n"
+            "{{recent_tool_results}}\n"
+        )
+        tmpl = self._read_prompt_template("orchestrator_system_prompt.md", fallback)
+        return self._render_template(
+            tmpl,
+            {
+                "channel": channel,
+                "session": session,
+                "date": date_token,
+                "user_text": text,
+                "workspace_snapshot": snapshot or "(empty)",
+                "recent_tool_results": recent_tools or "(none)",
+            },
         )
 
     def _extract_tool_calls(self, text: str) -> tuple[list[dict], str]:
@@ -142,21 +178,86 @@ class WorkerRuntime:
             start = idx
         return calls, cleaned.strip()
 
-    def _write_turn_input_file(self, *, session: str, date_token: str, channel: str, principal_id: str, text: str) -> Path:
-        now = _utc_now()
-        ts = now.strftime("%Y%m%dT%H%M%S%fZ")
-        p = self.inbox_dir / f"{session}_{date_token}_{ts}_user.md"
+    def _acquire_seq_lock(self, session_dir: Path) -> Path:
+        lock = session_dir / ".seq.lock"
+        while True:
+            try:
+                fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fd)
+                return lock
+            except FileExistsError:
+                time.sleep(0.01)
+
+    def _release_seq_lock(self, lock_path: Path) -> None:
+        try:
+            lock_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    def _next_sequence(self, session_dir: Path) -> int:
+        pat = re.compile(r"^(\d+)_")
+        max_n = 0
+        for p in session_dir.rglob("*.md"):
+            m = pat.match(p.name)
+            if not m:
+                continue
+            try:
+                n = int(m.group(1))
+            except Exception:
+                continue
+            max_n = max(max_n, n)
+        return max_n + 1
+
+    def _write_session_md_file(self, *, session: str, kind: str, body: str, subdir: str | None = None) -> Path:
+        now = _local_now()
+        minute_stamp = now.strftime("%Y_%m_%d_%H_%M")
+        session_dir = self._session_dir(session)
+        target_dir = session_dir if not subdir else (session_dir / subdir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        lock = self._acquire_seq_lock(session_dir)
+        try:
+            seq = self._next_sequence(session_dir)
+            name = f"{seq}_{minute_stamp}_{kind}.md"
+            out = target_dir / name
+            self._atomic_write_text(out, body)
+            return out
+        finally:
+            self._release_seq_lock(lock)
+
+    def _write_turn_input_file(self, *, session: str, date_token: str, channel: str, text: str) -> Path:
+        now = _local_now()
         body = (
             f"# User Message\n\n"
             f"- session: {session}\n"
             f"- date: {date_token}\n"
-            f"- timestamp_utc: {now.isoformat()}\n"
+            f"- timestamp_local: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
             f"- channel: {channel}\n"
-            f"- principal: {principal_id}\n\n"
             f"## text\n\n{text}\n"
         )
-        p.write_text(body, encoding="utf-8")
-        return p
+        return self._write_session_md_file(session=session, kind="user", body=body)
+
+    def _atomic_write_text(self, path: Path, text: str) -> None:
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+
+    def _write_assistant_output_file(self, *, session: str, date_token: str, text: str) -> Path:
+        now = _local_now()
+        minute_stamp = now.strftime("%Y_%m_%d_%H_%M")
+        session_dir = self._session_dir(session)
+        final = session_dir / f"00_{minute_stamp}_assistant.md"
+        tmp = session_dir / f"00_{minute_stamp}_assistant.tmp"
+        body = (
+            f"# Assistant Message\n\n"
+            f"- session: {session}\n"
+            f"- date: {date_token}\n"
+            f"- timestamp_local: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
+            f"## text\n\n{text}\n"
+        )
+        tmp.write_text(body, encoding="utf-8")
+        os.replace(tmp, final)
+        return final
 
     async def _spawn_child_agent(self, *, parent_session: str, model: str, provider, payload: dict) -> dict:
         turn_key = parent_session
@@ -176,8 +277,16 @@ class WorkerRuntime:
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "You are a spawned helper agent. Complete the task using files/tools and return a concise result."
+                "content": self._render_template(
+                    self._read_prompt_template(
+                        "child_agent_system_prompt.md",
+                        "You are a spawned helper agent. Complete the task using files/tools and return a concise result.",
+                    ),
+                    {
+                        "parent_session": parent_session,
+                        "child_id": child_id,
+                        "timeout_seconds": str(timeout),
+                    },
                 ),
             },
             {"role": "user", "content": f"Task: {task}\nContext paths: {context_paths}\nOutput dir: {output_dir}"},
@@ -194,47 +303,29 @@ class WorkerRuntime:
         out_file.write_text(out, encoding="utf-8")
         return {"status": "ok", "child_id": child_id, "output_paths": [str(out_file)]}
 
-    def _load_ready_manifest(self) -> dict | None:
-        if not self.ready_manifest_path.exists():
-            return None
-        try:
-            obj = json.loads(self.ready_manifest_path.read_text(encoding="utf-8"))
-        except Exception:
-            return None
-        if not isinstance(obj, dict):
-            return None
-        if not isinstance(obj.get("files"), list):
-            return None
-        return obj
-
-    def _collect_ready_files(self, *, session: str, date_token: str, seen_manifest: dict | None) -> tuple[list[Path], dict | None]:
-        manifest = self._load_ready_manifest()
-        if not manifest:
-            return [], None
-        if seen_manifest is not None and manifest == seen_manifest:
-            return [], manifest
-        if str(manifest.get("session", "")) != session:
-            return [], manifest
-        if str(manifest.get("date", "")) != date_token:
-            return [], manifest
-
-        prefix = f"{session}_{date_token}"
+    def _collect_session_response_files(self, session: str, sent_files: set[str]) -> list[Path]:
+        session_dir = self._session_dir(session)
         files: list[Path] = []
-        for raw in manifest.get("files", []):
-            if not isinstance(raw, str) or not raw.strip():
+        for p in sorted(session_dir.glob("00_*_*.md")):
+            name = p.name.lower()
+            if name.endswith("_user.md") or name.endswith("_system.md") or name.endswith("_tools.md"):
                 continue
-            p = Path(raw)
-            if not p.is_absolute():
-                p = (self.agent_workspace / p).resolve()
-            name = p.name
-            if not name.startswith(prefix):
+            ps = str(p.resolve())
+            if ps in sent_files:
                 continue
-            if name.endswith(".tmp"):
-                continue
-            if not p.exists() or not p.is_file():
-                continue
-            files.append(p)
-        return files, manifest
+            files.append(p.resolve())
+        return files
+
+    def _write_system_prompt_file(self, *, session: str, prompt: str) -> Path:
+        now = _local_now()
+        body = (
+            "# System Prompt\n\n"
+            f"- session: {session}\n"
+            f"- timestamp_local: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}\n\n"
+            "## prompt\n\n"
+            f"{prompt}\n"
+        )
+        return self._write_session_md_file(session=session, kind="system", body=body, subdir="system")
 
     async def user_message(
         self,
@@ -252,17 +343,17 @@ class WorkerRuntime:
         state = self._session_state(session_handle)
         state["turn_counter"] = int(state.get("turn_counter", 0)) + 1
         turn_no = int(state["turn_counter"])
+        sent_files = set(state.get("sent_files", []))
 
         model = resolve_model(model_ref)
         selected_provider = provider_name or ("test" if model.startswith("test/") else "stub")
         provider = self._provider(selected_provider, api_key, base_url, codex_state_b64)
 
-        date_token = _utc_now().strftime("%Y%m%d")
+        date_token = _local_now().strftime("%Y_%m_%d")
         self._write_turn_input_file(
             session=session_handle,
             date_token=date_token,
             channel=channel,
-            principal_id=principal_external_id,
             text=text,
         )
 
@@ -273,13 +364,13 @@ class WorkerRuntime:
                     session=session_handle,
                     date_token=date_token,
                     channel=channel,
-                    principal_id=principal_external_id,
                     text=text,
                     tool_results=list(state.get("tool_results", [])),
                 ),
             },
             {"role": "user", "content": text},
         ]
+        self._write_system_prompt_file(session=session_handle, prompt=messages[0]["content"])
 
         assistant_msg = ""
         for _ in range(self.MAX_TOOL_ROUNDS):
@@ -307,28 +398,26 @@ class WorkerRuntime:
                 assistant_msg = "Tool call requested."
                 break
 
-        ready_files, manifest = self._collect_ready_files(
-            session=session_handle,
-            date_token=date_token,
-            seen_manifest=state.get("last_manifest"),
-        )
-        if manifest is not None:
-            state["last_manifest"] = manifest
-
-        if ready_files:
-            for p in ready_files:
+        pending_files = self._collect_session_response_files(session_handle, sent_files)
+        if pending_files:
+            for p in pending_files:
                 try:
                     content = p.read_text(encoding="utf-8")
                 except Exception as e:
                     content = f"Failed to read response file {p}: {e}"
                 await emit_event("assistant.delta", {"text": content})
                 await emit_event("assistant.final", {"text": content, "file_path": str(p)})
+                sent_files.add(str(p))
+            state["sent_files"] = sorted(sent_files)
             return
 
         if not assistant_msg:
-            assistant_msg = f"No ready response files generated for turn {turn_no}."
+            assistant_msg = f"No response files generated for turn {turn_no}."
+        p = self._write_assistant_output_file(session=session_handle, date_token=date_token, text=assistant_msg)
         await emit_event("assistant.delta", {"text": assistant_msg})
-        await emit_event("assistant.final", {"text": assistant_msg})
+        await emit_event("assistant.final", {"text": assistant_msg, "file_path": str(p)})
+        sent_files.add(str(p.resolve()))
+        state["sent_files"] = sorted(sent_files)
 
         if hasattr(provider, "last_codex_state_b64"):
             out_state = str(getattr(provider, "last_codex_state_b64") or "")
@@ -337,9 +426,9 @@ class WorkerRuntime:
 
     async def tool_result(self, session_handle: str, tool_name: str, result: dict) -> None:
         state = self._session_state(session_handle)
-        row = {"ts": _utc_now().isoformat(), "tool_name": tool_name, "result": result}
+        row = {"ts": _local_now().strftime("%Y-%m-%d %H:%M:%S %Z"), "tool_name": tool_name, "result": result}
         state["tool_results"].append(row)
-        log = self.events_dir / f"{session_handle}_tool_results.jsonl"
+        log = self._session_dir(session_handle) / "tool_results.jsonl"
         with log.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 

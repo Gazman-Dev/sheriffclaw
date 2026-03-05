@@ -51,7 +51,7 @@ def _set_ai_worker_allow_net(allow: bool) -> None:
 def _ai_worker_sandbox_profile() -> Path:
     p = gw_root() / "state" / "ai_worker.sb"
     workspace = gw_root().parent.resolve()
-    agent_ws = workspace / "agent_workspace"
+    agent_ws = workspace / "codex_agent"
     agent_ws.mkdir(parents=True, exist_ok=True)
 
     net_rule = "(allow network-outbound) (allow network-inbound)" if _network_allowed_for_ai_worker() else ""
@@ -96,7 +96,7 @@ def _ai_worker_sandbox_profile() -> Path:
 def _linux_sandbox_profile() -> Path:
     p = gw_root() / "state" / "ai_worker.bwrap.args"
     workspace = gw_root().parent.resolve()
-    agent_ws = (workspace / "agent_workspace").resolve()
+    agent_ws = (workspace / "codex_agent").resolve()
     skill_root = (workspace / "skills").resolve()
     system_skill_root = (workspace / "system_skills").resolve()
     gw = gw_root().resolve()

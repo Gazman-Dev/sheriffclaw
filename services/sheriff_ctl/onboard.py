@@ -1,5 +1,3 @@
-# File: services/sheriff_ctl/onboard.py
-
 from __future__ import annotations
 
 import asyncio
@@ -64,6 +62,7 @@ def cmd_onboard(args):
     existing: dict[str, str] = {}
 
     if keep_unchanged and _is_onboarded():
+
         async def _load_existing() -> dict[str, str]:
             gw = ProcClient("sheriff-gateway")
             ok = await _gw_secrets_call("secrets.unlock", {"master_password": mp}, gw=gw)
@@ -95,7 +94,7 @@ def cmd_onboard(args):
         while True:
             print("\nChoose your LLM:")
             print("1) OpenAI Codex (API key)")
-            print("2) OpenAI Codex (ChatGPT subscription login)")
+            print("2) OpenAI Codex (ChatGPT subscription login via external agent native workspace)")
             print("3) Local stub (testing only)")
             default_choice = "1"
             if keep_unchanged and existing.get("llm_provider"):
@@ -130,35 +129,7 @@ def cmd_onboard(args):
                 break
 
             if choice == "2":
-                print("Starting Codex CLI login...")
-                try:
-                    from shared.llm.providers import _CodexCliBase
-
-                    codex_home = _CodexCliBase._ram_codex_home()
-                    env = os.environ.copy()
-                    env["CODEX_HOME"] = str(codex_home)
-
-                    proc = subprocess.Popen(["codex", "login"], env=env)  # noqa: S603
-                    print("\nBrowser login in progress. Complete login, then press Enter here.")
-                    input("Press Enter after finishing login in browser...")
-
-                    st = subprocess.run(["codex", "login", "status"], env=env, stdout=subprocess.DEVNULL,
-                                        stderr=subprocess.DEVNULL, check=False)  # noqa: S603
-                    if st.returncode != 0:
-                        if proc.poll() is None:
-                            proc.terminate()
-                        print("codex login status is not authenticated. Please retry.")
-                        continue
-
-                    if proc.poll() is None:
-                        proc.terminate()
-
-                    # snapshot CODEX_HOME into encrypted vault state bundle
-                    snap = _CodexCliBase(codex_state_b64="")._snapshot_codex_state(codex_home)
-                    codex_state_b64 = snap
-                except Exception as e:
-                    print(f"Login cancelled/failed: {e}")
-                    continue
+                print("Codex CLI login and session state is now completely managed natively by the agent workspace CLI settings.")
                 llm_prov = "openai-codex-chatgpt"
                 llm_key = ""
                 llm_auth = None
@@ -181,8 +152,7 @@ def cmd_onboard(args):
     llm_bot = args.llm_bot_token
     if llm_bot is None:
         if keep_unchanged and existing.get("llm_bot_token"):
-            llm_bot = input("Telegram AI bot token (Enter=keep unchanged): ").strip() or existing.get("llm_bot_token",
-                                                                                                      "")
+            llm_bot = input("Telegram AI bot token (Enter=keep unchanged): ").strip() or existing.get("llm_bot_token", "")
         else:
             llm_bot = input("Telegram AI bot token (BotFather): ").strip()
 
@@ -198,8 +168,6 @@ def cmd_onboard(args):
         print("2) The bot will reply with an activation code.")
         print("3) Paste that code here.")
 
-        # If webhook is currently set for this token, getUpdates will not deliver messages.
-        # Best-effort disable webhook during activation polling.
         try:
             r = requests.post(
                 f"https://api.telegram.org/bot{token}/deleteWebhook",
@@ -217,7 +185,6 @@ def cmd_onboard(args):
         wait_ticks = 0
 
         while time.time() - start < timeout_sec:
-            # Already activated?
             st = await _gw_secrets_call("secrets.activation.status", {"bot_role": role}, gw=gw)
             if st.get("user_id"):
                 return True
@@ -230,63 +197,38 @@ def cmd_onboard(args):
                 )
                 data = resp.json()
                 updates = data.get("result", []) if isinstance(data, dict) else []
-                OPLOG.info("activation[%s] getUpdates status=%s count=%s offset=%s", role, resp.status_code,
-                           len(updates), offset)
-            except Exception as e:
-                OPLOG.exception("activation[%s] getUpdates failed: %s", role, e)
+            except Exception:
                 updates = []
 
             for upd in updates:
                 update_id = int(upd.get("update_id", 0))
                 offset = max(offset, update_id + 1)
                 msg = upd.get("message") or {}
-                from_user = msg.get("from") or {}
-                chat = msg.get("chat") or {}
-                user_id = str(from_user.get("id") or "")
-                chat_id = chat.get("id")
-                text_in = (msg.get("text") or "").strip()
-                OPLOG.info(
-                    "activation[%s] update id=%s has_message=%s user_id=%s chat_id=%s has_text=%s",
-                    role,
-                    update_id,
-                    bool(msg),
-                    bool(user_id),
-                    chat_id,
-                    bool(text_in),
-                )
+                user_id = str((msg.get("from") or {}).get("id") or "")
+                chat_id = (msg.get("chat") or {}).get("id")
                 if not user_id or chat_id is None:
-                    OPLOG.info("activation[%s] skip update id=%s reason=missing_user_or_chat", role, update_id)
                     continue
 
                 bound = await _gw_secrets_call("secrets.activation.status", {"bot_role": role}, gw=gw)
-                bound_uid = bound.get("user_id")
-                if bound_uid and str(bound_uid) == user_id:
-                    OPLOG.info("activation[%s] skip update id=%s reason=already_bound user_id=%s", role, update_id,
-                               user_id)
+                if bound.get("user_id") and str(bound.get("user_id")) == user_id:
                     continue
 
                 code = sent_codes.get(user_id)
                 if not code:
-                    c = await _gw_secrets_call("secrets.activation.create", {"bot_role": role, "user_id": user_id},
-                                               gw=gw)
+                    c = await _gw_secrets_call("secrets.activation.create", {"bot_role": role, "user_id": user_id}, gw=gw)
                     code = c.get("code")
                     if not code:
-                        OPLOG.warning("activation[%s] failed to create code user_id=%s response=%s", role, user_id, c)
                         continue
                     sent_codes[user_id] = code
                     user_chat[user_id] = int(chat_id)
-
-                    text = f"Your activation code is: {code}"
                     try:
-                        s = requests.post(
+                        requests.post(
                             f"https://api.telegram.org/bot{token}/sendMessage",
-                            json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
+                            json={"chat_id": chat_id, "text": f"Your activation code is: {code}", "disable_web_page_preview": True},
                             timeout=15,
                         )
-                        OPLOG.info("activation[%s] send code chat_id=%s status=%s body=%s", role, chat_id,
-                                   s.status_code, (s.text or "")[:300])
-                    except Exception as e:
-                        OPLOG.exception("activation[%s] send code failed chat_id=%s err=%s", role, chat_id, e)
+                    except Exception:
+                        pass
 
             if sent_codes:
                 try:
@@ -299,35 +241,27 @@ def cmd_onboard(args):
                 if claim.get("ok"):
                     ok_user = str(claim.get("user_id") or "")
                     ok_chat = user_chat.get(ok_user)
-                    OPLOG.info("activation[%s] claim success user_id=%s chat_id=%s", role, ok_user, ok_chat)
                     if ok_chat:
                         try:
-                            s = requests.post(
+                            requests.post(
                                 f"https://api.telegram.org/bot{token}/sendMessage",
-                                json={"chat_id": ok_chat, "text": "✅ Activated. You can chat now.",
-                                      "disable_web_page_preview": True},
+                                json={"chat_id": ok_chat, "text": "Activated. You can chat now.", "disable_web_page_preview": True},
                                 timeout=15,
                             )
-                            OPLOG.info("activation[%s] send success message chat_id=%s status=%s", role, ok_chat,
-                                       s.status_code)
-                        except Exception as e:
-                            OPLOG.exception("activation[%s] send success message failed chat_id=%s err=%s", role,
-                                            ok_chat, e)
+                        except Exception:
+                            pass
                     return True
                 print("Invalid code, try again.")
             else:
                 wait_ticks += 1
                 if wait_ticks % 5 == 1:
-                    OPLOG.info("activation[%s] waiting for DM... elapsed=%ss", role, int(time.time() - start))
-                print("Waiting for a Telegram DM to the bot...")
+                    print("Waiting for a Telegram DM to the bot...")
                 await asyncio.sleep(2)
 
-        OPLOG.warning("activation[%s] timed out after %ss", role, timeout_sec)
         return False
 
     async def _run():
         gw = ProcClient("sheriff-gateway")
-        # Give services a moment to be ready if we just started them
         for _ in range(5):
             try:
                 await gw.request("health", {})
@@ -349,22 +283,18 @@ def cmd_onboard(args):
         )
         unlock_res = await _gw_secrets_call("secrets.unlock", {"master_password": mp}, gw=gw)
         if not unlock_res.get("ok"):
-            OPLOG.error("onboard unlock failed after initialize: %s", unlock_res)
             raise RuntimeError("failed to unlock vault after onboarding initialize")
         st_unlock = await _gw_secrets_call("secrets.is_unlocked", {}, gw=gw)
         if not st_unlock.get("unlocked"):
-            OPLOG.error("onboard unlock check failed after initialize: %s", st_unlock)
             raise RuntimeError("vault is still locked after unlock")
 
         if llm_auth:
             await _gw_secrets_call("secrets.set_llm_auth", {"auth": llm_auth}, gw=gw)
         if codex_state_b64:
             await _gw_secrets_call("secrets.codex_state.set", {"bundle_b64": codex_state_b64}, gw=gw)
-            # Subscription auth now lives in codex CLI state bundle.
             await _gw_secrets_call("secrets.clear_llm_auth", {}, gw=gw)
 
         interactive = sys.stdin.isatty()
-
         if llm_bot:
             await _gw_secrets_call("secrets.set_llm_bot_token", {"token": llm_bot}, gw=gw)
             if interactive:
@@ -377,8 +307,7 @@ def cmd_onboard(args):
         gate_tok = gate_bot
         if gate_tok is None:
             if keep_unchanged and existing.get("gate_bot_token"):
-                gate_tok = input("Telegram Sheriff bot token (Enter=keep unchanged): ").strip() or existing.get(
-                    "gate_bot_token", "")
+                gate_tok = input("Telegram Sheriff bot token (Enter=keep unchanged): ").strip() or existing.get("gate_bot_token", "")
             else:
                 gate_tok = input("Telegram Sheriff bot token (BotFather): ").strip()
 
@@ -394,7 +323,6 @@ def cmd_onboard(args):
         if (llm_bot or gate_tok) and not interactive:
             print("Skipping activation wait in non-interactive mode.")
 
-        # Ask unlock policy only after activation phase
         nonlocal allow_tg
         if args.allow_telegram:
             allow_tg = True
@@ -403,8 +331,7 @@ def cmd_onboard(args):
         else:
             if keep_unchanged and "allow_telegram_master_password" in existing:
                 cur = "Y" if existing.get("allow_telegram_master_password") else "N"
-                ans = input(
-                    f"Allow sending master password via Telegram to unlock?[y/N] (Enter=keep {cur}): ").strip().lower()
+                ans = input(f"Allow sending master password via Telegram to unlock?[y/N] (Enter=keep {cur}): ").strip().lower()
                 if not ans:
                     allow_tg = bool(existing.get("allow_telegram_master_password"))
                 else:
@@ -417,7 +344,6 @@ def cmd_onboard(args):
         master_policy.parent.mkdir(parents=True, exist_ok=True)
         master_policy.write_text(json.dumps({"allow_telegram_master_password": allow_tg}), encoding="utf-8")
 
-        # Optional: allow proactive lock/unlock notifications via Sheriff channel only.
         if allow_tg and gate_tok:
             bound = await _gw_secrets_call("secrets.activation.status", {"bot_role": "sheriff"}, gw=gw)
             bound_uid = str(bound.get("user_id") or "")
@@ -434,10 +360,10 @@ def cmd_onboard(args):
         print("\nOnboarding cancelled.")
         return
 
-    # Keep edge listener services alive after onboarding so Telegram replies work immediately.
     SERVICE_MANAGER.start_many(MANAGED_SERVICES)
 
     if mp:
+
         async def _post_unlock() -> bool:
             gw = ProcClient("sheriff-gateway")
             for _ in range(20):
@@ -474,7 +400,6 @@ def cmd_configure_llm(args):
             res = await _gw_secrets_call("secrets.unlock", {"master_password": args.master_password}, gw=gw)
             if not res.get("ok"):
                 raise RuntimeError("failed to unlock vault with provided master password")
-
         await _gw_secrets_call("secrets.set_llm_provider", {"provider": provider}, gw=gw)
         await _gw_secrets_call("secrets.set_llm_api_key", {"api_key": api_key}, gw=gw)
 

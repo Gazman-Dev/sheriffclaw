@@ -23,7 +23,7 @@ from shared.proc_rpc import ProcClient
 
 def _wipe_all_state() -> None:
     base = gw_root().parent
-    for name in ("gw", "llm", "agent_workspace", ".memory"):
+    for name in ("gw", "llm", "codex_agent", "agent_workspace", ".memory"):
         target = base / name
         if target.exists():
             if target.is_dir():

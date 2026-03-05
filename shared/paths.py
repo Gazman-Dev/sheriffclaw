@@ -22,3 +22,10 @@ def gw_root() -> Path:
 
 def llm_root() -> Path:
     return _ensure_island(base_root() / "llm")
+
+
+def agent_root() -> Path:
+    project_root = Path(__file__).resolve().parents[1]
+    root = project_root / "agents" / "codex"
+    root.mkdir(parents=True, exist_ok=True)
+    return root

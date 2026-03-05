@@ -215,6 +215,19 @@ setup_venv_and_install() {
     python -m pip install "$SOURCE_DIR" --quiet
 }
 
+sync_agent_workspace_template() {
+    local src="$SOURCE_DIR/agents/codex"
+    local dst="$INSTALL_DIR/agents/codex"
+    mkdir -p "$dst"
+    if [ -d "$src" ]; then
+        # Seed only missing files; preserve user auth/session state.
+        cp -R -n "$src"/. "$dst"/ 2>/dev/null || true
+        log "Agent workspace template synced to $dst"
+    else
+        warn "Agent workspace template not found at $src; created empty $dst"
+    fi
+}
+
 setup_alias() {
     local shell_cfg=""
     if [ -f "$HOME/.zshrc" ]; then
@@ -398,6 +411,7 @@ acquire_lock
 ensure_system_dependencies
 ensure_sandbox_dependencies
 sync_source
+sync_agent_workspace_template
 setup_venv_and_install
 setup_alias
 setup_ai_worker_user

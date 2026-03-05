@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 
@@ -25,7 +26,33 @@ def llm_root() -> Path:
 
 
 def agent_root() -> Path:
-    project_root = Path(__file__).resolve().parents[1]
-    root = project_root / "agents" / "codex"
+    root = base_root() / "agents" / "codex"
     root.mkdir(parents=True, exist_ok=True)
+
+    def _copy_missing_tree(src: Path, dst: Path) -> None:
+        for item in src.rglob("*"):
+            rel = item.relative_to(src)
+            target = dst / rel
+            if item.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            if not target.exists():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(item, target)
+
+    source_candidates = [
+        # Installer-managed source checkout location.
+        base_root() / "source" / "agents" / "codex",
+        # Developer checkout location.
+        Path(__file__).resolve().parents[1] / "agents" / "codex",
+    ]
+    for src in source_candidates:
+        if src.exists():
+            _copy_missing_tree(src, root)
+            break
+
+    # Ensure minimal runtime folders always exist.
+    for rel in (".codex", "conversations/sessions", "skill", "tmp"):
+        (root / rel).mkdir(parents=True, exist_ok=True)
+
     return root

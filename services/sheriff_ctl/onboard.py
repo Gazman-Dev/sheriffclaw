@@ -16,8 +16,40 @@ from services.sheriff_ctl.utils import (
     _is_onboarded,
     _save_telegram_unlock_channel,
 )
-from shared.paths import gw_root
+from shared.paths import agent_root, gw_root
 from shared.proc_rpc import ProcClient
+
+
+def _ensure_codex_subscription_login() -> bool:
+    """
+    Ensure the native Codex CLI workspace used by Sheriff is logged in.
+    Returns True when login state is valid, otherwise False.
+    """
+    env = os.environ.copy()
+    env["CODEX_HOME"] = str(agent_root())
+
+    try:
+        status = subprocess.run(["codex", "login", "status"], env=env, check=False)
+    except FileNotFoundError:
+        print("Codex CLI is not installed or not on PATH. Install Codex CLI and retry onboarding.")
+        return False
+
+    if status.returncode == 0:
+        return True
+
+    print("\nCodex subscription provider requires native Codex CLI login.")
+    print("Starting `codex login` for the Sheriff agent workspace...")
+    login = subprocess.run(["codex", "login"], env=env, check=False)
+    if login.returncode != 0:
+        print("Codex login did not complete successfully.")
+        return False
+
+    status = subprocess.run(["codex", "login", "status"], env=env, check=False)
+    if status.returncode != 0:
+        print("Codex login status is still not active after login.")
+        return False
+
+    return True
 
 
 def cmd_onboard(args):
@@ -144,6 +176,11 @@ def cmd_onboard(args):
                 llm_key = getpass.getpass("OpenAI API Key: ").strip()
         else:
             llm_key = ""
+
+    if llm_prov == "openai-codex-chatgpt":
+        if not _ensure_codex_subscription_login():
+            print("Onboarding aborted: Codex subscription login is required before continuing.")
+            return
 
     channel = "telegram"
     print("\nChannel setup:")

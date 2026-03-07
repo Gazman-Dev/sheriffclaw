@@ -4,8 +4,12 @@ import asyncio
 import json
 import os
 import re
+import subprocess
 import time
 from pathlib import Path
+
+if os.name != "nt":
+    import pty
 
 from shared.oplog import RotatingTextLog
 from shared.paths import agent_root, llm_root
@@ -48,7 +52,10 @@ class WorkerRuntime:
 
     async def _drain_codex_stream(self, stream, sink: RotatingTextLog, stream_name: str) -> None:
         while True:
-            chunk = await stream.read(512)
+            if hasattr(stream, "read_chunk"):
+                chunk = await stream.read_chunk(512)
+            else:
+                chunk = await stream.read(512)
             if not chunk:
                 return
             text = chunk.decode("utf-8", errors="replace")
@@ -56,13 +63,23 @@ class WorkerRuntime:
             if stream_name == "stdout":
                 await self._handle_codex_stdout(text)
 
+    async def _write_codex_bytes(self, payload: bytes) -> None:
+        if self.codex_proc is None:
+            raise RuntimeError("codex process is not running")
+        if hasattr(self.codex_proc, "write_stdin"):
+            await self.codex_proc.write_stdin(payload)
+            return
+        if getattr(self.codex_proc, "stdin", None) is None:
+            raise RuntimeError("codex stdin unavailable")
+        self.codex_proc.stdin.write(payload)
+        await self.codex_proc.stdin.drain()
+
     async def _write_codex_control(self, payload: bytes, *, reason: str, session: str | None = None) -> None:
         if self.codex_proc is None or self.codex_proc.stdin is None:
             self._debug_log("codex_control_unavailable", reason=reason, session=session)
             return
         try:
-            self.codex_proc.stdin.write(payload)
-            await self.codex_proc.stdin.drain()
+            await self._write_codex_bytes(payload)
             self._debug_log("codex_control_write", reason=reason, session=session, payload_hex=payload.hex())
         except Exception as exc:
             self._debug_log("codex_control_write_failed", reason=reason, session=session, error=str(exc))
@@ -175,18 +192,25 @@ class WorkerRuntime:
             cmd = build_chat_command(self.repo_root)
             use_pipe_logs = os.name != "nt"
             try:
-                self.codex_proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE if use_pipe_logs else asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.PIPE if use_pipe_logs else asyncio.subprocess.DEVNULL,
-                    cwd=str(self.agent_workspace),
-                    env=env,
-                )
+                if os.name != "nt" and not debug_enabled():
+                    self.codex_proc = _PosixPtyProcess.start(cmd, cwd=str(self.agent_workspace), env=env)
+                else:
+                    self.codex_proc = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdin=asyncio.subprocess.PIPE,
+                        stdout=asyncio.subprocess.PIPE if use_pipe_logs else asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.PIPE if use_pipe_logs else asyncio.subprocess.DEVNULL,
+                        cwd=str(self.agent_workspace),
+                        env=env,
+                    )
                 self.codex_start_error = ""
                 self.codex_prompt_buffer = ""
                 self.codex_prompt_last_action.clear()
-                if use_pipe_logs and self.codex_proc.stdout is not None and self.codex_proc.stderr is not None:
+                if isinstance(self.codex_proc, _PosixPtyProcess):
+                    self.codex_stdout_task = asyncio.create_task(
+                        self._drain_codex_stream(self.codex_proc, self.codex_stdout_log, "stdout")
+                    )
+                elif use_pipe_logs and self.codex_proc.stdout is not None and self.codex_proc.stderr is not None:
                     self.codex_stdout_task = asyncio.create_task(
                         self._drain_codex_stream(self.codex_proc.stdout, self.codex_stdout_log, "stdout")
                     )
@@ -220,8 +244,7 @@ class WorkerRuntime:
             return
         payload = (text.rstrip("\n") + "\n").encode("utf-8")
         try:
-            self.codex_proc.stdin.write(payload)
-            await self.codex_proc.stdin.drain()
+            await self._write_codex_bytes(payload)
             self._debug_log("codex_stdin_write", session=session_handle, bytes=len(payload), text=text)
         except Exception as exc:
             self._debug_log("codex_stdin_write_failed", session=session_handle, error=str(exc))
@@ -376,3 +399,54 @@ class WorkerRuntime:
                 except Exception:
                     pass
                 setattr(self, task_name, None)
+
+
+class _PosixPtyProcess:
+    def __init__(self, proc: subprocess.Popen[bytes], master_fd: int):
+        self._proc = proc
+        self._master_fd = master_fd
+
+    @classmethod
+    def start(cls, argv: list[str], *, cwd: str, env: dict[str, str]) -> "_PosixPtyProcess":
+        master_fd, slave_fd = pty.openpty()
+        try:
+            proc = subprocess.Popen(
+                argv,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                cwd=cwd,
+                env=env,
+                close_fds=True,
+            )
+        finally:
+            os.close(slave_fd)
+        return cls(proc, master_fd)
+
+    @property
+    def returncode(self):
+        return self._proc.poll()
+
+    async def read_chunk(self, size: int) -> bytes:
+        try:
+            return await asyncio.to_thread(os.read, self._master_fd, size)
+        except OSError:
+            return b""
+
+    async def write_stdin(self, payload: bytes) -> None:
+        await asyncio.to_thread(os.write, self._master_fd, payload)
+
+    def terminate(self) -> None:
+        self._proc.terminate()
+
+    def kill(self) -> None:
+        self._proc.kill()
+
+    async def wait(self) -> int:
+        try:
+            return await asyncio.to_thread(self._proc.wait)
+        finally:
+            try:
+                os.close(self._master_fd)
+            except OSError:
+                pass

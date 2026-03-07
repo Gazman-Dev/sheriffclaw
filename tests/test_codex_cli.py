@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from shared.worker import codex_cli
 
 
@@ -35,13 +33,8 @@ def test_augment_path_adds_common_locations(monkeypatch, tmp_path):
     assert str(tmp_path / ".npm" / "bin") in out
 
 
-def test_build_chat_command_wraps_codex_with_script_on_macos(monkeypatch, tmp_path):
+def test_build_chat_command_uses_direct_codex_binary(monkeypatch):
     monkeypatch.setenv("SHERIFF_DEBUG", "0")
-    monkeypatch.setattr(codex_cli.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(codex_cli, "resolve_codex_binary", lambda: "/opt/homebrew/bin/codex")
-    script_bin = tmp_path / "script"
-    script_bin.write_text("", encoding="utf-8")
-    monkeypatch.setattr(codex_cli.shutil, "which", lambda name: str(script_bin) if name == "script" else None)
-    cmd = codex_cli.build_chat_command(Path.cwd())
-    assert cmd[:3] == [str(script_bin), "-q", "/dev/null"]
-    assert cmd[3:] == ["/opt/homebrew/bin/codex", "chat", "--dangerously-bypass-approvals-and-sandbox"]
+    cmd = codex_cli.build_chat_command(codex_cli.Path.cwd())
+    assert cmd == ["/opt/homebrew/bin/codex", "chat", "--dangerously-bypass-approvals-and-sandbox"]

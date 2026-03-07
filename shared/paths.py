@@ -35,13 +35,50 @@ def agent_root() -> Path:
             rel_parts = rel.parts
             if len(rel_parts) >= 2 and rel_parts[0] == "conversations" and rel_parts[1] == "sessions":
                 continue
-            target = dst / rel
+            if rel_parts == (".codex", "config.toml"):
+                target = dst / "config.toml"
+            else:
+                target = dst / rel
             if item.is_dir():
                 target.mkdir(parents=True, exist_ok=True)
                 continue
             if not target.exists():
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(item, target)
+
+    def _toml_basic_string(value: str) -> str:
+        return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+    def _ensure_trusted_project(global_config: Path, workspace_root: Path) -> None:
+        trust_header = f"[projects.{_toml_basic_string(str(workspace_root))}]"
+        trust_line = 'trust_level = "trusted"'
+        existing = global_config.read_text(encoding="utf-8") if global_config.exists() else ""
+        if trust_header in existing and trust_line in existing:
+            return
+        with global_config.open("a", encoding="utf-8") as fh:
+            if existing and not existing.endswith("\n"):
+                fh.write("\n")
+            if existing:
+                fh.write("\n")
+            fh.write(f"{trust_header}\n{trust_line}\n")
+
+    def _migrate_legacy_codex_config(dst: Path) -> None:
+        legacy_config = dst / ".codex" / "config.toml"
+        global_config = dst / "config.toml"
+        if legacy_config.exists() and not global_config.exists():
+            legacy_config.replace(global_config)
+        elif legacy_config.exists() and global_config.exists():
+            legacy_text = legacy_config.read_text(encoding="utf-8")
+            global_text = global_config.read_text(encoding="utf-8")
+            if legacy_text == global_text:
+                legacy_config.unlink()
+            else:
+                backup = dst / ".codex" / "config.toml.legacy"
+                if not backup.exists():
+                    legacy_config.replace(backup)
+                else:
+                    legacy_config.unlink()
+        _ensure_trusted_project(global_config, dst)
 
     source_candidates = [
         # Installer-managed source checkout location.
@@ -57,5 +94,7 @@ def agent_root() -> Path:
     # Ensure minimal runtime folders always exist.
     for rel in (".codex", "conversations/sessions", "skill", "tmp"):
         (root / rel).mkdir(parents=True, exist_ok=True)
+
+    _migrate_legacy_codex_config(root)
 
     return root

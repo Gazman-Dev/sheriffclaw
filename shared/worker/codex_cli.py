@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import sys
 from pathlib import Path
@@ -54,7 +55,12 @@ def augment_path(path_value: str | None) -> str:
 def build_chat_command(repo_root: Path) -> list[str]:
     if debug_enabled():
         return [sys.executable, str(debug_script(repo_root)), "chat", "--dangerously-bypass-approvals-and-sandbox"]
-    return [resolve_codex_binary(), "chat", "--dangerously-bypass-approvals-and-sandbox"]
+    codex = resolve_codex_binary()
+    if platform.system() == "Darwin":
+        script_bin = shutil.which("script") or "/usr/bin/script"
+        if Path(script_bin).exists():
+            return [script_bin, "-q", "/dev/null", codex, "chat", "--dangerously-bypass-approvals-and-sandbox"]
+    return [codex, "chat", "--dangerously-bypass-approvals-and-sandbox"]
 
 
 def build_login_status_command(repo_root: Path) -> list[str]:

@@ -67,7 +67,9 @@ class WorkerRuntime:
         if self.codex_proc is None:
             raise RuntimeError("codex process is not running")
         if hasattr(self.codex_proc, "write_stdin"):
-            await self.codex_proc.write_stdin(payload)
+            # Chunk the write to avoid pty buffer overflow on long Telegram messages
+            for i in range(0, len(payload), 1024):
+                await self.codex_proc.write_stdin(payload[i:i+1024])
             return
         if getattr(self.codex_proc, "stdin", None) is None:
             raise RuntimeError("codex stdin unavailable")
@@ -90,7 +92,7 @@ class WorkerRuntime:
     def _extract_prompt_lines(self, text: str) -> list[str]:
         normalized = self._normalized_codex_text(text)
         lines = [line.strip() for line in normalized.splitlines()]
-        lines = [line for line in lines if line]
+        lines =[line for line in lines if line]
         return lines[-40:]
 
     def _build_manual_prompt(self, text: str) -> dict | None:
@@ -106,7 +108,7 @@ class WorkerRuntime:
         return None
 
     def _extract_interactive_menu(self, lines: list[str]) -> tuple[list[str], list[dict]]:
-        candidate_starts = [
+        candidate_starts =[
             idx
             for idx, line in enumerate(lines)
             if any(token in line for token in ("choose", "select", "press enter to confirm", "use ↑/↓", "use up/down"))
@@ -119,9 +121,9 @@ class WorkerRuntime:
             if options:
                 return window, options
 
-        menu_indices = [idx for idx, line in enumerate(lines) if re.match(r"^[>\s]*([0-9]+)[.)]\s+(.+)$", line)]
+        menu_indices =[idx for idx, line in enumerate(lines) if re.match(r"^[>\s]*([0-9]+)[.)]\s+(.+)$", line)]
         if not menu_indices:
-            return [], []
+            return [],[]
         groups: list[list[int]] = []
         current = [menu_indices[0]]
         for idx in menu_indices[1:]:
@@ -137,7 +139,7 @@ class WorkerRuntime:
         window = lines[start:end]
         options = self._extract_menu_options(window)
         if len(options) < 2:
-            return [], []
+            return [],[]
         return window, options
 
     def _extract_menu_options(self, lines: list[str]) -> list[dict]:
@@ -150,17 +152,17 @@ class WorkerRuntime:
             idx = int(match.group(1))
             label = re.sub(r"^[^a-z0-9/]+", "", match.group(2).strip())
             if (
-                not label
-                or label in seen_labels
-                or idx <= 0
-                or label.startswith("/")
-                or label.startswith("http")
-                or label.startswith("/users/")
-                or "/" in label
-                or ".codex" in label
-                or "config.toml" in label
-                or "release notes" in label
-                or "update available" in label
+                    not label
+                    or label in seen_labels
+                    or idx <= 0
+                    or label.startswith("/")
+                    or label.startswith("http")
+                    or label.startswith("/users/")
+                    or "/" in label
+                    or ".codex" in label
+                    or "config.toml" in label
+                    or "release notes" in label
+                    or "update available" in label
             ):
                 continue
             seen_labels.add(label)
@@ -280,7 +282,8 @@ class WorkerRuntime:
             self._debug_log("codex_stdin_unavailable", session=session_handle)
             return
         prompt_text = self._build_codex_stdin_prompt(session_handle, text, first_message=first_message)
-        payload = (prompt_text.rstrip("\n") + "\n").encode("utf-8")
+        # Multiline prompt_toolkit fields typically require Escape + Enter (Alt+Enter) to submit in a PTY.
+        payload = (prompt_text.rstrip("\n") + "\n\x1b\r").encode("utf-8")
         try:
             await self._write_codex_bytes(payload)
             self._debug_log("codex_stdin_write", session=session_handle, bytes=len(payload), text=prompt_text)
@@ -310,12 +313,12 @@ class WorkerRuntime:
         return True
 
     async def user_message(
-        self,
-        session_handle: str,
-        text: str,
-        model_ref: str | None,
-        emit_event,
-        **kwargs,
+            self,
+            session_handle: str,
+            text: str,
+            model_ref: str | None,
+            emit_event,
+            **kwargs,
     ):
         session_dir = self.conversations_dir / session_handle
         session_dir.mkdir(parents=True, exist_ok=True)
@@ -349,12 +352,13 @@ class WorkerRuntime:
 
         start = time.time()
         emitted_typing = False
-        timeout_sec = 300.0
+        last_heartbeat = 0.0
+        timeout_sec = float(os.environ.get("SHERIFF_AGENT_TIMEOUT_SEC", "900.0"))
         if debug_mode:
             try:
                 timeout_sec = float(os.environ.get("SHERIFF_DEBUG_TIMEOUT_SEC", timeout_sec))
             except ValueError:
-                timeout_sec = 300.0
+                timeout_sec = 900.0
 
         while time.time() - start < timeout_sec:
             if session_handle in self.codex_prompt_state and pending_file.exists():
@@ -376,10 +380,17 @@ class WorkerRuntime:
                     return
                 except Exception:
                     self._debug_log("pending_read_failed", session=session_handle)
-            elif typing_file.exists() and not emitted_typing:
-                self._debug_log("assistant_typing", session=session_handle)
-                await emit_event("assistant.delta", {"text": "typing..."})
-                emitted_typing = True
+            elif typing_file.exists():
+                now = time.time()
+                if not emitted_typing:
+                    self._debug_log("assistant_typing", session=session_handle)
+                    await emit_event("assistant.delta", {"text": "typing..."})
+                    emitted_typing = True
+                    last_heartbeat = now
+                elif now - last_heartbeat > 30.0:
+                    # Emit a heartbeat to keep the ProcClient RPC connection alive
+                    await emit_event("assistant.heartbeat", {})
+                    last_heartbeat = now
 
             await asyncio.sleep(0.2)
 
@@ -402,7 +413,7 @@ class WorkerRuntime:
             return {"error": f"unknown skill: {name}"}
 
         cmd = loaded.command
-        argv = payload.get("argv", [])
+        argv = payload.get("argv",[])
         stdin_data = payload.get("stdin", "")
         if argv:
             cmd = f"{cmd} {' '.join(argv)}"
@@ -482,7 +493,14 @@ class _PosixPtyProcess:
             return b""
 
     async def write_stdin(self, payload: bytes) -> None:
-        await asyncio.to_thread(os.write, self._master_fd, payload)
+        loop = asyncio.get_running_loop()
+        idx = 0
+        while idx < len(payload):
+            try:
+                written = await loop.run_in_executor(None, os.write, self._master_fd, payload[idx:])
+                idx += written
+            except OSError:
+                break
 
     def terminate(self) -> None:
         self._proc.terminate()

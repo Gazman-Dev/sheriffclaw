@@ -20,6 +20,7 @@ class TelegramWebhookService:
         self.sheriff_gate = ProcClient("sheriff-tg-gate")
         self.cli_gate = ProcClient("sheriff-cli-gate")
         self.debug_mode = os.environ.get("SHERIFF_DEBUG", "").strip().lower() in {"1", "true", "yes"}
+        self.loop = None
 
     def _append_debug_outbox(self, item: dict) -> None:
         from shared.paths import gw_root
@@ -70,49 +71,55 @@ class TelegramWebhookService:
         return cfg
 
     async def _handle_ai_message(self, token: str, user_id: str, chat_id: int, text: str):
-        _, gate = await self.ai_gate.request("ai_tg_llm.inbound_message", {"user_id": user_id, "text": text})
-        result = gate.get("result", {})
-        status = result.get("status")
-        if status == "activation_required":
-            code = result.get("activation_code", "")
-            self._send_message(token, chat_id, f"Your activation code is: {code}\nReply: activate {code}")
-            return
-        if status == "activated":
-            self._send_message(token, chat_id, "Activated. You can chat now.")
-            return
-        if status != "accepted":
-            return
+        try:
+            _, gate = await self.ai_gate.request("ai_tg_llm.inbound_message", {"user_id": user_id, "text": text})
+            result = gate.get("result", {})
+            status = result.get("status")
+            if status == "activation_required":
+                code = result.get("activation_code", "")
+                self._send_message(token, chat_id, f"Your activation code is: {code}\nReply: activate {code}")
+                return
+            if status == "activated":
+                self._send_message(token, chat_id, "Activated. You can chat now.")
+                return
+            if status != "accepted":
+                return
 
-        stream, final = await self.gateway.request(
-            "gateway.handle_user_message",
-            {"channel": "telegram", "principal_external_id": user_id, "text": text},
-            stream_events=True,
-        )
-        reply = None
-        async for frame in stream:
-            if frame.get("event") == "assistant.final":
-                reply = frame.get("payload", {}).get("text")
-        if hasattr(final, "__await__"):
-            await final
-        if reply:
-            self._send_message(token, chat_id, reply)
+            stream, final = await self.gateway.request(
+                "gateway.handle_user_message",
+                {"channel": "telegram", "principal_external_id": user_id, "text": text},
+                stream_events=True,
+            )
+            reply = None
+            async for frame in stream:
+                if frame.get("event") == "assistant.final":
+                    reply = frame.get("payload", {}).get("text")
+            if hasattr(final, "__await__"):
+                await final
+            if reply:
+                self._send_message(token, chat_id, reply)
+        except Exception as e:
+            self._send_message(token, chat_id, f"⚠️ Internal system error processing your request: {e}")
 
     async def _handle_sheriff_message(self, token: str, user_id: str, chat_id: int, text: str):
-        _, gate = await self.sheriff_gate.request("gate.inbound_message", {"user_id": user_id, "text": text})
-        result = gate.get("result", {})
-        status = result.get("status")
-        if status == "activation_required":
-            code = result.get("activation_code", "")
-            self._send_message(token, chat_id, f"Your activation code is: {code}\nReply: activate {code}")
-            return
-        if status == "activated":
-            self._send_message(token, chat_id, "Sheriff activated.")
-            return
-        if status != "accepted":
-            return
-        if text.startswith("/"):
-            _, out = await self.cli_gate.request("cli.handle_message", {"text": text})
-            self._send_message(token, chat_id, out.get("result", {}).get("message", "ok"))
+        try:
+            _, gate = await self.sheriff_gate.request("gate.inbound_message", {"user_id": user_id, "text": text})
+            result = gate.get("result", {})
+            status = result.get("status")
+            if status == "activation_required":
+                code = result.get("activation_code", "")
+                self._send_message(token, chat_id, f"Your activation code is: {code}\nReply: activate {code}")
+                return
+            if status == "activated":
+                self._send_message(token, chat_id, "Sheriff activated.")
+                return
+            if status != "accepted":
+                return
+            if text.startswith("/"):
+                _, out = await self.cli_gate.request("cli.handle_message", {"text": text})
+                self._send_message(token, chat_id, out.get("result", {}).get("message", "ok"))
+        except Exception as e:
+            self._send_message(token, chat_id, f"⚠️ Internal system error: {e}")
 
     def _send_message(self, token: str, chat_id: int | str, text: str):
         MAX_LEN = 4000
@@ -128,6 +135,7 @@ class TelegramWebhookService:
                 pass
 
     async def run_forever(self):
+        self.loop = __import__("asyncio").get_running_loop()
         cfg = await self._load_or_init_cfg()
         public_base = __import__("os").environ.get("SHERIFF_WEBHOOK_PUBLIC_BASE", "").strip()
         cert = __import__("os").environ.get("SHERIFF_WEBHOOK_CERT", "").strip()
@@ -164,7 +172,7 @@ class TelegramWebhookService:
                 payload={
                     "url": f"{public_base}{cfg['sheriff_path']}",
                     "secret_token": cfg["sheriff_secret"],
-                    "allowed_updates":["message"],
+                    "allowed_updates": ["message"],
                 },
                 timeout=20,
             )
@@ -203,10 +211,17 @@ class TelegramWebhookService:
 
                 if user_id and chat_id is not None and text:
                     token = llm_token if role == "llm" else sheriff_token
+                    # Dispatch to main event loop immediately and return 200 to prevent Telegram Timeout
                     if role == "llm":
-                        __import__("asyncio").run(service._handle_ai_message(token, user_id, int(chat_id), text))
+                        __import__("asyncio").run_coroutine_threadsafe(
+                            service._handle_ai_message(token, user_id, int(chat_id), text),
+                            service.loop
+                        )
                     else:
-                        __import__("asyncio").run(service._handle_sheriff_message(token, user_id, int(chat_id), text))
+                        __import__("asyncio").run_coroutine_threadsafe(
+                            service._handle_sheriff_message(token, user_id, int(chat_id), text),
+                            service.loop
+                        )
 
                 self.send_response(200)
                 self.end_headers()

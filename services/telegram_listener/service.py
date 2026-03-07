@@ -135,108 +135,116 @@ class TelegramListenerService:
         self._webhook_cleared.add(token)
 
     async def _handle_ai_message(self, token: str, sheriff_token: str, user_id: str, chat_id: int, text: str):
-        unlocked = await self._secrets("secrets.is_unlocked", {})
-        if not unlocked.get("unlocked"):
-            msg = "🔒 Vault is locked. Send /unlock <master_password> in Sheriff bot, then retry."
-            self._send_message(token, chat_id, msg)
-            if sheriff_token:
-                self._send_message(sheriff_token, chat_id, msg)
-            self.log.info("ai blocked while locked user_id=%s", user_id)
-            return
-
-        role = "llm"
-        st = await self._secrets("secrets.activation.status", {"bot_role": role})
-        bound = st.get("user_id")
-        if not bound or str(bound) != user_id:
-            if text.startswith("activate "):
-                code = text.split(" ", 1)[1].strip().lower()
-                claim = await self._secrets("secrets.activation.claim", {"bot_role": role, "code": code})
-                if claim.get("ok"):
-                    self._send_message(token, chat_id, "✅ Activated. You can chat now.")
-                    return
-            c = await self._secrets("secrets.activation.create", {"bot_role": role, "user_id": user_id})
-            code = c.get("code", "")
-            if code:
-                self._send_message(token, chat_id, f"Your activation code is: {code}")
-            return
-
-        self.log.info("ai inbound status=accepted user_id=%s", user_id)
-
-        stream, final = await self.gateway.request(
-            "gateway.handle_user_message",
-            {"channel": "telegram", "principal_external_id": user_id, "text": text},
-            stream_events=True,
-        )
-        reply = None
-        delta_parts: list[str] =[]
-        async for frame in stream:
-            ev = frame.get("event")
-            if ev == "assistant.final":
-                reply = frame.get("payload", {}).get("text")
-            elif ev == "assistant.delta":
-                part = str((frame.get("payload") or {}).get("text") or "")
-                if part:
-                    delta_parts.append(part)
-        final_res = await final if asyncio.isfuture(final) or asyncio.iscoroutine(final) else final
-
-        if not reply and delta_parts:
-            reply = "".join(delta_parts).strip()
-
-        if reply:
-            self._send_message(token, chat_id, reply)
-
-        result_obj = (final_res or {}).get("result", {}) if isinstance(final_res, dict) else {}
-        status_obj = result_obj.get("status")
-        self.log.info("ai gateway final status=%s has_reply=%s delta_parts=%s", status_obj, bool(reply),
-                      len(delta_parts))
-        if status_obj == "locked":
-            # Always notify on Sheriff channel too, so user can unlock right there.
-            msg = "🔒 Vault is locked. Open the Sheriff bot and send: /unlock <master_password>"
-            if sheriff_token:
-                self._send_message(sheriff_token, chat_id, msg)
-            elif not reply:
+        try:
+            unlocked = await self._secrets("secrets.is_unlocked", {})
+            if not unlocked.get("unlocked"):
+                msg = "🔒 Vault is locked. Send /unlock <master_password> in Sheriff bot, then retry."
                 self._send_message(token, chat_id, msg)
-        elif not reply:
-            self._send_message(token, chat_id, "⚠️ No response generated. Please try again in a moment.")
+                if sheriff_token:
+                    self._send_message(sheriff_token, chat_id, msg)
+                self.log.info("ai blocked while locked user_id=%s", user_id)
+                return
+
+            role = "llm"
+            st = await self._secrets("secrets.activation.status", {"bot_role": role})
+            bound = st.get("user_id")
+            if not bound or str(bound) != user_id:
+                if text.startswith("activate "):
+                    code = text.split(" ", 1)[1].strip().lower()
+                    claim = await self._secrets("secrets.activation.claim", {"bot_role": role, "code": code})
+                    if claim.get("ok"):
+                        self._send_message(token, chat_id, "✅ Activated. You can chat now.")
+                        return
+                c = await self._secrets("secrets.activation.create", {"bot_role": role, "user_id": user_id})
+                code = c.get("code", "")
+                if code:
+                    self._send_message(token, chat_id, f"Your activation code is: {code}")
+                return
+
+            self.log.info("ai inbound status=accepted user_id=%s", user_id)
+
+            stream, final = await self.gateway.request(
+                "gateway.handle_user_message",
+                {"channel": "telegram", "principal_external_id": user_id, "text": text},
+                stream_events=True,
+            )
+            reply = None
+            delta_parts: list[str] =[]
+            async for frame in stream:
+                ev = frame.get("event")
+                if ev == "assistant.final":
+                    reply = frame.get("payload", {}).get("text")
+                elif ev == "assistant.delta":
+                    part = str((frame.get("payload") or {}).get("text") or "")
+                    if part:
+                        delta_parts.append(part)
+            final_res = await final if asyncio.isfuture(final) or asyncio.iscoroutine(final) else final
+
+            if not reply and delta_parts:
+                reply = "".join(delta_parts).strip()
+
+            if reply:
+                self._send_message(token, chat_id, reply)
+
+            result_obj = (final_res or {}).get("result", {}) if isinstance(final_res, dict) else {}
+            status_obj = result_obj.get("status")
+            self.log.info("ai gateway final status=%s has_reply=%s delta_parts=%s", status_obj, bool(reply),
+                          len(delta_parts))
+            if status_obj == "locked":
+                # Always notify on Sheriff channel too, so user can unlock right there.
+                msg = "🔒 Vault is locked. Open the Sheriff bot and send: /unlock <master_password>"
+                if sheriff_token:
+                    self._send_message(sheriff_token, chat_id, msg)
+                elif not reply:
+                    self._send_message(token, chat_id, msg)
+            elif not reply:
+                self._send_message(token, chat_id, "⚠️ No response generated. Please try again in a moment.")
+        except Exception as e:
+            self.log.exception("ai_message handler failed user_id=%s err=%s", user_id, e)
+            self._send_message(token, chat_id, f"⚠️ Internal system error processing your request: {e}")
 
     async def _handle_sheriff_message(self, token: str, user_id: str, chat_id: int, text: str):
-        # Direct unlock path for reliability during locked-state recovery.
-        if text.startswith("/unlock"):
-            parts = text.split(" ", 1)
-            if len(parts) < 2 or not parts[1].strip():
-                self._send_message(token, chat_id, "Usage: /unlock <master_password>")
+        try:
+            # Direct unlock path for reliability during locked-state recovery.
+            if text.startswith("/unlock"):
+                parts = text.split(" ", 1)
+                if len(parts) < 2 or not parts[1].strip():
+                    self._send_message(token, chat_id, "Usage: /unlock <master_password>")
+                    return
+                mp = parts[1].strip()
+                r = await self._secrets("secrets.unlock", {"master_password": mp})
+                self.log.info("unlock attempt user_id=%s ok=%s", user_id, bool(r.get("ok")))
+                if r.get("ok"):
+                    self._send_message(token, chat_id, "✅ Vault unlocked.")
+                else:
+                    self._send_message(token, chat_id, "❌ Unlock failed.")
                 return
-            mp = parts[1].strip()
-            r = await self._secrets("secrets.unlock", {"master_password": mp})
-            self.log.info("unlock attempt user_id=%s ok=%s", user_id, bool(r.get("ok")))
-            if r.get("ok"):
-                self._send_message(token, chat_id, "✅ Vault unlocked.")
-            else:
-                self._send_message(token, chat_id, "❌ Unlock failed.")
-            return
 
-        _, gate = await self.sheriff_gate.request("gate.inbound_message", {"user_id": user_id, "text": text})
-        result = gate.get("result", {})
-        status = result.get("status")
-        self.log.info("sheriff inbound status=%s user_id=%s", status, user_id)
-        if status == "activation_required":
-            code = result.get("activation_code", "")
-            self._send_message(token, chat_id, f"Your activation code is: {code}")
-            return
-        if status == "activated":
-            self._send_message(token, chat_id, "✅ Sheriff activated.")
-            return
-        if status != "accepted":
-            return
+            _, gate = await self.sheriff_gate.request("gate.inbound_message", {"user_id": user_id, "text": text})
+            result = gate.get("result", {})
+            status = result.get("status")
+            self.log.info("sheriff inbound status=%s user_id=%s", status, user_id)
+            if status == "activation_required":
+                code = result.get("activation_code", "")
+                self._send_message(token, chat_id, f"Your activation code is: {code}")
+                return
+            if status == "activated":
+                self._send_message(token, chat_id, "✅ Sheriff activated.")
+                return
+            if status != "accepted":
+                return
 
-        if text.startswith("/"):
-            _, out = await self.cli_gate.request("cli.handle_message", {"text": text})
-            msg = out.get("result", {}).get("message", "ok")
-            self._send_message(token, chat_id, msg)
-            return
+            if text.startswith("/"):
+                _, out = await self.cli_gate.request("cli.handle_message", {"text": text})
+                msg = out.get("result", {}).get("message", "ok")
+                self._send_message(token, chat_id, msg)
+                return
 
-        # Non-command messages on Sheriff channel should still guide user.
-        self._send_message(token, chat_id, "Sheriff channel commands: /unlock <master_password>, /status")
+            # Non-command messages on Sheriff channel should still guide user.
+            self._send_message(token, chat_id, "Sheriff channel commands: /unlock <master_password>, /status")
+        except Exception as e:
+            self.log.exception("sheriff_message handler failed user_id=%s err=%s", user_id, e)
+            self._send_message(token, chat_id, f"⚠️ Internal system error: {e}")
 
     async def _poll_bot(self, role: str, token: str, sheriff_token: str, offsets: dict):
         self._ensure_long_polling(token)
@@ -263,12 +271,14 @@ class TelegramListenerService:
             text = (msg.get("text") or "").strip()
             if not user_id or chat_id is None or not text:
                 continue
+
+            # Fire and forget to prevent blocking the polling loop with long-running agent tasks
             if role == "llm":
                 self.log.info("dispatch role=llm user_id=%s text=%s", user_id, text[:80])
-                await self._handle_ai_message(token, sheriff_token, user_id, int(chat_id), text)
+                asyncio.create_task(self._handle_ai_message(token, sheriff_token, user_id, int(chat_id), text))
             else:
                 self.log.info("dispatch role=sheriff user_id=%s text=%s", user_id, text[:80])
-                await self._handle_sheriff_message(token, user_id, int(chat_id), text)
+                asyncio.create_task(self._handle_sheriff_message(token, user_id, int(chat_id), text))
 
         offsets[role] = offset
 
@@ -300,7 +310,7 @@ class TelegramListenerService:
                 if changed:
                     self._save_tokens_cache(cached_tokens)
 
-                specs = [("llm", llm_token), ("sheriff", sheriff_token)]
+                specs =[("llm", llm_token), ("sheriff", sheriff_token)]
                 if not llm_token:
                     self.log.info("llm token unavailable (vault likely locked); waiting for sheriff unlock")
                     if sheriff_token and not self._llm_missing_notified:

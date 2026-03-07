@@ -21,7 +21,7 @@ async def test_worker_writes_inbox_file_and_receives_file_protocol_reply(monkeyp
     monkeypatch.setattr(rt, "_ensure_codex_active", fake_ensure)
     monkeypatch.setattr(rt, "_send_codex_stdin", fake_send)
 
-    events = []
+    events =[]
 
     async def emit(event, payload):
         events.append((event, payload))
@@ -40,7 +40,7 @@ async def test_worker_writes_inbox_file_and_receives_file_protocol_reply(monkeyp
     agent_body = agent_files[0].read_text(encoding="utf-8")
     assert "Debug Codex Response to: hello from test" in agent_body
 
-    finals = [p for e, p in events if e == "assistant.final"]
+    finals =[p for e, p in events if e == "assistant.final"]
     assert finals
     assert finals[0]["text"] == "Debug Codex Response to: hello from test"
 
@@ -63,7 +63,7 @@ async def test_worker_timeout_is_reproducible_via_codex_debug(monkeypatch, tmp_p
     monkeypatch.setattr(rt, "_ensure_codex_active", fake_ensure)
     monkeypatch.setattr(rt, "_send_codex_stdin", fake_send)
 
-    events = []
+    events =[]
 
     async def emit(event, payload):
         events.append((event, payload))
@@ -95,7 +95,7 @@ async def test_worker_typing_timeout_emits_delta_before_timeout(monkeypatch, tmp
     monkeypatch.setattr(rt, "_ensure_codex_active", fake_ensure)
     monkeypatch.setattr(rt, "_send_codex_stdin", fake_send)
 
-    events = []
+    events =[]
 
     async def emit(event, payload):
         events.append((event, payload))
@@ -111,7 +111,7 @@ async def test_worker_typing_timeout_emits_delta_before_timeout(monkeypatch, tmp
 
 class _FakeWriter:
     def __init__(self):
-        self.writes = []
+        self.writes =[]
         self.drains = 0
 
     def write(self, payload):
@@ -157,7 +157,7 @@ async def test_worker_writes_message_file_and_forwards_turn_to_codex_stdin(monke
 
     monkeypatch.setattr(rt, "_ensure_codex_active", fake_ensure)
 
-    events = []
+    events =[]
 
     async def emit(event, payload):
         events.append((event, payload))
@@ -169,14 +169,14 @@ async def test_worker_writes_message_file_and_forwards_turn_to_codex_stdin(monke
     user_files = list(session_dir.glob("*_user_agent.tmd"))
     assert user_files
     assert user_files[0].read_text(encoding="utf-8") == "hello stdin path"
-    assert len(fake_proc.stdin.writes) == 1
-    stdin_payload = fake_proc.stdin.writes[0].decode("utf-8")
+    assert len(fake_proc.stdin.writes) >= 1
+    stdin_payload = b"".join(fake_proc.stdin.writes).decode("utf-8")
     assert "check how we manage messages." in stdin_payload.lower()
     assert "the user just sent a message over s4 session." in stdin_payload.lower()
     assert "please do what the user says and write a reply to the user via the conversation files." in stdin_payload.lower()
-    assert stdin_payload.endswith("User message:\nhello stdin path\n")
-    assert fake_proc.stdin.drains == 1
-    finals = [p for e, p in events if e == "assistant.final"]
+    assert stdin_payload.endswith("User message:\nhello stdin path\n\x1b\r")
+    assert fake_proc.stdin.drains >= 1
+    finals =[p for e, p in events if e == "assistant.final"]
     assert finals[-1]["text"] == "Agent background process response timed out."
 
 
@@ -203,24 +203,23 @@ async def test_worker_followup_turn_uses_followup_stdin_prompt(monkeypatch, tmp_
 
     await rt.user_message("s4b", "second", None, emit, channel="telegram", principal_external_id="u1")
 
-    assert len(fake_proc.stdin.writes) == 1
-    stdin_payload = fake_proc.stdin.writes[0].decode("utf-8")
+    assert len(fake_proc.stdin.writes) >= 1
+    stdin_payload = b"".join(fake_proc.stdin.writes).decode("utf-8")
     assert "the user sent another message over s4b session." in stdin_payload.lower()
     assert "please do what the user says and write a reply to the user via the conversation files." in stdin_payload.lower()
-    assert stdin_payload.endswith("User message:\nsecond\n")
+    assert stdin_payload.endswith("User message:\nsecond\n\x1b\r")
 
 
 def test_extract_menu_options_builds_option_payloads(tmp_path, monkeypatch):
     monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
     rt = WorkerRuntime()
-    options = rt._extract_menu_options(
-        [
-            "choose how you'd like codex to proceed.",
-            "1. try new model",
-            "2. use existing model",
-        ]
+    options = rt._extract_menu_options([
+        "choose how you'd like codex to proceed.",
+        "1. try new model",
+        "2. use existing model",
+    ]
     )
-    assert options == [
+    assert options ==[
         {"label": "try new model", "payload": b"\r"},
         {"label": "use existing model", "payload": b"\x1b[B\r"},
     ]
@@ -229,7 +228,7 @@ def test_extract_menu_options_builds_option_payloads(tmp_path, monkeypatch):
 def test_extract_interactive_menu_prefers_choice_block_over_warning_list(tmp_path, monkeypatch):
     monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
     rt = WorkerRuntime()
-    lines = [
+    lines =[
         "warning text",
         "1. /users/ilyagazman/.sheriffclaw/agents/codex/.codex",
         "to load config.toml, add trusted project",
@@ -240,7 +239,7 @@ def test_extract_interactive_menu_prefers_choice_block_over_warning_list(tmp_pat
     ]
     context, options = rt._extract_interactive_menu(lines)
     assert "choose how you'd like codex to proceed." in context
-    assert options == [
+    assert options ==[
         {"label": "try new model", "payload": b"\r"},
         {"label": "use existing model", "payload": b"\x1b[B\r"},
     ]
@@ -249,14 +248,14 @@ def test_extract_interactive_menu_prefers_choice_block_over_warning_list(tmp_pat
 def test_extract_interactive_menu_rejects_single_warning_path_option(tmp_path, monkeypatch):
     monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
     rt = WorkerRuntime()
-    lines = [
+    lines =[
         "project config.toml files are disabled in the following folders.",
         "1. /users/ilyagazman/.sheriffclaw/agents/codex/.codex",
         "to load config.toml, add trusted project",
     ]
     context, options = rt._extract_interactive_menu(lines)
     assert context == []
-    assert options == []
+    assert options ==[]
 
 
 def test_normalized_codex_text_strips_ansi(tmp_path, monkeypatch):
@@ -285,18 +284,18 @@ async def test_option_reply_sends_selected_control(monkeypatch, tmp_path):
         "key": "generic_menu:try new model|use existing model",
         "message": "Codex is waiting on an interactive selection.",
         "details": "1. try new model\n2. use existing model",
-        "options": [
+        "options":[
             {"label": "try new model", "payload": b"\r"},
             {"label": "use existing model", "payload": b"\x1b[B\r"},
         ],
     }
-    calls = []
+    calls =[]
 
     async def fake_write(payload, *, reason, session=None):
         calls.append((payload, reason, session))
 
     monkeypatch.setattr(rt, "_write_codex_control", fake_write)
-    events = []
+    events =[]
 
     async def emit(event, payload):
         events.append((event, payload))
@@ -315,18 +314,18 @@ async def test_normal_message_is_blocked_while_prompt_is_pending(monkeypatch, tm
         "key": "generic_menu:one|two",
         "message": "Codex is waiting on an interactive selection.",
         "details": "1. one\n2. two",
-        "options": [
+        "options":[
             {"label": "one", "payload": b"\r"},
             {"label": "two", "payload": b"\x1b[B\r"},
         ],
     }
-    events = []
+    events =[]
 
     async def emit(event, payload):
         events.append((event, payload))
 
     await rt.user_message("s7", "hello", None, emit)
-    assert events == [
+    assert events ==[
         (
             "assistant.final",
             {"text": "Codex is waiting on an interactive selection.\n\n1. one\n2. two\n\nChoose one:\n/option1 - one\n/option2 - two"},
@@ -349,7 +348,7 @@ async def test_prompt_pending_returns_prompt_without_timeout(monkeypatch, tmp_pa
             "key": "generic_menu:try new model|use existing model",
             "message": "Codex is waiting on an interactive selection.",
             "details": "choose how you'd like codex to proceed.\n1. try new model\n2. use existing model",
-            "options": [
+            "options":[
                 {"label": "try new model", "payload": b"\r"},
                 {"label": "use existing model", "payload": b"\x1b[B\r"},
             ],
@@ -362,13 +361,13 @@ async def test_prompt_pending_returns_prompt_without_timeout(monkeypatch, tmp_pa
         )
 
     monkeypatch.setattr(rt, "_ensure_codex_active", fake_ensure)
-    events = []
+    events =[]
 
     async def emit(event, payload):
         events.append((event, payload))
 
     await rt.user_message("s8", "hi", None, emit)
-    assert events == [
+    assert events ==[
         (
             "assistant.final",
             {

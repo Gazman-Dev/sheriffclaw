@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import time
 from pathlib import Path
 
-from shared.paths import agent_root
+from shared.paths import agent_root, llm_root
 from shared.skills.loader import SkillLoader
+from shared.worker.codex_cli import build_chat_command, debug_enabled
 
 
 class WorkerRuntime:
@@ -26,33 +28,45 @@ class WorkerRuntime:
         )
         self.skills = self.skill_loader.load()
         self.codex_proc = None
+        self.codex_start_error = ""
+        self.debug_log_path = llm_root() / "state" / "debug" / "worker_runtime.jsonl"
+
+    def _debug_log(self, event: str, **payload) -> None:
+        self.debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+        row = {"ts": time.time(), "event": event, **payload}
+        with self.debug_log_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     async def _ensure_codex_active(self):
         if self.codex_proc is None or self.codex_proc.returncode is not None:
             env = os.environ.copy()
             env["CODEX_HOME"] = str(self.agent_workspace)
+            cmd = build_chat_command(self.repo_root)
             try:
-                self.codex_proc = await asyncio.create_subprocess_exec(
-                    "codex",
-                    "chat",
-                    "--dangerously-bypass-approvals-and-sandbox",
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=str(self.agent_workspace),
-                    env=env,
-                )
-
-                async def drain(stream):
-                    while True:
-                        line = await stream.readline()
-                        if not line:
-                            break
-
-                asyncio.create_task(drain(self.codex_proc.stdout))
-                asyncio.create_task(drain(self.codex_proc.stderr))
-            except Exception:
-                pass
+                if debug_enabled():
+                    self.codex_proc = await asyncio.create_subprocess_shell(
+                        subprocess.list2cmdline(cmd),
+                        stdin=asyncio.subprocess.DEVNULL,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                        cwd=str(self.agent_workspace),
+                        env=env,
+                    )
+                else:
+                    self.codex_proc = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdin=asyncio.subprocess.DEVNULL,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                        cwd=str(self.agent_workspace),
+                        env=env,
+                    )
+                self.codex_start_error = ""
+                self._debug_log("codex_launch", command=cmd, cwd=str(self.agent_workspace))
+            except Exception as exc:
+                self.codex_proc = None
+                self.codex_start_error = str(exc)
+                self._debug_log("codex_launch_failed", command=cmd, error=self.codex_start_error)
 
     async def user_message(
         self,
@@ -65,28 +79,34 @@ class WorkerRuntime:
         session_dir = self.conversations_dir / session_handle
         session_dir.mkdir(parents=True, exist_ok=True)
         debug_mode = os.environ.get("SHERIFF_DEBUG", "0") == "1"
+        pending_file = session_dir / "agent_user_pending.tmd"
+        typing_file = session_dir / "agent_user_typing.tmd"
+
+        for stale in (pending_file, typing_file):
+            if stale.exists():
+                stale.unlink(missing_ok=True)
+                self._debug_log("stale_file_removed", session=session_handle, file=stale.name)
+
+        await self._ensure_codex_active()
+        if self.codex_start_error:
+            await emit_event("assistant.final", {"text": f"Codex background process failed to start: {self.codex_start_error}"})
+            return
 
         ts = int(time.time())
         user_file = session_dir / f"{ts}_user_agent.tmd"
         user_file.write_text(text, encoding="utf-8")
-
-        await self._ensure_codex_active()
-        if self.codex_proc and self.codex_proc.stdin:
-            self.codex_proc.stdin.write((text + "\n").encode("utf-8"))
-            await self.codex_proc.stdin.drain()
-        elif debug_mode:
-            sim_file = session_dir / "agent_user_pending.tmd"
-            sim_file.write_text(f"Mock CLI Response to: {text}", encoding="utf-8")
-
-        pending_file = session_dir / "agent_user_pending.tmd"
-        typing_file = session_dir / "agent_user_typing.tmd"
-        if debug_mode and not pending_file.exists():
-            pending_file.write_text(f"Mock CLI Response to: {text}", encoding="utf-8")
+        self._debug_log("user_message", session=session_handle, file=user_file.name, text=text)
 
         start = time.time()
         emitted_typing = False
+        timeout_sec = 300.0
+        if debug_mode:
+            try:
+                timeout_sec = float(os.environ.get("SHERIFF_DEBUG_TIMEOUT_SEC", timeout_sec))
+            except ValueError:
+                timeout_sec = 300.0
 
-        while time.time() - start < 300:
+        while time.time() - start < timeout_sec:
             if pending_file.exists():
                 await asyncio.sleep(0.1)
                 try:
@@ -95,21 +115,20 @@ class WorkerRuntime:
                     final_file = session_dir / f"{reply_ts}_agent_user.tmd"
                     final_file.write_text(content, encoding="utf-8")
                     pending_file.unlink(missing_ok=True)
+                    typing_file.unlink(missing_ok=True)
+                    self._debug_log("assistant_final", session=session_handle, file=final_file.name, text=content.strip())
                     await emit_event("assistant.final", {"text": content.strip()})
                     return
                 except Exception:
-                    if debug_mode:
-                        reply_ts = int(time.time())
-                        final_file = session_dir / f"{reply_ts}_agent_user.tmd"
-                        final_file.write_text(f"Mock CLI Response to: {text}", encoding="utf-8")
-                        await emit_event("assistant.final", {"text": f"Mock CLI Response to: {text}"})
-                        return
+                    self._debug_log("pending_read_failed", session=session_handle)
             elif typing_file.exists() and not emitted_typing:
+                self._debug_log("assistant_typing", session=session_handle)
                 await emit_event("assistant.delta", {"text": "typing..."})
                 emitted_typing = True
 
             await asyncio.sleep(0.2)
 
+        self._debug_log("assistant_timeout", session=session_handle, timeout_sec=timeout_sec)
         await emit_event("assistant.final", {"text": "Agent background process response timed out."})
 
     async def tool_result(self, session_handle: str, tool_name: str, result: dict) -> None:
@@ -151,4 +170,11 @@ class WorkerRuntime:
         return session_id or "primary_session"
 
     async def session_close(self, session_handle: str) -> None:
-        pass
+        if self.codex_proc is not None and self.codex_proc.returncode is None:
+            self.codex_proc.terminate()
+            try:
+                await asyncio.wait_for(self.codex_proc.wait(), timeout=2.0)
+            except Exception:
+                self.codex_proc.kill()
+                await self.codex_proc.wait()
+        self.codex_proc = None

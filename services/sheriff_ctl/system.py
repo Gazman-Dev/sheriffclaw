@@ -137,9 +137,20 @@ def cmd_debug(args):
         print("Usage: sheriff debug [folder] [subfolder] [args...]")
         return
 
+    root = Path(__file__).resolve().parents[2]
+
+    if d_args[0] == "codex":
+        script_path = root / "debug" / "codex" / "codex_debug.py"
+        if script_path.exists():
+            env = os.environ.copy()
+            env["SHERIFF_DEBUG"] = "1"
+            subprocess.run([sys.executable, str(script_path)] + d_args[1:], env=env)
+            return
+        print("Debug script not found for path: debug/codex/codex_debug.py")
+        return
+
     # Dynamic routing for debug paths
     # e.g. sheriff debug channel telegram user-agent "msg"
-    root = Path(__file__).resolve().parents[2]
     if len(d_args) >= 2:
         script_path = root / "debug" / d_args[0] / d_args[1] / f"{d_args[1]}_debug.py"
         if script_path.exists():

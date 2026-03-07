@@ -32,6 +32,9 @@ def agent_root() -> Path:
     def _copy_missing_tree(src: Path, dst: Path) -> None:
         for item in src.rglob("*"):
             rel = item.relative_to(src)
+            rel_parts = rel.parts
+            if len(rel_parts) >= 2 and rel_parts[0] == "conversations" and rel_parts[1] == "sessions":
+                continue
             target = dst / rel
             if item.is_dir():
                 target.mkdir(parents=True, exist_ok=True)

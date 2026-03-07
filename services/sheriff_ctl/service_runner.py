@@ -104,22 +104,25 @@ def cmd_start(args):
 
     async def _check_and_unlock():
         gw = ProcClient("sheriff-gateway")
-        for _ in range(15):
-            try:
-                await gw.request("health", {})
-                break
-            except Exception:
-                await asyncio.sleep(0.3)
+        try:
+            for _ in range(15):
+                try:
+                    await gw.request("health", {})
+                    break
+                except Exception:
+                    await asyncio.sleep(0.3)
 
-        # Check if already unlocked (via secrets_session.json)
-        res_unl = await _gw_secrets_call("secrets.is_unlocked", {}, gw=gw)
-        if res_unl.get("unlocked"):
-            return True, True  # (is_unlocked, was_auto_unlocked)
+            # Check if already unlocked (via secrets_session.json)
+            res_unl = await _gw_secrets_call("secrets.is_unlocked", {}, gw=gw)
+            if res_unl.get("unlocked"):
+                return True, True  # (is_unlocked, was_auto_unlocked)
 
-        if mp:
-            res = await _gw_secrets_call("secrets.unlock", {"master_password": mp}, gw=gw)
-            return bool(res.get("ok")), False
-        return False, False
+            if mp:
+                res = await _gw_secrets_call("secrets.unlock", {"master_password": mp}, gw=gw)
+                return bool(res.get("ok")), False
+            return False, False
+        finally:
+            await gw.close()
 
     ok, auto = asyncio.run(_check_and_unlock())
     if ok:

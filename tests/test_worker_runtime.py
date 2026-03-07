@@ -175,20 +175,20 @@ async def test_worker_writes_message_file_and_forwards_turn_to_codex_stdin(monke
     assert finals[-1]["text"] == "Agent background process response timed out."
 
 
-def test_prompt_actions_accept_update_and_always_trust(tmp_path, monkeypatch):
+def test_extract_menu_options_builds_option_payloads(tmp_path, monkeypatch):
     monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
     rt = WorkerRuntime()
-    text = (
-        "Would you like to update to the latest version?\n"
-        "Update\n"
-        "Not now\n"
-        "Trust the current folder?\n"
-        "Trust once\n"
-        "Always trust\n"
+    options = rt._extract_menu_options(
+        [
+            "choose how you'd like codex to proceed.",
+            "1. try new model",
+            "2. use existing model",
+        ]
     )
-    actions = rt._prompt_actions_for_text(text)
-    assert ("accept_update", b"\r") in actions
-    assert ("always_trust_folder", b"\x1b[B\r") in actions
+    assert options == [
+        {"label": "try new model", "payload": b"\r"},
+        {"label": "use existing model", "payload": b"\x1b[B\r"},
+    ]
 
 
 def test_normalized_codex_text_strips_ansi(tmp_path, monkeypatch):
@@ -203,10 +203,10 @@ async def test_unknown_prompt_publishes_manual_selection_prompt(monkeypatch, tmp
     monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
     rt = WorkerRuntime()
     rt.active_session_handle = "s5"
-    await rt._handle_codex_stdout("Trust the current folder?\nAlways trust\n")
+    await rt._handle_codex_stdout("Choose how you'd like Codex to proceed.\n1. Try new model\n2. Use existing model\n")
     pending = (rt.conversations_dir / "s5" / "agent_user_pending.tmd").read_text(encoding="utf-8")
-    assert "/option1 - Trust once" in pending
-    assert "/option2 - Always trust" in pending
+    assert "/option1 - try new model" in pending
+    assert "/option2 - use existing model" in pending
 
 
 @pytest.mark.asyncio
@@ -214,12 +214,12 @@ async def test_option_reply_sends_selected_control(monkeypatch, tmp_path):
     monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
     rt = WorkerRuntime()
     rt.codex_prompt_state["s6"] = {
-        "key": "trust_folder_manual",
-        "message": "Codex is asking whether to trust the current folder.",
-        "details": "trust the current folder",
+        "key": "generic_menu:try new model|use existing model",
+        "message": "Codex is waiting on an interactive selection.",
+        "details": "1. try new model\n2. use existing model",
         "options": [
-            {"label": "Trust once", "payload": b"\r"},
-            {"label": "Always trust", "payload": b"\x1b[B\r"},
+            {"label": "try new model", "payload": b"\r"},
+            {"label": "use existing model", "payload": b"\x1b[B\r"},
         ],
     }
     calls = []
@@ -237,3 +237,30 @@ async def test_option_reply_sends_selected_control(monkeypatch, tmp_path):
     assert handled is True
     assert calls == [(b"\x1b[B\r", "user_/option2", "s6")]
     assert ("assistant.final", {"text": "Sent /option2 to Codex."}) in events
+
+
+@pytest.mark.asyncio
+async def test_normal_message_is_blocked_while_prompt_is_pending(monkeypatch, tmp_path):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    rt = WorkerRuntime()
+    rt.codex_prompt_state["s7"] = {
+        "key": "generic_menu:one|two",
+        "message": "Codex is waiting on an interactive selection.",
+        "details": "1. one\n2. two",
+        "options": [
+            {"label": "one", "payload": b"\r"},
+            {"label": "two", "payload": b"\x1b[B\r"},
+        ],
+    }
+    events = []
+
+    async def emit(event, payload):
+        events.append((event, payload))
+
+    await rt.user_message("s7", "hello", None, emit)
+    assert events == [
+        (
+            "assistant.final",
+            {"text": "Codex is waiting on an interactive selection. Reply with one of the shown /optionN choices first."},
+        )
+    ]

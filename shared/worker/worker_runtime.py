@@ -91,39 +91,36 @@ class WorkerRuntime:
         normalized = self._normalized_codex_text(text)
         lines = [line.strip() for line in normalized.splitlines()]
         lines = [line for line in lines if line]
-        return lines[-12:]
+        return lines[-24:]
 
     def _build_manual_prompt(self, text: str) -> dict | None:
         lines = self._extract_prompt_lines(text)
         joined = "\n".join(lines)
-        if "trust the current folder" in joined:
+        options = self._extract_menu_options(lines)
+        if options:
             return {
-                "key": "trust_folder_manual",
-                "message": "Codex is asking whether to trust the current folder.",
+                "key": f"generic_menu:{'|'.join(opt['label'] for opt in options)}",
+                "message": "Codex is waiting on an interactive selection.",
                 "details": joined,
-                "options": [
-                    {"label": "Trust once", "payload": b"\r"},
-                    {"label": "Always trust", "payload": b"\x1b[B\r"},
-                ],
-            }
-        if "update to the latest version" in joined or "would you like to update" in joined:
-            return {
-                "key": "update_manual",
-                "message": "Codex is asking whether to update itself.",
-                "details": joined,
-                "options": [
-                    {"label": "Update", "payload": b"\r"},
-                    {"label": "Skip update", "payload": b"\x1b[B\r"},
-                ],
-            }
-        if "trust" in joined or "update" in joined:
-            return {
-                "key": "generic_prompt",
-                "message": "Codex is waiting on an interactive prompt.",
-                "details": joined,
-                "options": [{"label": "Accept default", "payload": b"\r"}],
+                "options": options,
             }
         return None
+
+    def _extract_menu_options(self, lines: list[str]) -> list[dict]:
+        options: list[dict] = []
+        seen_labels: set[str] = set()
+        for line in lines:
+            match = re.match(r"^[>\s]*([0-9]+)[.)]\s+(.+)$", line)
+            if not match:
+                continue
+            idx = int(match.group(1))
+            label = match.group(2).strip()
+            if not label or label in seen_labels or idx <= 0:
+                continue
+            seen_labels.add(label)
+            payload = (b"\r" if idx == 1 else (b"\x1b[B" * (idx - 1)) + b"\r")
+            options.append({"label": label, "payload": payload})
+        return options
 
     async def _publish_manual_prompt(self, prompt: dict) -> None:
         session = self._prompt_session()
@@ -148,41 +145,11 @@ class WorkerRuntime:
         stripped = stripped.replace("\r", "\n")
         return stripped.lower()
 
-    def _prompt_actions_for_text(self, text: str) -> list[tuple[str, bytes]]:
-        normalized = self._normalized_codex_text(text)
-        actions: list[tuple[str, bytes]] = []
-        if (
-            "update to the latest version" in normalized
-            and "skip update" in normalized
-            and "update now" in normalized
-        ) or (
-            "would you like to update" in normalized
-            and "not now" in normalized
-            and "update" in normalized
-        ):
-            actions.append(("accept_update", b"\r"))
-        if (
-            "trust the current folder" in normalized
-            and "always trust" in normalized
-            and ("trust once" in normalized or "this time" in normalized)
-        ):
-            actions.append(("always_trust_folder", b"\x1b[B\r"))
-        return actions
-
     async def _handle_codex_stdout(self, text: str) -> None:
         self.codex_prompt_buffer = (self.codex_prompt_buffer + text)[-8000:]
-        now = time.time()
-        actions = self._prompt_actions_for_text(self.codex_prompt_buffer)
-        for reason, payload in actions:
-            if now - self.codex_prompt_last_action.get(reason, 0.0) < 2.0:
-                continue
-            self.codex_prompt_last_action[reason] = now
-            await self._write_codex_control(payload, reason=reason)
-            self.codex_prompt_state.pop(self._prompt_session(), None)
-        if not actions:
-            prompt = self._build_manual_prompt(self.codex_prompt_buffer)
-            if prompt is not None:
-                await self._publish_manual_prompt(prompt)
+        prompt = self._build_manual_prompt(self.codex_prompt_buffer)
+        if prompt is not None:
+            await self._publish_manual_prompt(prompt)
 
     async def _ensure_codex_active(self):
         if self.codex_proc is None or self.codex_proc.returncode is not None:
@@ -284,14 +251,21 @@ class WorkerRuntime:
         self.active_session_handle = session_handle
         if await self._handle_prompt_selection(session_handle, text.strip(), emit_event):
             return
+        if session_handle in self.codex_prompt_state:
+            await emit_event(
+                "assistant.final",
+                {"text": "Codex is waiting on an interactive selection. Reply with one of the shown /optionN choices first."},
+            )
+            return
         debug_mode = os.environ.get("SHERIFF_DEBUG", "0") == "1"
         pending_file = session_dir / "agent_user_pending.tmd"
         typing_file = session_dir / "agent_user_typing.tmd"
 
-        for stale in (pending_file, typing_file):
-            if stale.exists():
-                stale.unlink(missing_ok=True)
-                self._debug_log("stale_file_removed", session=session_handle, file=stale.name)
+        if session_handle not in self.codex_prompt_state:
+            for stale in (pending_file, typing_file):
+                if stale.exists():
+                    stale.unlink(missing_ok=True)
+                    self._debug_log("stale_file_removed", session=session_handle, file=stale.name)
 
         await self._ensure_codex_active()
         if self.codex_start_error:

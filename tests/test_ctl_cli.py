@@ -1,4 +1,5 @@
 from services.sheriff_ctl.ctl import build_parser
+import builtins
 
 
 def test_configure_llm_command_parses():
@@ -55,3 +56,17 @@ def test_sandbox_parses():
     args = parser.parse_args(["sandbox", "--user", "agentuser", "--deny-net"])
     assert args.user == "agentuser"
     assert args.allow_net is False
+
+
+def test_build_parser_tolerates_missing_doctor_module(monkeypatch):
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "services.sheriff_ctl.doctor":
+            raise ModuleNotFoundError(name)
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    parser = build_parser()
+    args = parser.parse_args(["status"])
+    assert args.cmd == "status"

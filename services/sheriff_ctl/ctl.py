@@ -16,7 +16,6 @@ if os.getenv("SHERIFF_DEBUG", "0") not in {"1", "true", "yes"}:
         pass
 
 from services.sheriff_ctl.chat import cmd_call, cmd_chat, cmd_entry, cmd_skill
-from services.sheriff_ctl.doctor import add_doctor_parser
 from services.sheriff_ctl.onboard import cmd_configure_llm, cmd_logout_llm, cmd_onboard
 from services.sheriff_ctl.sandbox import cmd_sandbox
 from services.sheriff_ctl.service_runner import ALL, cmd_logs, cmd_start, cmd_status, cmd_stop
@@ -92,7 +91,12 @@ def build_parser() -> argparse.ArgumentParser:
     logout.add_argument("--master-password", default=None, help="Required if vault is locked")
     logout.set_defaults(func=cmd_logout_llm)
 
-    add_doctor_parser(sub)
+    try:
+        from services.sheriff_ctl.doctor import add_doctor_parser
+    except ModuleNotFoundError:
+        add_doctor_parser = None
+    if add_doctor_parser is not None:
+        add_doctor_parser(sub)
 
     chat = sub.add_parser("chat")
     chat.add_argument("--principal", default="local-cli")

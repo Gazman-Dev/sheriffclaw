@@ -75,7 +75,7 @@ class WorkerRuntime:
         await self.codex_proc.stdin.drain()
 
     async def _write_codex_control(self, payload: bytes, *, reason: str, session: str | None = None) -> None:
-        if self.codex_proc is None or self.codex_proc.stdin is None:
+        if self.codex_proc is None:
             self._debug_log("codex_control_unavailable", reason=reason, session=session)
             return
         try:
@@ -239,7 +239,7 @@ class WorkerRuntime:
                 await self._close_codex_logs()
 
     async def _send_codex_stdin(self, text: str, session_handle: str) -> None:
-        if self.codex_proc is None or self.codex_proc.stdin is None:
+        if self.codex_proc is None:
             self._debug_log("codex_stdin_unavailable", session=session_handle)
             return
         payload = (text.rstrip("\n") + "\n").encode("utf-8")

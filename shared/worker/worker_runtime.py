@@ -169,13 +169,22 @@ class WorkerRuntime:
         session_dir = self.conversations_dir / session
         session_dir.mkdir(parents=True, exist_ok=True)
         pending_file = session_dir / "agent_user_pending.tmd"
+        body = self._render_prompt_text(prompt)
+        pending_file.write_text(body, encoding="utf-8")
+        self._debug_log(
+            "codex_prompt_waiting_for_user",
+            session=session,
+            key=prompt["key"],
+            options=[f"/option{i + 1} - {opt['label']}" for i, opt in enumerate(prompt["options"])],
+        )
+
+    def _render_prompt_text(self, prompt: dict) -> str:
         option_lines = [f"/option{i + 1} - {opt['label']}" for i, opt in enumerate(prompt["options"])]
         body = prompt["message"]
         if prompt.get("details"):
             body += f"\n\n{prompt['details']}"
         body += "\n\nChoose one:\n" + "\n".join(option_lines)
-        pending_file.write_text(body, encoding="utf-8")
-        self._debug_log("codex_prompt_waiting_for_user", session=session, key=prompt["key"], options=option_lines)
+        return body
 
     def _normalized_codex_text(self, text: str) -> str:
         stripped = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
@@ -290,10 +299,7 @@ class WorkerRuntime:
         if await self._handle_prompt_selection(session_handle, text.strip(), emit_event):
             return
         if session_handle in self.codex_prompt_state:
-            await emit_event(
-                "assistant.final",
-                {"text": "Codex is waiting on an interactive selection. Reply with one of the shown /optionN choices first."},
-            )
+            await emit_event("assistant.final", {"text": self._render_prompt_text(self.codex_prompt_state[session_handle]).strip()})
             return
         debug_mode = os.environ.get("SHERIFF_DEBUG", "0") == "1"
         pending_file = session_dir / "agent_user_pending.tmd"

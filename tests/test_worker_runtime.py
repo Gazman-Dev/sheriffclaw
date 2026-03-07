@@ -281,7 +281,7 @@ async def test_normal_message_is_blocked_while_prompt_is_pending(monkeypatch, tm
     assert events == [
         (
             "assistant.final",
-            {"text": "Codex is waiting on an interactive selection. Reply with one of the shown /optionN choices first."},
+            {"text": "Codex is waiting on an interactive selection.\n\n1. one\n2. two\n\nChoose one:\n/option1 - one\n/option2 - two"},
         )
     ]
 

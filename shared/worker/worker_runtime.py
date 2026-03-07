@@ -42,6 +42,7 @@ class WorkerRuntime:
         self.codex_prompt_buffer = ""
         self.codex_prompt_last_action: dict[str, float] = {}
         self.codex_prompt_state: dict[str, dict] = {}
+        self.codex_last_terminal_reply: dict[str, str] = {}
         self.active_session_handle = "primary_session"
 
     def _debug_log(self, event: str, **payload) -> None:
@@ -135,7 +136,10 @@ class WorkerRuntime:
         start = max(last_group[0] - 3, 0)
         end = min(last_group[-1] + 4, len(lines))
         window = lines[start:end]
-        return window, self._extract_menu_options(window)
+        options = self._extract_menu_options(window)
+        if len(options) < 2:
+            return [], []
+        return window, options
 
     def _extract_menu_options(self, lines: list[str]) -> list[dict]:
         options: list[dict] = []
@@ -145,7 +149,7 @@ class WorkerRuntime:
             if not match:
                 continue
             idx = int(match.group(1))
-            label = match.group(2).strip()
+            label = re.sub(r"^[^a-z0-9/]+", "", match.group(2).strip())
             if (
                 not label
                 or label in seen_labels
@@ -153,6 +157,11 @@ class WorkerRuntime:
                 or label.startswith("/")
                 or label.startswith("http")
                 or label.startswith("/users/")
+                or "/" in label
+                or ".codex" in label
+                or "config.toml" in label
+                or "release notes" in label
+                or "update available" in label
             ):
                 continue
             seen_labels.add(label)
@@ -188,15 +197,90 @@ class WorkerRuntime:
 
     def _normalized_codex_text(self, text: str) -> str:
         stripped = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+        stripped = re.sub(r"\x1b\].*?(?:\x07|\x1b\\)", "", stripped, flags=re.DOTALL)
         stripped = re.sub(r"\x1b[@-_]", "", stripped)
+        stripped = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", stripped)
         stripped = stripped.replace("\r", "\n")
         return stripped.lower()
+
+    def _build_terminal_reply(self, text: str) -> str | None:
+        lines = self._extract_prompt_lines(text)
+        if not lines:
+            return None
+
+        filtered: list[str] = []
+        skip_tokens = (
+            "openai codex",
+            "model:",
+            "directory:",
+            "100% context left",
+            "improve documentation in @filename",
+            "for shortcuts",
+            "update available",
+            "release notes",
+            "project config.toml",
+            "exec policies still load",
+            "trusted project",
+            "working",
+            "esc to interrupt",
+            "tip:",
+            "run 'codex app'",
+            "app-landing-page=true",
+            "choose one:",
+        )
+        for raw in lines:
+            line = raw.strip()
+            if not line:
+                continue
+            line = line.lstrip("│>").strip()
+            if any(token in line for token in skip_tokens):
+                continue
+            if re.match(r"^[0-9]+[.)]\s+", line):
+                continue
+            if "prompt injection" in line or "untrusted" in line or "ignoring instructions" in line:
+                continue
+            filtered.append(line)
+
+        if not filtered:
+            return None
+
+        candidate: list[str] = []
+        for line in filtered:
+            if line.startswith("• "):
+                candidate = [line[2:].strip()]
+                continue
+            if candidate:
+                if line.startswith("?") or line.startswith("/") or line.startswith("›"):
+                    break
+                candidate.append(line)
+
+        if not candidate:
+            return None
+        reply = "\n".join(part for part in candidate if part).strip()
+        if not reply or len(reply) < 2:
+            return None
+        return reply
 
     async def _handle_codex_stdout(self, text: str) -> None:
         self.codex_prompt_buffer = (self.codex_prompt_buffer + text)[-8000:]
         prompt = self._build_manual_prompt(self.codex_prompt_buffer)
         if prompt is not None:
             await self._publish_manual_prompt(prompt)
+            return
+        session = self._prompt_session()
+        if session in self.codex_prompt_state:
+            return
+        reply = self._build_terminal_reply(self.codex_prompt_buffer)
+        if not reply:
+            return
+        if self.codex_last_terminal_reply.get(session) == reply:
+            return
+        self.codex_last_terminal_reply[session] = reply
+        session_dir = self.conversations_dir / session
+        session_dir.mkdir(parents=True, exist_ok=True)
+        pending_file = session_dir / "agent_user_pending.tmd"
+        pending_file.write_text(reply, encoding="utf-8")
+        self._debug_log("codex_terminal_reply", session=session, text=reply)
 
     async def _ensure_codex_active(self):
         if self.codex_proc is None or self.codex_proc.returncode is not None:
@@ -220,6 +304,7 @@ class WorkerRuntime:
                 self.codex_start_error = ""
                 self.codex_prompt_buffer = ""
                 self.codex_prompt_last_action.clear()
+                self.codex_last_terminal_reply.clear()
                 if isinstance(self.codex_proc, _PosixPtyProcess):
                     self.codex_stdout_task = asyncio.create_task(
                         self._drain_codex_stream(self.codex_proc, self.codex_stdout_log, "stdout")

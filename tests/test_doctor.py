@@ -51,3 +51,25 @@ def test_redact_masks_common_secret_patterns():
     assert "sk-abc123" not in redacted
     assert "123456789:ABCDEFGHIJKLMNOPQRSTUV" not in redacted
     assert "master_password=secret" not in redacted
+
+
+def test_health_summary_uses_short_timeout(monkeypatch):
+    seen = {}
+
+    class FakeClient:
+        def __init__(self, service):
+            self.service = service
+            self.request_timeout_sec = None
+
+        async def request(self, op, payload, stream_events=False):
+            seen["timeout"] = self.request_timeout_sec
+            return [], {"result": {"status": "ok"}}
+
+        async def close(self):
+            seen["closed"] = True
+
+    monkeypatch.setattr(doctor, "ProcClient", FakeClient)
+    result = doctor.asyncio.run(doctor._health_summary("sheriff-gateway"))
+    assert result == "ok"
+    assert seen["timeout"] == doctor.DOCTOR_RPC_TIMEOUT_SEC
+    assert seen["closed"] is True

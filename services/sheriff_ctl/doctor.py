@@ -15,6 +15,8 @@ from shared.codex_debug import load_config
 from shared.paths import agent_root, base_root, gw_root, llm_root
 from shared.proc_rpc import ProcClient
 
+DOCTOR_RPC_TIMEOUT_SEC = 1.5
+
 
 def _tail_text(path: Path, max_lines: int) -> str:
     if not path.exists():
@@ -35,6 +37,7 @@ def _redact(text: str) -> str:
 
 async def _health_summary(service: str) -> str:
     cli = ProcClient(service)
+    cli.request_timeout_sec = DOCTOR_RPC_TIMEOUT_SEC
     try:
         _, res = await cli.request("health", {})
         result = res.get("result", {})
@@ -47,6 +50,7 @@ async def _health_summary(service: str) -> str:
 
 async def _vault_summary() -> str:
     gw = ProcClient("sheriff-gateway")
+    gw.request_timeout_sec = DOCTOR_RPC_TIMEOUT_SEC
     try:
         res = await _gw_secrets_call("secrets.is_unlocked", {}, gw=gw)
         return "unlocked" if res.get("unlocked") else "locked"

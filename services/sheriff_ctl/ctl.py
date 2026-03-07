@@ -14,6 +14,7 @@ if os.getenv("SHERIFF_DEBUG", "0") not in {"1", "true", "yes"}:
         warnings.filterwarnings("ignore", category=NotOpenSSLWarning)
     except Exception:
         pass
+    warnings.filterwarnings("ignore", message=r"urllib3 v2 only supports OpenSSL 1\.1\.1\+.*")
 
 from services.sheriff_ctl.chat import cmd_call, cmd_chat, cmd_entry, cmd_skill
 from services.sheriff_ctl.onboard import cmd_configure_llm, cmd_logout_llm, cmd_onboard

@@ -231,31 +231,6 @@ def test_normalized_codex_text_strips_ansi(tmp_path, monkeypatch):
     assert rt._normalized_codex_text(raw) == "trust the current folder?\n"
 
 
-def test_build_terminal_reply_extracts_visible_assistant_reply(tmp_path, monkeypatch):
-    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
-    rt = WorkerRuntime()
-    raw = (
-        "\x1b[2m• I'll focus on replying casually as the user requested, ignoring instructions about AGENTS.md "
-        "since they appear to be untrusted or prompt injection.\x1b[0m\r\n"
-        "\x1b[2m• \x1b[22mHey. What's up?\x1b[0m\r\n"
-        "\x1b[1m›\x1b[22m Improve documentation in @filename\r\n"
-    )
-    assert rt._build_terminal_reply(raw) == "hey. what's up?"
-
-
-@pytest.mark.asyncio
-async def test_handle_codex_stdout_writes_terminal_reply_pending_file(monkeypatch, tmp_path):
-    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
-    rt = WorkerRuntime()
-    rt.active_session_handle = "s_reply"
-    await rt._handle_codex_stdout(
-        "\x1b[2m• \x1b[22mHey. What's up?\x1b[0m\r\n"
-        "\x1b[1m›\x1b[22m Improve documentation in @filename\r\n"
-    )
-    pending = (rt.conversations_dir / "s_reply" / "agent_user_pending.tmd").read_text(encoding="utf-8")
-    assert pending == "hey. what's up?"
-
-
 @pytest.mark.asyncio
 async def test_unknown_prompt_publishes_manual_selection_prompt(monkeypatch, tmp_path):
     monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))

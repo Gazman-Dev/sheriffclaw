@@ -70,43 +70,46 @@ def cmd_update(args):
     async def _run_update() -> tuple[bool, str, bool]:
         gw = ProcClient("sheriff-gateway")
         updater = ProcClient("sheriff-updater")
-
-        _, plan_res = await updater.request("updater.plan", {"force": bool(getattr(args, "force", False))})
-        plan = plan_res.get("result", {})
-        if plan.get("needs_master_password"):
-            nonlocal mp
-            if not mp:
-                if not sys.stdin.isatty():
-                    return False, "Master password required for secrets update. Pass --master-password in non-interactive mode.", True
-                mp = getpass.getpass("Master password for update (secrets version increased): ")
-            if not await _verify_master_password_async(mp):
-                return False, "Invalid master password. Update cancelled.", True
-
-        await gw.request("gateway.queue.control", {"pause": True, "reason": "update"})
         try:
-            # wait for in-flight agent work to finish
-            for _ in range(120):
-                _, st = await gw.request("gateway.queue.status", {})
-                r = st.get("result", {})
-                if int(r.get("processing", 0)) == 0:
-                    break
-                import asyncio as _a
-                await _a.sleep(0.5)
+            _, plan_res = await updater.request("updater.plan", {"force": bool(getattr(args, "force", False))})
+            plan = plan_res.get("result", {})
+            if plan.get("needs_master_password"):
+                nonlocal mp
+                if not mp:
+                    if not sys.stdin.isatty():
+                        return False, "Master password required for secrets update. Pass --master-password in non-interactive mode.", True
+                    mp = getpass.getpass("Master password for update (secrets version increased): ")
+                if not await _verify_master_password_async(mp):
+                    return False, "Invalid master password. Update cancelled.", True
 
-            _, res = await updater.request(
-                "updater.run",
-                {
-                    "master_password": mp,
-                    "auto_pull": not getattr(args, "no_pull", False),
-                    "force": bool(getattr(args, "force", False)),
-                },
-            )
-            result = res.get("result", {})
-            secrets_changed = bool(
-                (((result.get("plan") or {}).get("changes") or {}).get("secrets") or {}).get("increased"))
-            return bool(result.get("ok")), "", secrets_changed
+            await gw.request("gateway.queue.control", {"pause": True, "reason": "update"})
+            try:
+                # wait for in-flight agent work to finish
+                for _ in range(120):
+                    _, st = await gw.request("gateway.queue.status", {})
+                    r = st.get("result", {})
+                    if int(r.get("processing", 0)) == 0:
+                        break
+                    import asyncio as _a
+                    await _a.sleep(0.5)
+
+                _, res = await updater.request(
+                    "updater.run",
+                    {
+                        "master_password": mp,
+                        "auto_pull": not getattr(args, "no_pull", False),
+                        "force": bool(getattr(args, "force", False)),
+                    },
+                )
+                result = res.get("result", {})
+                secrets_changed = bool(
+                    (((result.get("plan") or {}).get("changes") or {}).get("secrets") or {}).get("increased"))
+                return bool(result.get("ok")), "", secrets_changed
+            finally:
+                await gw.request("gateway.queue.control", {"pause": False})
         finally:
-            await gw.request("gateway.queue.control", {"pause": False})
+            await updater.close()
+            await gw.close()
 
     ok, note, secrets_changed = asyncio.run(_run_update())
     if note:

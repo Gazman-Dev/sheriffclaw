@@ -19,6 +19,7 @@ class ProcClient:
         self.cwd = cwd
         self.env = env
         self.proc: asyncio.subprocess.Process | None = None
+        self._stderr_task: asyncio.Task | None = None
         self._stderr_tail: deque[str] = deque(maxlen=80)
         self._lock = asyncio.Lock()
         self.request_timeout_sec = float(os.environ.get("SHERIFF_RPC_TIMEOUT_SEC", "600"))
@@ -40,7 +41,7 @@ class ProcClient:
             cwd=self.cwd,
             env=self.env,
         )
-        asyncio.create_task(self._drain_stderr())
+        self._stderr_task = asyncio.create_task(self._drain_stderr())
 
     async def _drain_stderr(self):
         assert self.proc and self.proc.stderr
@@ -60,6 +61,54 @@ class ProcClient:
         if not line:
             raise ServiceCrashedError("service exited; stderr tail:\n" + "\n".join(self._stderr_tail))
         return json.loads(line.decode("utf-8"))
+
+    async def close(self) -> None:
+        proc = self.proc
+        stderr_task = self._stderr_task
+        self.proc = None
+        self._stderr_task = None
+        if proc is None:
+            return
+
+        for stream_name in ("stdin", "stdout", "stderr"):
+            stream = getattr(proc, stream_name, None)
+            if stream is None:
+                continue
+            try:
+                stream.close()
+            except Exception:
+                pass
+
+        if proc.returncode is None:
+            try:
+                proc.terminate()
+            except ProcessLookupError:
+                pass
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=1.0)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=1.0)
+                except Exception:
+                    pass
+
+        if stderr_task is not None:
+            stderr_task.cancel()
+            try:
+                await stderr_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
 
     async def request(self, op: str, payload: dict, *, stream_events: bool = False):
         await self.start()

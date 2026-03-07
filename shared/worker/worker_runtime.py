@@ -7,9 +7,10 @@ import subprocess
 import time
 from pathlib import Path
 
+from shared.oplog import get_rotating_logger
 from shared.paths import agent_root, llm_root
 from shared.skills.loader import SkillLoader
-from shared.worker.codex_cli import build_chat_command, debug_enabled
+from shared.worker.codex_cli import augment_path, build_chat_command, debug_enabled, resolve_codex_binary
 
 
 class WorkerRuntime:
@@ -30,6 +31,10 @@ class WorkerRuntime:
         self.codex_proc = None
         self.codex_start_error = ""
         self.debug_log_path = llm_root() / "state" / "debug" / "worker_runtime.jsonl"
+        self.codex_stdout_task = None
+        self.codex_stderr_task = None
+        self.codex_stdout_logger = get_rotating_logger("codex.stdout", llm_root() / "logs" / "codex.out")
+        self.codex_stderr_logger = get_rotating_logger("codex.stderr", llm_root() / "logs" / "codex.err")
 
     def _debug_log(self, event: str, **payload) -> None:
         self.debug_log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -37,18 +42,27 @@ class WorkerRuntime:
         with self.debug_log_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 
+    async def _drain_codex_stream(self, stream, logger) -> None:
+        while True:
+            line = await stream.readline()
+            if not line:
+                return
+            logger.info("%s", line.decode("utf-8", errors="replace").rstrip())
+
     async def _ensure_codex_active(self):
         if self.codex_proc is None or self.codex_proc.returncode is not None:
             env = os.environ.copy()
             env["CODEX_HOME"] = str(self.agent_workspace)
+            env["PATH"] = augment_path(env.get("PATH"))
             cmd = build_chat_command(self.repo_root)
+            use_pipe_logs = os.name != "nt"
             try:
                 if debug_enabled():
                     self.codex_proc = await asyncio.create_subprocess_shell(
                         subprocess.list2cmdline(cmd),
                         stdin=asyncio.subprocess.DEVNULL,
-                        stdout=asyncio.subprocess.DEVNULL,
-                        stderr=asyncio.subprocess.DEVNULL,
+                        stdout=asyncio.subprocess.PIPE if use_pipe_logs else asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.PIPE if use_pipe_logs else asyncio.subprocess.DEVNULL,
                         cwd=str(self.agent_workspace),
                         env=env,
                     )
@@ -56,17 +70,39 @@ class WorkerRuntime:
                     self.codex_proc = await asyncio.create_subprocess_exec(
                         *cmd,
                         stdin=asyncio.subprocess.DEVNULL,
-                        stdout=asyncio.subprocess.DEVNULL,
-                        stderr=asyncio.subprocess.DEVNULL,
+                        stdout=asyncio.subprocess.PIPE if use_pipe_logs else asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.PIPE if use_pipe_logs else asyncio.subprocess.DEVNULL,
                         cwd=str(self.agent_workspace),
                         env=env,
                     )
                 self.codex_start_error = ""
-                self._debug_log("codex_launch", command=cmd, cwd=str(self.agent_workspace))
+                if use_pipe_logs and self.codex_proc.stdout is not None and self.codex_proc.stderr is not None:
+                    self.codex_stdout_task = asyncio.create_task(
+                        self._drain_codex_stream(self.codex_proc.stdout, self.codex_stdout_logger)
+                    )
+                    self.codex_stderr_task = asyncio.create_task(
+                        self._drain_codex_stream(self.codex_proc.stderr, self.codex_stderr_logger)
+                    )
+                self._debug_log(
+                    "codex_launch",
+                    command=cmd,
+                    cwd=str(self.agent_workspace),
+                    resolved_binary=resolve_codex_binary(),
+                    path=env.get("PATH", ""),
+                    stdout_log=str(llm_root() / "logs" / "codex.out"),
+                    stderr_log=str(llm_root() / "logs" / "codex.err"),
+                )
             except Exception as exc:
                 self.codex_proc = None
                 self.codex_start_error = str(exc)
-                self._debug_log("codex_launch_failed", command=cmd, error=self.codex_start_error)
+                self._debug_log(
+                    "codex_launch_failed",
+                    command=cmd,
+                    resolved_binary=resolve_codex_binary(),
+                    path=env.get("PATH", ""),
+                    error=self.codex_start_error,
+                )
+                await self._close_codex_logs()
 
     async def user_message(
         self,
@@ -178,3 +214,17 @@ class WorkerRuntime:
                 self.codex_proc.kill()
                 await self.codex_proc.wait()
         self.codex_proc = None
+        await self._close_codex_logs()
+
+    async def _close_codex_logs(self) -> None:
+        for task_name in ("codex_stdout_task", "codex_stderr_task"):
+            task = getattr(self, task_name, None)
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
+                setattr(self, task_name, None)

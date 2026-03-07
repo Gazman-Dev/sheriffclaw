@@ -14,6 +14,7 @@ from services.sheriff_ctl.utils import _gw_secrets_call, _log_paths
 from shared.codex_debug import load_config
 from shared.paths import agent_root, base_root, gw_root, llm_root
 from shared.proc_rpc import ProcClient
+from shared.worker.codex_cli import augment_path, resolve_codex_binary
 
 DOCTOR_RPC_TIMEOUT_SEC = 1.5
 
@@ -95,6 +96,8 @@ async def _report_async(tail_lines: int) -> str:
         lines.append(f"login_status: {cfg.get('login_status', 'unknown')}")
     except Exception as exc:  # noqa: BLE001
         lines.append(f"config_error: {exc}")
+    lines.append(f"resolved_codex_binary: {resolve_codex_binary()}")
+    lines.append(f"augmented_path: {augment_path(os.environ.get('PATH'))}")
     lines.append(f"agent_root: {agent}")
     lines.append(f"gw_root: {gw_root()}")
     lines.append(f"llm_root: {llm_root()}")
@@ -117,6 +120,8 @@ async def _report_async(tail_lines: int) -> str:
         llm_root() / "state" / "debug" / "codex_cli_debug.jsonl",
         gw_root() / "state" / "debug" / "codex_debug.json",
         gw_root() / "state" / "transcripts" / "primary_session.jsonl",
+        llm_root() / "logs" / "codex.out",
+        llm_root() / "logs" / "codex.err",
     ]
     lines.append("")
     lines.append("Artifacts")

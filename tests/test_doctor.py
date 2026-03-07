@@ -73,3 +73,14 @@ def test_health_summary_uses_short_timeout(monkeypatch):
     assert result == "ok"
     assert seen["timeout"] == doctor.DOCTOR_RPC_TIMEOUT_SEC
     assert seen["closed"] is True
+
+
+def test_report_includes_codex_resolution(monkeypatch, tmp_path):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    monkeypatch.setattr(doctor, "_vault_summary", lambda: doctor.asyncio.sleep(0, result="locked"))
+    monkeypatch.setattr(doctor, "_health_summary", lambda service: doctor.asyncio.sleep(0, result="stopped"))
+    monkeypatch.setattr(doctor, "resolve_codex_binary", lambda: "/opt/homebrew/bin/codex")
+    monkeypatch.setattr(doctor, "augment_path", lambda path: "/usr/bin:/opt/homebrew/bin")
+    report = doctor.asyncio.run(doctor._report_async(1))
+    assert "resolved_codex_binary: /opt/homebrew/bin/codex" in report
+    assert "augmented_path: /usr/bin:/opt/homebrew/bin" in report

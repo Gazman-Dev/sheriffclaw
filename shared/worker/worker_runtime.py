@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import subprocess
 import time
 from pathlib import Path
 
@@ -57,24 +56,14 @@ class WorkerRuntime:
             cmd = build_chat_command(self.repo_root)
             use_pipe_logs = os.name != "nt"
             try:
-                if debug_enabled():
-                    self.codex_proc = await asyncio.create_subprocess_shell(
-                        subprocess.list2cmdline(cmd),
-                        stdin=asyncio.subprocess.DEVNULL,
-                        stdout=asyncio.subprocess.PIPE if use_pipe_logs else asyncio.subprocess.DEVNULL,
-                        stderr=asyncio.subprocess.PIPE if use_pipe_logs else asyncio.subprocess.DEVNULL,
-                        cwd=str(self.agent_workspace),
-                        env=env,
-                    )
-                else:
-                    self.codex_proc = await asyncio.create_subprocess_exec(
-                        *cmd,
-                        stdin=asyncio.subprocess.DEVNULL,
-                        stdout=asyncio.subprocess.PIPE if use_pipe_logs else asyncio.subprocess.DEVNULL,
-                        stderr=asyncio.subprocess.PIPE if use_pipe_logs else asyncio.subprocess.DEVNULL,
-                        cwd=str(self.agent_workspace),
-                        env=env,
-                    )
+                self.codex_proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE if use_pipe_logs else asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE if use_pipe_logs else asyncio.subprocess.DEVNULL,
+                    cwd=str(self.agent_workspace),
+                    env=env,
+                )
                 self.codex_start_error = ""
                 if use_pipe_logs and self.codex_proc.stdout is not None and self.codex_proc.stderr is not None:
                     self.codex_stdout_task = asyncio.create_task(
@@ -104,6 +93,18 @@ class WorkerRuntime:
                 )
                 await self._close_codex_logs()
 
+    async def _send_codex_stdin(self, text: str, session_handle: str) -> None:
+        if self.codex_proc is None or self.codex_proc.stdin is None:
+            self._debug_log("codex_stdin_unavailable", session=session_handle)
+            return
+        payload = (text.rstrip("\n") + "\n").encode("utf-8")
+        try:
+            self.codex_proc.stdin.write(payload)
+            await self.codex_proc.stdin.drain()
+            self._debug_log("codex_stdin_write", session=session_handle, bytes=len(payload), text=text)
+        except Exception as exc:
+            self._debug_log("codex_stdin_write_failed", session=session_handle, error=str(exc))
+
     async def user_message(
         self,
         session_handle: str,
@@ -132,6 +133,7 @@ class WorkerRuntime:
         user_file = session_dir / f"{ts}_user_agent.tmd"
         user_file.write_text(text, encoding="utf-8")
         self._debug_log("user_message", session=session_handle, file=user_file.name, text=text)
+        await self._send_codex_stdin(text, session_handle)
 
         start = time.time()
         emitted_typing = False

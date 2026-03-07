@@ -15,7 +15,7 @@ async def test_worker_writes_inbox_file_and_receives_file_protocol_reply(monkeyp
         rt.codex_proc = fake_proc
         rt.codex_start_error = ""
 
-    async def fake_send(text, session_handle):
+    async def fake_send(text, session_handle, *, first_message):
         await _write_pending_after_delay(rt, session_handle, f"Debug Codex Response to: {text}", 0.01)
 
     monkeypatch.setattr(rt, "_ensure_codex_active", fake_ensure)
@@ -57,7 +57,7 @@ async def test_worker_timeout_is_reproducible_via_codex_debug(monkeypatch, tmp_p
         rt.codex_proc = fake_proc
         rt.codex_start_error = ""
 
-    async def fake_send(text, session_handle):
+    async def fake_send(text, session_handle, *, first_message):
         return None
 
     monkeypatch.setattr(rt, "_ensure_codex_active", fake_ensure)
@@ -87,7 +87,7 @@ async def test_worker_typing_timeout_emits_delta_before_timeout(monkeypatch, tmp
         rt.codex_proc = fake_proc
         rt.codex_start_error = ""
 
-    async def fake_send(text, session_handle):
+    async def fake_send(text, session_handle, *, first_message):
         session_dir = rt.conversations_dir / session_handle
         session_dir.mkdir(parents=True, exist_ok=True)
         (session_dir / "agent_user_typing.tmd").touch()
@@ -169,10 +169,45 @@ async def test_worker_writes_message_file_and_forwards_turn_to_codex_stdin(monke
     user_files = list(session_dir.glob("*_user_agent.tmd"))
     assert user_files
     assert user_files[0].read_text(encoding="utf-8") == "hello stdin path"
-    assert fake_proc.stdin.writes == [b"hello stdin path\n"]
+    assert len(fake_proc.stdin.writes) == 1
+    stdin_payload = fake_proc.stdin.writes[0].decode("utf-8")
+    assert "check how we manage messages." in stdin_payload.lower()
+    assert "the user just sent a message over s4 session." in stdin_payload.lower()
+    assert "please do what the user says and write a reply to the user via the conversation files." in stdin_payload.lower()
+    assert stdin_payload.endswith("User message:\nhello stdin path\n")
     assert fake_proc.stdin.drains == 1
     finals = [p for e, p in events if e == "assistant.final"]
     assert finals[-1]["text"] == "Agent background process response timed out."
+
+
+@pytest.mark.asyncio
+async def test_worker_followup_turn_uses_followup_stdin_prompt(monkeypatch, tmp_path):
+    monkeypatch.setenv("SHERIFF_DEBUG", "1")
+    monkeypatch.setenv("SHERIFF_DEBUG_TIMEOUT_SEC", "0.1")
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    rt = WorkerRuntime()
+    fake_proc = _FakeProc()
+
+    async def fake_ensure():
+        rt.codex_proc = fake_proc
+        rt.codex_start_error = ""
+
+    monkeypatch.setattr(rt, "_ensure_codex_active", fake_ensure)
+
+    async def emit(event, payload):
+        return None
+
+    session_dir = rt.conversations_dir / "s4b"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    (session_dir / "111_user_agent.tmd").write_text("first", encoding="utf-8")
+
+    await rt.user_message("s4b", "second", None, emit, channel="telegram", principal_external_id="u1")
+
+    assert len(fake_proc.stdin.writes) == 1
+    stdin_payload = fake_proc.stdin.writes[0].decode("utf-8")
+    assert "the user sent another message over s4b session." in stdin_payload.lower()
+    assert "please do what the user says and write a reply to the user via the conversation files." in stdin_payload.lower()
+    assert stdin_payload.endswith("User message:\nsecond\n")
 
 
 def test_extract_menu_options_builds_option_payloads(tmp_path, monkeypatch):

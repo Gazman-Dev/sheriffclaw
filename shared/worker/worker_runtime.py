@@ -194,6 +194,19 @@ class WorkerRuntime:
         body += "\n\nChoose one:\n" + "\n".join(option_lines)
         return body
 
+    def _build_codex_stdin_prompt(self, session_handle: str, text: str, *, first_message: bool) -> str:
+        if first_message:
+            prefix = (
+                f"Check how we manage messages. The user just sent a message over {session_handle} session. "
+                "Please do what the user says and write a reply to the user via the conversation files."
+            )
+        else:
+            prefix = (
+                f"The user sent another message over {session_handle} session. "
+                "Please do what the user says and write a reply to the user via the conversation files."
+            )
+        return f"{prefix}\n\nUser message:\n{text}"
+
     def _normalized_codex_text(self, text: str) -> str:
         stripped = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
         stripped = re.sub(r"\x1b\].*?(?:\x07|\x1b\\)", "", stripped, flags=re.DOTALL)
@@ -262,14 +275,15 @@ class WorkerRuntime:
                 )
                 await self._close_codex_logs()
 
-    async def _send_codex_stdin(self, text: str, session_handle: str) -> None:
+    async def _send_codex_stdin(self, text: str, session_handle: str, *, first_message: bool) -> None:
         if self.codex_proc is None:
             self._debug_log("codex_stdin_unavailable", session=session_handle)
             return
-        payload = (text.rstrip("\n") + "\n").encode("utf-8")
+        prompt_text = self._build_codex_stdin_prompt(session_handle, text, first_message=first_message)
+        payload = (prompt_text.rstrip("\n") + "\n").encode("utf-8")
         try:
             await self._write_codex_bytes(payload)
-            self._debug_log("codex_stdin_write", session=session_handle, bytes=len(payload), text=text)
+            self._debug_log("codex_stdin_write", session=session_handle, bytes=len(payload), text=prompt_text)
         except Exception as exc:
             self._debug_log("codex_stdin_write_failed", session=session_handle, error=str(exc))
 
@@ -326,11 +340,12 @@ class WorkerRuntime:
             await emit_event("assistant.final", {"text": f"Codex background process failed to start: {self.codex_start_error}"})
             return
 
+        first_message = not any(session_dir.glob("*_user_agent.tmd"))
         ts = int(time.time())
         user_file = session_dir / f"{ts}_user_agent.tmd"
         user_file.write_text(text, encoding="utf-8")
         self._debug_log("user_message", session=session_handle, file=user_file.name, text=text)
-        await self._send_codex_stdin(text, session_handle)
+        await self._send_codex_stdin(text, session_handle, first_message=first_message)
 
         start = time.time()
         emitted_typing = False

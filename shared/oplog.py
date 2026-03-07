@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 from pathlib import Path
 
@@ -68,3 +69,35 @@ def get_rotating_logger(
     logger.addHandler(handler)
     logger.propagate = False
     return logger
+
+
+class RotatingTextLog:
+    def __init__(self, log_file: Path, *, max_bytes: int = 5 * 1024 * 1024, backup_count: int = 5):
+        self.log_file = log_file
+        self.max_bytes = max_bytes
+        self.backup_count = backup_count
+        self._lock = threading.Lock()
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+
+    def append(self, text: str) -> None:
+        if not text:
+            return
+        with self._lock:
+            self._rotate_if_needed(len(text.encode("utf-8", errors="ignore")))
+            with self.log_file.open("a", encoding="utf-8", errors="replace") as fh:
+                fh.write(text)
+
+    def _rotate_if_needed(self, incoming_bytes: int) -> None:
+        current_size = self.log_file.stat().st_size if self.log_file.exists() else 0
+        if current_size + incoming_bytes <= self.max_bytes:
+            return
+        oldest = self.log_file.with_name(f"{self.log_file.name}.{self.backup_count}")
+        if oldest.exists():
+            oldest.unlink()
+        for idx in range(self.backup_count - 1, 0, -1):
+            src = self.log_file.with_name(f"{self.log_file.name}.{idx}")
+            dst = self.log_file.with_name(f"{self.log_file.name}.{idx + 1}")
+            if src.exists():
+                src.replace(dst)
+        if self.log_file.exists():
+            self.log_file.replace(self.log_file.with_name(f"{self.log_file.name}.1"))

@@ -173,3 +173,67 @@ async def test_worker_writes_message_file_and_forwards_turn_to_codex_stdin(monke
     assert fake_proc.stdin.drains == 1
     finals = [p for e, p in events if e == "assistant.final"]
     assert finals[-1]["text"] == "Agent background process response timed out."
+
+
+def test_prompt_actions_accept_update_and_always_trust(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    rt = WorkerRuntime()
+    text = (
+        "Would you like to update to the latest version?\n"
+        "Update\n"
+        "Not now\n"
+        "Trust the current folder?\n"
+        "Trust once\n"
+        "Always trust\n"
+    )
+    actions = rt._prompt_actions_for_text(text)
+    assert ("accept_update", b"\r") in actions
+    assert ("always_trust_folder", b"\x1b[B\r") in actions
+
+
+def test_normalized_codex_text_strips_ansi(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    rt = WorkerRuntime()
+    raw = "\x1b[31mTrust the current folder?\x1b[0m\r\n"
+    assert rt._normalized_codex_text(raw) == "trust the current folder?\n\n"
+
+
+@pytest.mark.asyncio
+async def test_unknown_prompt_publishes_manual_selection_prompt(monkeypatch, tmp_path):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    rt = WorkerRuntime()
+    rt.active_session_handle = "s5"
+    await rt._handle_codex_stdout("Trust the current folder?\nAlways trust\n")
+    pending = (rt.conversations_dir / "s5" / "agent_user_pending.tmd").read_text(encoding="utf-8")
+    assert "/option1 - Trust once" in pending
+    assert "/option2 - Always trust" in pending
+
+
+@pytest.mark.asyncio
+async def test_option_reply_sends_selected_control(monkeypatch, tmp_path):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    rt = WorkerRuntime()
+    rt.codex_prompt_state["s6"] = {
+        "key": "trust_folder_manual",
+        "message": "Codex is asking whether to trust the current folder.",
+        "details": "trust the current folder",
+        "options": [
+            {"label": "Trust once", "payload": b"\r"},
+            {"label": "Always trust", "payload": b"\x1b[B\r"},
+        ],
+    }
+    calls = []
+
+    async def fake_write(payload, *, reason, session=None):
+        calls.append((payload, reason, session))
+
+    monkeypatch.setattr(rt, "_write_codex_control", fake_write)
+    events = []
+
+    async def emit(event, payload):
+        events.append((event, payload))
+
+    handled = await rt._handle_prompt_selection("s6", "/option2", emit)
+    assert handled is True
+    assert calls == [(b"\x1b[B\r", "user_/option2", "s6")]
+    assert ("assistant.final", {"text": "Sent /option2 to Codex."}) in events

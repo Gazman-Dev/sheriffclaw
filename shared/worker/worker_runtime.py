@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import time
 from pathlib import Path
 
-from shared.oplog import get_rotating_logger
+from shared.oplog import RotatingTextLog
 from shared.paths import agent_root, llm_root
 from shared.skills.loader import SkillLoader
 from shared.worker.codex_cli import augment_path, build_chat_command, debug_enabled, resolve_codex_binary
@@ -32,8 +33,12 @@ class WorkerRuntime:
         self.debug_log_path = llm_root() / "state" / "debug" / "worker_runtime.jsonl"
         self.codex_stdout_task = None
         self.codex_stderr_task = None
-        self.codex_stdout_logger = get_rotating_logger("codex.stdout", llm_root() / "logs" / "codex.out")
-        self.codex_stderr_logger = get_rotating_logger("codex.stderr", llm_root() / "logs" / "codex.err")
+        self.codex_stdout_log = RotatingTextLog(llm_root() / "logs" / "codex.out")
+        self.codex_stderr_log = RotatingTextLog(llm_root() / "logs" / "codex.err")
+        self.codex_prompt_buffer = ""
+        self.codex_prompt_last_action: dict[str, float] = {}
+        self.codex_prompt_state: dict[str, dict] = {}
+        self.active_session_handle = "primary_session"
 
     def _debug_log(self, event: str, **payload) -> None:
         self.debug_log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -41,12 +46,126 @@ class WorkerRuntime:
         with self.debug_log_path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-    async def _drain_codex_stream(self, stream, logger) -> None:
+    async def _drain_codex_stream(self, stream, sink: RotatingTextLog, stream_name: str) -> None:
         while True:
-            line = await stream.readline()
-            if not line:
+            chunk = await stream.read(512)
+            if not chunk:
                 return
-            logger.info("%s", line.decode("utf-8", errors="replace").rstrip())
+            text = chunk.decode("utf-8", errors="replace")
+            sink.append(text)
+            if stream_name == "stdout":
+                await self._handle_codex_stdout(text)
+
+    async def _write_codex_control(self, payload: bytes, *, reason: str, session: str | None = None) -> None:
+        if self.codex_proc is None or self.codex_proc.stdin is None:
+            self._debug_log("codex_control_unavailable", reason=reason, session=session)
+            return
+        try:
+            self.codex_proc.stdin.write(payload)
+            await self.codex_proc.stdin.drain()
+            self._debug_log("codex_control_write", reason=reason, session=session, payload_hex=payload.hex())
+        except Exception as exc:
+            self._debug_log("codex_control_write_failed", reason=reason, session=session, error=str(exc))
+
+    def _prompt_session(self) -> str:
+        return self.active_session_handle or "primary_session"
+
+    def _extract_prompt_lines(self, text: str) -> list[str]:
+        normalized = self._normalized_codex_text(text)
+        lines = [line.strip() for line in normalized.splitlines()]
+        lines = [line for line in lines if line]
+        return lines[-12:]
+
+    def _build_manual_prompt(self, text: str) -> dict | None:
+        lines = self._extract_prompt_lines(text)
+        joined = "\n".join(lines)
+        if "trust the current folder" in joined:
+            return {
+                "key": "trust_folder_manual",
+                "message": "Codex is asking whether to trust the current folder.",
+                "details": joined,
+                "options": [
+                    {"label": "Trust once", "payload": b"\r"},
+                    {"label": "Always trust", "payload": b"\x1b[B\r"},
+                ],
+            }
+        if "update to the latest version" in joined or "would you like to update" in joined:
+            return {
+                "key": "update_manual",
+                "message": "Codex is asking whether to update itself.",
+                "details": joined,
+                "options": [
+                    {"label": "Update", "payload": b"\r"},
+                    {"label": "Skip update", "payload": b"\x1b[B\r"},
+                ],
+            }
+        if "trust" in joined or "update" in joined:
+            return {
+                "key": "generic_prompt",
+                "message": "Codex is waiting on an interactive prompt.",
+                "details": joined,
+                "options": [{"label": "Accept default", "payload": b"\r"}],
+            }
+        return None
+
+    async def _publish_manual_prompt(self, prompt: dict) -> None:
+        session = self._prompt_session()
+        existing = self.codex_prompt_state.get(session)
+        if existing and existing.get("key") == prompt["key"]:
+            return
+        self.codex_prompt_state[session] = prompt
+        session_dir = self.conversations_dir / session
+        session_dir.mkdir(parents=True, exist_ok=True)
+        pending_file = session_dir / "agent_user_pending.tmd"
+        option_lines = [f"/option{i + 1} - {opt['label']}" for i, opt in enumerate(prompt["options"])]
+        body = prompt["message"]
+        if prompt.get("details"):
+            body += f"\n\n{prompt['details']}"
+        body += "\n\nChoose one:\n" + "\n".join(option_lines)
+        pending_file.write_text(body, encoding="utf-8")
+        self._debug_log("codex_prompt_waiting_for_user", session=session, key=prompt["key"], options=option_lines)
+
+    def _normalized_codex_text(self, text: str) -> str:
+        stripped = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+        stripped = re.sub(r"\x1b[@-_]", "", stripped)
+        stripped = stripped.replace("\r", "\n")
+        return stripped.lower()
+
+    def _prompt_actions_for_text(self, text: str) -> list[tuple[str, bytes]]:
+        normalized = self._normalized_codex_text(text)
+        actions: list[tuple[str, bytes]] = []
+        if (
+            "update to the latest version" in normalized
+            and "skip update" in normalized
+            and "update now" in normalized
+        ) or (
+            "would you like to update" in normalized
+            and "not now" in normalized
+            and "update" in normalized
+        ):
+            actions.append(("accept_update", b"\r"))
+        if (
+            "trust the current folder" in normalized
+            and "always trust" in normalized
+            and ("trust once" in normalized or "this time" in normalized)
+        ):
+            actions.append(("always_trust_folder", b"\x1b[B\r"))
+        return actions
+
+    async def _handle_codex_stdout(self, text: str) -> None:
+        self.codex_prompt_buffer = (self.codex_prompt_buffer + text)[-8000:]
+        now = time.time()
+        actions = self._prompt_actions_for_text(self.codex_prompt_buffer)
+        for reason, payload in actions:
+            if now - self.codex_prompt_last_action.get(reason, 0.0) < 2.0:
+                continue
+            self.codex_prompt_last_action[reason] = now
+            await self._write_codex_control(payload, reason=reason)
+            self.codex_prompt_state.pop(self._prompt_session(), None)
+        if not actions:
+            prompt = self._build_manual_prompt(self.codex_prompt_buffer)
+            if prompt is not None:
+                await self._publish_manual_prompt(prompt)
 
     async def _ensure_codex_active(self):
         if self.codex_proc is None or self.codex_proc.returncode is not None:
@@ -65,12 +184,14 @@ class WorkerRuntime:
                     env=env,
                 )
                 self.codex_start_error = ""
+                self.codex_prompt_buffer = ""
+                self.codex_prompt_last_action.clear()
                 if use_pipe_logs and self.codex_proc.stdout is not None and self.codex_proc.stderr is not None:
                     self.codex_stdout_task = asyncio.create_task(
-                        self._drain_codex_stream(self.codex_proc.stdout, self.codex_stdout_logger)
+                        self._drain_codex_stream(self.codex_proc.stdout, self.codex_stdout_log, "stdout")
                     )
                     self.codex_stderr_task = asyncio.create_task(
-                        self._drain_codex_stream(self.codex_proc.stderr, self.codex_stderr_logger)
+                        self._drain_codex_stream(self.codex_proc.stderr, self.codex_stderr_log, "stderr")
                     )
                 self._debug_log(
                     "codex_launch",
@@ -105,6 +226,28 @@ class WorkerRuntime:
         except Exception as exc:
             self._debug_log("codex_stdin_write_failed", session=session_handle, error=str(exc))
 
+    async def _handle_prompt_selection(self, session_handle: str, text: str, emit_event) -> bool:
+        if not text.startswith("/option"):
+            return False
+        state = self.codex_prompt_state.get(session_handle)
+        if not state:
+            await emit_event("assistant.final", {"text": "No pending Codex prompt is waiting for a selection."})
+            return True
+        suffix = text[len("/option") :].strip()
+        try:
+            idx = int(suffix) - 1
+        except ValueError:
+            idx = -1
+        if idx < 0 or idx >= len(state["options"]):
+            allowed = ", ".join(f"/option{i + 1}" for i in range(len(state["options"])))
+            await emit_event("assistant.final", {"text": f"Invalid selection. Available choices: {allowed}"})
+            return True
+        choice = state["options"][idx]
+        await self._write_codex_control(choice["payload"], reason=f"user_{text}", session=session_handle)
+        self.codex_prompt_state.pop(session_handle, None)
+        await emit_event("assistant.final", {"text": f"Sent {text} to Codex."})
+        return True
+
     async def user_message(
         self,
         session_handle: str,
@@ -115,6 +258,9 @@ class WorkerRuntime:
     ):
         session_dir = self.conversations_dir / session_handle
         session_dir.mkdir(parents=True, exist_ok=True)
+        self.active_session_handle = session_handle
+        if await self._handle_prompt_selection(session_handle, text.strip(), emit_event):
+            return
         debug_mode = os.environ.get("SHERIFF_DEBUG", "0") == "1"
         pending_file = session_dir / "agent_user_pending.tmd"
         typing_file = session_dir / "agent_user_typing.tmd"

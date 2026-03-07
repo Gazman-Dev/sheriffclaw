@@ -39,7 +39,19 @@ class SheriffUpdaterService:
         force = bool(payload.get("force", False))
 
         if auto_pull and (self.repo_root / ".git").exists():
-            subprocess.run(["git", "-C", str(self.repo_root), "pull", "--ff-only"], check=False)  # noqa: S603
+            git_res = subprocess.run(
+                ["git", "-C", str(self.repo_root), "pull", "--ff-only"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )  # noqa: S603
+            if git_res.returncode != 0:
+                return {
+                    "ok": False,
+                    "error": "git_pull_failed",
+                    "code": git_res.returncode,
+                    "stderr": (git_res.stderr or "").strip(),
+                }
 
         plan = self._build_plan(force=force)
 
@@ -59,9 +71,16 @@ class SheriffUpdaterService:
             "--force-reinstall",
             str(self.repo_root),
         ]
-        proc = subprocess.run(pip_cmd, check=False)  # noqa: S603
+        proc = subprocess.run(pip_cmd, check=False, capture_output=True, text=True)  # noqa: S603
         if proc.returncode != 0:
-            return {"ok": False, "error": "pip_install_failed", "code": proc.returncode, "plan": plan}
+            return {
+                "ok": False,
+                "error": "pip_install_failed",
+                "code": proc.returncode,
+                "stderr": (proc.stderr or "").strip(),
+                "stdout": (proc.stdout or "").strip(),
+                "plan": plan,
+            }
 
         save_applied_versions(plan["target_versions"])
         return {"ok": True, "mode": "full_update", "plan": plan}

@@ -25,11 +25,13 @@ async def test_updater_skips_when_versions_not_increased(monkeypatch, tmp_path):
 
     calls =[]
 
-    def fake_run(cmd, check=False):
+    def fake_run(cmd, check=False, capture_output=False, text=False):
         calls.append(cmd)
 
         class P:
             returncode = 0
+            stdout = ""
+            stderr = ""
 
         return P()
 
@@ -64,11 +66,13 @@ async def test_updater_force_updates_even_without_version_increase(monkeypatch, 
 
     calls =[]
 
-    def fake_run(cmd, check=False):
+    def fake_run(cmd, check=False, capture_output=False, text=False):
         calls.append(cmd)
 
         class P:
             returncode = 0
+            stdout = ""
+            stderr = ""
 
         return P()
 
@@ -97,9 +101,11 @@ async def test_updater_requires_master_password_when_secrets_version_increased(m
     monkeypatch.setattr("services.sheriff_updater.service.load_applied_versions",
                         lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"})
 
-    def fake_run(cmd, check=False):
+    def fake_run(cmd, check=False, capture_output=False, text=False):
         class P:
             returncode = 0
+            stdout = ""
+            stderr = ""
 
         return P()
 
@@ -124,11 +130,13 @@ async def test_updater_does_not_require_master_password_when_only_non_secrets_in
 
     calls =[]
 
-    def fake_run(cmd, check=False):
+    def fake_run(cmd, check=False, capture_output=False, text=False):
         calls.append(cmd)
 
         class P:
             returncode = 0
+            stdout = ""
+            stderr = ""
 
         return P()
 
@@ -168,11 +176,13 @@ async def test_updater_returns_error_when_reinstall_fails(monkeypatch, tmp_path)
 
     calls =[]
 
-    def fake_run(cmd, check=False):
+    def fake_run(cmd, check=False, capture_output=False, text=False):
         calls.append(cmd)
 
         class P:
             returncode = 17
+            stdout = "pip stdout"
+            stderr = "pip stderr"
 
         return P()
 
@@ -191,3 +201,49 @@ async def test_updater_returns_error_when_reinstall_fails(monkeypatch, tmp_path)
     assert "--upgrade" in pip_calls[0]
     assert "--force-reinstall" in pip_calls[0]
     assert str(repo) in pip_calls[0]
+    assert out["stderr"] == "pip stderr"
+    assert out["stdout"] == "pip stdout"
+
+
+@pytest.mark.asyncio
+async def test_updater_returns_error_when_git_pull_fails(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    (repo / "versions.json").write_text('{"agent":"1.0.1","sheriff":"1.0.0","secrets":"1.0.0"}\n', encoding="utf-8")
+
+    monkeypatch.setattr(
+        "services.sheriff_updater.service.load_applied_versions",
+        lambda: {"agent": "1.0.0", "sheriff": "1.0.0", "secrets": "1.0.0"},
+    )
+
+    calls = []
+
+    def fake_run(cmd, check=False, capture_output=False, text=False):
+        calls.append((cmd, capture_output, text))
+
+        class P:
+            if cmd[0] == "git":
+                returncode = 9
+                stdout = ""
+                stderr = "git failed"
+            else:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+
+        return P()
+
+    monkeypatch.setattr("services.sheriff_updater.service.subprocess.run", fake_run)
+    monkeypatch.setattr("services.sheriff_updater.service.save_applied_versions", lambda _: None)
+
+    svc = SheriffUpdaterService()
+    svc.repo_root = repo
+
+    out = await svc.run_update({"auto_pull": True}, None, "r6")
+    assert out["ok"] is False
+    assert out["error"] == "git_pull_failed"
+    assert out["code"] == 9
+    assert out["stderr"] == "git failed"
+    assert calls[0][1] is True
+    assert calls[0][2] is True

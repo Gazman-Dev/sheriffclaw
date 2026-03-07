@@ -191,6 +191,26 @@ def test_extract_menu_options_builds_option_payloads(tmp_path, monkeypatch):
     ]
 
 
+def test_extract_interactive_menu_prefers_choice_block_over_warning_list(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    rt = WorkerRuntime()
+    lines = [
+        "warning text",
+        "1. /users/ilyagazman/.sheriffclaw/agents/codex/.codex",
+        "to load config.toml, add trusted project",
+        "choose how you'd like codex to proceed.",
+        "1. try new model",
+        "2. use existing model",
+        "use ↑/↓ to move, press enter to confirm",
+    ]
+    context, options = rt._extract_interactive_menu(lines)
+    assert "choose how you'd like codex to proceed." in context
+    assert options == [
+        {"label": "try new model", "payload": b"\r"},
+        {"label": "use existing model", "payload": b"\x1b[B\r"},
+    ]
+
+
 def test_normalized_codex_text_strips_ansi(tmp_path, monkeypatch):
     monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
     rt = WorkerRuntime()
@@ -262,5 +282,49 @@ async def test_normal_message_is_blocked_while_prompt_is_pending(monkeypatch, tm
         (
             "assistant.final",
             {"text": "Codex is waiting on an interactive selection. Reply with one of the shown /optionN choices first."},
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_prompt_pending_returns_prompt_without_timeout(monkeypatch, tmp_path):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    monkeypatch.setenv("SHERIFF_DEBUG", "1")
+    monkeypatch.setenv("SHERIFF_DEBUG_TIMEOUT_SEC", "0.2")
+    rt = WorkerRuntime()
+    fake_proc = _FakeProc()
+
+    async def fake_ensure():
+        rt.codex_proc = fake_proc
+        rt.codex_start_error = ""
+        rt.codex_prompt_state["s8"] = {
+            "key": "generic_menu:try new model|use existing model",
+            "message": "Codex is waiting on an interactive selection.",
+            "details": "choose how you'd like codex to proceed.\n1. try new model\n2. use existing model",
+            "options": [
+                {"label": "try new model", "payload": b"\r"},
+                {"label": "use existing model", "payload": b"\x1b[B\r"},
+            ],
+        }
+        session_dir = rt.conversations_dir / "s8"
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / "agent_user_pending.tmd").write_text(
+            "Codex is waiting on an interactive selection.\n\nChoose one:\n/option1 - try new model\n/option2 - use existing model",
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(rt, "_ensure_codex_active", fake_ensure)
+    events = []
+
+    async def emit(event, payload):
+        events.append((event, payload))
+
+    await rt.user_message("s8", "hi", None, emit)
+    assert events == [
+        (
+            "assistant.final",
+            {
+                "text": "Codex is waiting on an interactive selection.\n\nChoose one:\n/option1 - try new model\n/option2 - use existing model"
+            },
         )
     ]

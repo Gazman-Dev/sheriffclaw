@@ -91,20 +91,51 @@ class WorkerRuntime:
         normalized = self._normalized_codex_text(text)
         lines = [line.strip() for line in normalized.splitlines()]
         lines = [line for line in lines if line]
-        return lines[-24:]
+        return lines[-40:]
 
     def _build_manual_prompt(self, text: str) -> dict | None:
         lines = self._extract_prompt_lines(text)
-        joined = "\n".join(lines)
-        options = self._extract_menu_options(lines)
+        context_lines, options = self._extract_interactive_menu(lines)
         if options:
             return {
                 "key": f"generic_menu:{'|'.join(opt['label'] for opt in options)}",
                 "message": "Codex is waiting on an interactive selection.",
-                "details": joined,
+                "details": "\n".join(context_lines),
                 "options": options,
             }
         return None
+
+    def _extract_interactive_menu(self, lines: list[str]) -> tuple[list[str], list[dict]]:
+        candidate_starts = [
+            idx
+            for idx, line in enumerate(lines)
+            if any(token in line for token in ("choose", "select", "press enter to confirm", "use ↑/↓", "use up/down"))
+        ]
+        for idx in reversed(candidate_starts):
+            start = max(idx - 4, 0)
+            end = min(idx + 8, len(lines))
+            window = lines[start:end]
+            options = self._extract_menu_options(window)
+            if options:
+                return window, options
+
+        menu_indices = [idx for idx, line in enumerate(lines) if re.match(r"^[>\s]*([0-9]+)[.)]\s+(.+)$", line)]
+        if not menu_indices:
+            return [], []
+        groups: list[list[int]] = []
+        current = [menu_indices[0]]
+        for idx in menu_indices[1:]:
+            if idx == current[-1] + 1:
+                current.append(idx)
+            else:
+                groups.append(current)
+                current = [idx]
+        groups.append(current)
+        last_group = groups[-1]
+        start = max(last_group[0] - 3, 0)
+        end = min(last_group[-1] + 4, len(lines))
+        window = lines[start:end]
+        return window, self._extract_menu_options(window)
 
     def _extract_menu_options(self, lines: list[str]) -> list[dict]:
         options: list[dict] = []
@@ -115,7 +146,14 @@ class WorkerRuntime:
                 continue
             idx = int(match.group(1))
             label = match.group(2).strip()
-            if not label or label in seen_labels or idx <= 0:
+            if (
+                not label
+                or label in seen_labels
+                or idx <= 0
+                or label.startswith("/")
+                or label.startswith("http")
+                or label.startswith("/users/")
+            ):
                 continue
             seen_labels.add(label)
             payload = (b"\r" if idx == 1 else (b"\x1b[B" * (idx - 1)) + b"\r")
@@ -288,6 +326,11 @@ class WorkerRuntime:
                 timeout_sec = 300.0
 
         while time.time() - start < timeout_sec:
+            if session_handle in self.codex_prompt_state and pending_file.exists():
+                content = pending_file.read_text(encoding="utf-8")
+                self._debug_log("assistant_prompt", session=session_handle, text=content)
+                await emit_event("assistant.final", {"text": content.strip()})
+                return
             if pending_file.exists():
                 await asyncio.sleep(0.1)
                 try:

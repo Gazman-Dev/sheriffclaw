@@ -45,6 +45,7 @@ class WorkerRuntime:
         self.codex_ready_event = asyncio.Event()
         self.codex_ready_marked = False
         self.codex_visible_buffer = ""
+        self.codex_boot_seen = False
         self.active_session_handle = "primary_session"
 
     def _debug_log(self, event: str, **payload) -> None:
@@ -231,12 +232,19 @@ class WorkerRuntime:
         visible = self._visible_codex_text(self.codex_visible_buffer)
         normalized = visible.lower()
         if "booting mcp server" in normalized:
-            if "what do you want to chat about?" not in normalized and "what do you want to work on?" not in normalized:
-                return
+            self.codex_boot_seen = True
         ready_markers = (
+            "hey. i’m here and ready.",
+            "hey. i'm here and ready.",
             "what do you want to chat about?",
             "what do you want to work on?",
         )
+        if (
+            not self.codex_boot_seen
+            and not any(marker in normalized for marker in ready_markers)
+            and (" model:     loading" in normalized or "implement {feature}" in normalized)
+        ):
+            return
         if any(marker in normalized for marker in ready_markers):
             self.codex_ready_marked = True
             self.codex_ready_event.set()
@@ -244,7 +252,11 @@ class WorkerRuntime:
             return
         lines = [line.strip() for line in visible.splitlines() if line.strip()]
         tail = lines[-8:]
-        if any("›" in line for line in tail) and not any("booting mcp server" in line.lower() for line in tail):
+        if (
+            not self.codex_boot_seen
+            and any("›" in line for line in tail)
+            and not any("booting mcp server" in line.lower() for line in tail)
+        ):
             self.codex_ready_marked = True
             self.codex_ready_event.set()
             self._debug_log("codex_ready", marker="prompt")
@@ -280,6 +292,7 @@ class WorkerRuntime:
                 self.codex_prompt_buffer = ""
                 self.codex_visible_buffer = ""
                 self.codex_prompt_last_action.clear()
+                self.codex_boot_seen = False
                 self.codex_ready_marked = False
                 self.codex_ready_event = asyncio.Event()
                 if isinstance(self.codex_proc, _PosixPtyProcess):
@@ -501,6 +514,7 @@ class WorkerRuntime:
                 self.codex_proc.kill()
                 await self.codex_proc.wait()
         self.codex_proc = None
+        self.codex_boot_seen = False
         self.codex_ready_marked = False
         self.codex_ready_event = asyncio.Event()
         await self._close_codex_logs()

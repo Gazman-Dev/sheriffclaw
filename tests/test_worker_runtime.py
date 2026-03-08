@@ -279,6 +279,19 @@ async def test_codex_ready_is_marked_from_greeting(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_codex_prompt_is_not_ready_during_boot_after_placeholder_prompt(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    rt = WorkerRuntime()
+    await rt._handle_codex_stdout("› Implement {feature}\n")
+    assert rt.codex_ready_marked is False
+    await rt._handle_codex_stdout("• Booting MCP server: codex_apps\n")
+    assert rt.codex_ready_marked is False
+    await rt._handle_codex_stdout("• Hey. I'm here and ready.\n")
+    assert rt.codex_ready_marked is True
+    assert rt.codex_ready_event.is_set()
+
+
+@pytest.mark.asyncio
 async def test_unknown_prompt_publishes_manual_selection_prompt(monkeypatch, tmp_path):
     monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
     rt = WorkerRuntime()

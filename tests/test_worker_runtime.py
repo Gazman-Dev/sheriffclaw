@@ -262,6 +262,38 @@ def test_extract_interactive_menu_rejects_single_warning_path_option(tmp_path, m
     assert options ==[]
 
 
+def test_extract_inline_interactive_menu_from_compacted_prompt(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    rt = WorkerRuntime()
+    text = (
+        "IntroducingGPT-5.4 "
+        "Choose how you'd like Codex to proceed. "
+        "1. Try new model "
+        "2. Use existing model "
+        "Use ↑/↓ to move, press enter to confirm"
+    )
+    context, options = rt._extract_inline_interactive_menu(text)
+    assert context
+    assert options == [
+        {"label": "try new model", "payload": b"\r"},
+        {"label": "use existing model", "payload": b"\x1b[B\r"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unknown_compacted_prompt_publishes_manual_selection_prompt(monkeypatch, tmp_path):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    rt = WorkerRuntime()
+    rt.active_session_handle = "s5b"
+    await rt._handle_codex_stdout(
+        "IntroducingGPT-5.4 Choose how you'd like Codex to proceed. "
+        "1. Try new model 2. Use existing model Use ↑/↓ to move, press enter to confirm"
+    )
+    pending = (rt.conversations_dir / "s5b" / "agent_user_pending.tmd").read_text(encoding="utf-8")
+    assert "/option1 - try new model" in pending
+    assert "/option2 - use existing model" in pending
+
+
 def test_normalized_codex_text_strips_ansi(tmp_path, monkeypatch):
     monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
     rt = WorkerRuntime()

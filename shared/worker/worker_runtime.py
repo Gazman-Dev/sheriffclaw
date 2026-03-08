@@ -108,6 +108,8 @@ class WorkerRuntime:
     def _build_manual_prompt(self, text: str) -> dict | None:
         lines = self._extract_prompt_lines(text)
         context_lines, options = self._extract_interactive_menu(lines)
+        if not options:
+            context_lines, options = self._extract_inline_interactive_menu(text)
         if options:
             return {
                 "key": f"generic_menu:{'|'.join(opt['label'] for opt in options)}",
@@ -151,6 +153,43 @@ class WorkerRuntime:
         if len(options) < 2:
             return [],[]
         return window, options
+
+    def _extract_inline_interactive_menu(self, text: str) -> tuple[list[str], list[dict]]:
+        visible = self._visible_codex_text(text)
+        compact = re.sub(r"\s+", " ", visible).strip()
+        if not compact:
+            return [], []
+        lowered = compact.lower()
+        trigger_phrases = (
+            "choose how you'd like codex to proceed",
+            "choose how you’d like codex to proceed",
+            "choose one",
+            "press enter to confirm",
+            "use ↑/↓",
+            "use up/down",
+        )
+        if not any(phrase in lowered for phrase in trigger_phrases):
+            return [], []
+
+        matches = list(re.finditer(r"(?<!\w)(\d+)\.\s+", compact))
+        options: list[dict] = []
+        for pos, match in enumerate(matches):
+            idx = int(match.group(1))
+            start = match.end()
+            end = matches[pos + 1].start() if pos + 1 < len(matches) else len(compact)
+            label = compact[start:end]
+            label = re.sub(r"\buse\s+[?↑]/[?↓]\s+to move.*$", "", label, flags=re.IGNORECASE)
+            label = re.sub(r"\buse up/down.*$", "", label, flags=re.IGNORECASE)
+            label = re.sub(r"\bpress enter.*$", "", label, flags=re.IGNORECASE)
+            label = re.sub(r"\s+", " ", label).strip(" .:-")
+            if not label:
+                continue
+            payload = (b"\r" if idx == 1 else (b"\x1b[B" * (idx - 1)) + b"\r")
+            options.append({"label": label.lower(), "payload": payload})
+        if len(options) < 2:
+            return [], []
+        details = [compact]
+        return details, options
 
     def _extract_menu_options(self, lines: list[str]) -> list[dict]:
         options: list[dict] = []

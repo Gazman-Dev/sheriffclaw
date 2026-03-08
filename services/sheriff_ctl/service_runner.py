@@ -19,11 +19,10 @@ from services.sheriff_ctl.sandbox import (
     _strict_sandbox_required,
 )
 from services.sheriff_ctl.utils import (
-    _gw_secrets_call,
     _log_paths,
     _notify_sheriff_channel,
     _pid_path,
-    _resolve_service_binary,
+    _service_exec_command,
 )
 from shared.proc_rpc import ProcClient
 from shared.service_registry import rpc_endpoint
@@ -32,12 +31,12 @@ from shared.service_manager import ServiceManager
 GW_ORDER =[
     "sheriff-secrets",
     "sheriff-policy",
-    "sheriff-requests",
     "sheriff-web",
     "sheriff-tools",
     "sheriff-gateway",
     "sheriff-chat-proxy",
     "sheriff-tg-gate",
+    "sheriff-requests",
     "sheriff-cli-gate",
     "sheriff-updater",
 ]
@@ -60,9 +59,8 @@ def _posix_user_exists(user: str) -> bool:
     except KeyError:
         return False
 
-
 def _service_command(service: str) -> list[str]:
-    base =[_resolve_service_binary(service)]
+    base = _service_exec_command(service)
     if service == "ai-worker":
         sandboxed = None
         if platform.system() == "Darwin":
@@ -86,8 +84,11 @@ def _service_command(service: str) -> list[str]:
         user = _ai_worker_user()
         if user and platform.system() in {"Darwin", "Linux"}:
             sudo = shutil.which("sudo")
-            if sudo and _posix_user_exists(user):
-                sandboxed =[sudo, "-n", "-u", user, *sandboxed]
+            if not _posix_user_exists(user):
+                raise RuntimeError(f"configured ai-worker user does not exist: {user}")
+            if not sudo:
+                raise RuntimeError("sudo is required to run ai-worker under a dedicated OS user")
+            sandboxed =[sudo, "-n", "-u", user, *sandboxed]
 
         return sandboxed
     return base
@@ -121,6 +122,26 @@ def _stop_service(service: str) -> None:
     SERVICE_MANAGER.stop(service)
 
 
+async def _wait_service_health(service: str, timeout_sec: float = 10.0) -> None:
+    endpoint = rpc_endpoint(service)
+    if endpoint is None:
+        await asyncio.sleep(0.2)
+        return
+    cli = ProcClient(service, spawn_fallback=False)
+    deadline = asyncio.get_running_loop().time() + timeout_sec
+    try:
+        while True:
+            try:
+                await cli.request("health", {})
+                return
+            except Exception:
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise
+                await asyncio.sleep(0.2)
+    finally:
+        await cli.close()
+
+
 def cmd_start(args):
     mp = getattr(args, "master_password", None) or os.getenv("SHERIFF_MASTER_PASSWORD", "")
 
@@ -128,29 +149,35 @@ def cmd_start(args):
 
     # Restart managed services we selected to avoid stale old binaries.
     SERVICE_MANAGER.stop_many(list(reversed(to_restart)))
-    SERVICE_MANAGER.start_many(to_restart)
+
+    async def _start_all() -> None:
+        for service in to_restart:
+            SERVICE_MANAGER.start(service)
+            await _wait_service_health(service)
+
+    asyncio.run(_start_all())
 
     async def _check_and_unlock():
-        gw = ProcClient("sheriff-gateway")
+        secrets = ProcClient("sheriff-secrets", spawn_fallback=False)
         try:
             for _ in range(15):
                 try:
-                    await gw.request("health", {})
+                    await secrets.request("health", {})
                     break
                 except Exception:
                     await asyncio.sleep(0.3)
 
             # Check if already unlocked (via secrets_session.json)
-            res_unl = await _gw_secrets_call("secrets.is_unlocked", {}, gw=gw)
-            if res_unl.get("unlocked"):
+            _, res_unl = await secrets.request("secrets.is_unlocked", {})
+            if res_unl.get("result", {}).get("unlocked"):
                 return True, True  # (is_unlocked, was_auto_unlocked)
 
             if mp:
-                res = await _gw_secrets_call("secrets.unlock", {"master_password": mp}, gw=gw)
-                return bool(res.get("ok")), False
+                _, res = await secrets.request("secrets.unlock", {"master_password": mp})
+                return bool(res.get("result", {}).get("ok")), False
             return False, False
         finally:
-            await gw.close()
+            await secrets.close()
 
     ok, auto = asyncio.run(_check_and_unlock())
     if ok:

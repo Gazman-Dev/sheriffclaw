@@ -27,6 +27,23 @@ from shared.proc_rpc import ProcClient
 
 OPLOG = get_op_logger("ctl")
 
+SERVICE_MODULES = {
+    "sheriff-gateway": "services.sheriff_gateway.__main__",
+    "sheriff-chat-proxy": "services.sheriff_chat_proxy.__main__",
+    "sheriff-secrets": "services.sheriff_secrets.__main__",
+    "sheriff-policy": "services.sheriff_policy.__main__",
+    "sheriff-requests": "services.sheriff_requests.__main__",
+    "sheriff-web": "services.sheriff_web.__main__",
+    "sheriff-tools": "services.sheriff_tools.__main__",
+    "sheriff-tg-gate": "services.sheriff_tg_gate.__main__",
+    "sheriff-cli-gate": "services.sheriff_cli_gate.__main__",
+    "sheriff-updater": "services.sheriff_updater.__main__",
+    "ai-worker": "services.ai_worker.__main__",
+    "ai-tg-llm": "services.ai_tg_llm.__main__",
+    "telegram-listener": "services.telegram_listener.__main__",
+    "telegram-webhook": "services.telegram_webhook.__main__",
+}
+
 
 def _island_root(service: str) -> Path:
     return gw_root() if service.startswith("sheriff-") else llm_root()
@@ -44,6 +61,13 @@ def _log_paths(service: str) -> tuple[Path, Path]:
 def _resolve_service_binary(service: str) -> str:
     venv_bin = Path(sys.executable).parent / service
     return str(venv_bin) if venv_bin.exists() else service
+
+
+def _service_exec_command(service: str) -> list[str]:
+    module = SERVICE_MODULES.get(service)
+    if module:
+        return [sys.executable, "-m", module]
+    return [_resolve_service_binary(service)]
 
 
 def _telegram_unlock_channel_path() -> Path:

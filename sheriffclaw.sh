@@ -157,17 +157,19 @@ setup_ai_worker_user() {
         if is_linux; then
             if command -v useradd >/dev/null 2>&1; then
                 if [ "$(id -u)" -eq 0 ]; then
-                    useradd -m -s /usr/sbin/nologin "$user" || true
+                    useradd -m -s /usr/sbin/nologin "$user"
                 else
-                    sudo useradd -m -s /usr/sbin/nologin "$user" || true
+                    sudo useradd -m -s /usr/sbin/nologin "$user"
                 fi
             fi
         elif is_macos; then
-            warn "Auto-creating users on macOS is not enabled. Create user '$user' manually if needed."
+            err "Dedicated ai-worker user '$user' is required on macOS, but auto-creation is not implemented."
+            err "Create the user explicitly, then rerun the installer."
+            exit 1
         fi
     fi
 
-    "$VENV_DIR/bin/sheriff-ctl" sandbox --user "$user" --deny-net || true
+    "$VENV_DIR/bin/sheriff-ctl" sandbox --user "$user" --deny-net
 }
 
 acquire_lock() {

@@ -43,3 +43,16 @@ def test_service_command_non_ai_worker_plain(monkeypatch):
     monkeypatch.setattr(service_runner.shutil, "which", lambda x: "/usr/bin/sandbox-exec")
     cmd = service_runner._service_command("sheriff-gateway")
     assert "sandbox-exec" not in cmd[0]
+
+
+def test_service_command_ai_worker_skips_missing_user(monkeypatch, tmp_path):
+    monkeypatch.setattr(service_runner.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(service_runner.shutil, "which", lambda x: "/usr/bin/sandbox-exec" if x == "sandbox-exec" else "/usr/bin/sudo")
+    monkeypatch.setattr(sandbox, "gw_root", lambda: tmp_path / "gw")
+    monkeypatch.setattr(sandbox, "llm_root", lambda: tmp_path / "llm")
+    monkeypatch.setattr(service_runner, "_ai_worker_user", lambda: "sheriffai")
+    monkeypatch.setattr(service_runner, "_posix_user_exists", lambda user: False)
+
+    cmd = service_runner._service_command("ai-worker")
+    assert cmd[0].endswith("sandbox-exec")
+    assert "sudo" not in cmd[0]

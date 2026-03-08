@@ -7,6 +7,11 @@ import os
 import platform
 import shutil
 
+try:
+    import pwd
+except ImportError:  # pragma: no cover - Windows
+    pwd = None
+
 from services.sheriff_ctl.sandbox import (
     _ai_worker_sandbox_profile,
     _ai_worker_user,
@@ -42,6 +47,20 @@ ALL =[*GW_ORDER, *LLM_ORDER]
 MANAGED_SERVICES = ALL
 
 
+def _posix_user_exists(user: str) -> bool:
+    if not user:
+        return False
+    if platform.system() not in {"Darwin", "Linux"}:
+        return True
+    if pwd is None:
+        return False
+    try:
+        pwd.getpwnam(user)
+        return True
+    except KeyError:
+        return False
+
+
 def _service_command(service: str) -> list[str]:
     base =[_resolve_service_binary(service)]
     if service == "ai-worker":
@@ -67,7 +86,7 @@ def _service_command(service: str) -> list[str]:
         user = _ai_worker_user()
         if user and platform.system() in {"Darwin", "Linux"}:
             sudo = shutil.which("sudo")
-            if sudo:
+            if sudo and _posix_user_exists(user):
                 sandboxed =[sudo, "-n", "-u", user, *sandboxed]
 
         return sandboxed

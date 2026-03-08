@@ -139,8 +139,79 @@ ensure_sandbox_dependencies() {
     fi
 }
 
+next_macos_uid() {
+    local sudo_cmd=""
+    [ "$(id -u)" -ne 0 ] && sudo_cmd="sudo"
+    $sudo_cmd dscl . -list /Users UniqueID 2>/dev/null | awk '
+        BEGIN { max = 500 }
+        { if ($2 ~ /^[0-9]+$/ && $2 > max) max = $2 }
+        END { print max + 1 }
+    '
+}
+
+create_macos_service_user() {
+    local user="$1"
+    local group="${2:-sheriffclaw}"
+    local sudo_cmd=""
+    local uid
+    local gid
+    [ "$(id -u)" -ne 0 ] && sudo_cmd="sudo"
+
+    if ! command -v dscl >/dev/null 2>&1; then
+        err "dscl is required to create the dedicated ai-worker user on macOS."
+        return 1
+    fi
+
+    uid="$(next_macos_uid)"
+    [ -n "$uid" ] || {
+        err "Could not determine a UniqueID for macOS service user creation."
+        return 1
+    }
+
+    gid="$($sudo_cmd dscl . -list /Groups PrimaryGroupID 2>/dev/null | awk -v target="$(printf '%s' "$group" | tr '[:upper:]' '[:lower:]')" '
+        BEGIN { max = 500; found = "" }
+        {
+            name = tolower($1)
+            if ($2 ~ /^[0-9]+$/ && $2 > max) max = $2
+            if (name == target) found = $2
+        }
+        END {
+            if (found != "") print found
+            else print max + 1
+        }
+    ')"
+    [ -n "$gid" ] || {
+        err "Could not determine a PrimaryGroupID for macOS service group creation."
+        return 1
+    }
+
+    if ! $sudo_cmd dscl . -read "/Groups/$group" >/dev/null 2>&1; then
+        log "Creating dedicated ai-worker group on macOS: $group (gid=$gid)"
+        $sudo_cmd dscl . -create "/Groups/$group"
+        $sudo_cmd dscl . -create "/Groups/$group" PrimaryGroupID "$gid"
+        $sudo_cmd dscl . -create "/Groups/$group" RealName "SheriffClaw Service Group"
+        $sudo_cmd dscl . -append "/Groups/$group" GroupMembership "$user" || true
+    else
+        gid="$($sudo_cmd dscl . -read "/Groups/$group" PrimaryGroupID | awk '{print $2}')"
+    fi
+
+    log "Creating dedicated ai-worker user on macOS: $user (uid=$uid, gid=$gid)"
+    $sudo_cmd dscl . -create "/Users/$user"
+    $sudo_cmd dscl . -create "/Users/$user" UserShell /usr/bin/false
+    $sudo_cmd dscl . -create "/Users/$user" RealName "Sheriff AI Worker"
+    $sudo_cmd dscl . -create "/Users/$user" UniqueID "$uid"
+    $sudo_cmd dscl . -create "/Users/$user" PrimaryGroupID "$gid"
+    $sudo_cmd dscl . -create "/Users/$user" NFSHomeDirectory "/Users/$user"
+    $sudo_cmd dscl . -create "/Users/$user" IsHidden 1
+    $sudo_cmd mkdir -p "/Users/$user"
+    $sudo_cmd dscl . -append "/Groups/$group" GroupMembership "$user" || true
+    $sudo_cmd chown "$user":"$group" "/Users/$user"
+    $sudo_cmd chmod 700 "/Users/$user"
+}
+
 setup_ai_worker_user() {
     local user="${SHERIFF_AI_WORKER_USER:-sheriffai}"
+    local group="${SHERIFF_AI_WORKER_GROUP:-sheriffclaw}"
     local strict="${SHERIFF_SETUP_AI_WORKER_USER:-1}"
     if [ "$strict" = "0" ]; then
         return 0
@@ -163,10 +234,13 @@ setup_ai_worker_user() {
                 fi
             fi
         elif is_macos; then
-            err "Dedicated ai-worker user '$user' is required on macOS, but auto-creation is not implemented."
-            err "Create the user explicitly, then rerun the installer."
-            exit 1
+            create_macos_service_user "$user" "$group"
         fi
+    fi
+
+    if ! id "$user" >/dev/null 2>&1; then
+        err "Dedicated ai-worker user '$user' is required but was not created successfully."
+        exit 1
     fi
 
     "$VENV_DIR/bin/sheriff-ctl" sandbox --user "$user" --deny-net

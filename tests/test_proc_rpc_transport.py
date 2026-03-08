@@ -48,3 +48,30 @@ async def test_proc_client_daemon_only_raises_when_service_unavailable(monkeypat
     client = ProcClient("dummy", spawn_fallback=False)
     with pytest.raises(Exception):
         await client.request("echo", {"text": "hello"})
+
+
+def test_proc_client_can_be_constructed_outside_loop_and_used_inside(monkeypatch):
+    port = _free_port()
+    client = ProcClient("dummy", spawn_fallback=False)
+
+    async def _run():
+        app = NDJSONService(
+            name="test",
+            island="gw",
+            kind="service",
+            version="1",
+            ops={"echo": lambda payload, emit, req_id: asyncio.sleep(0, result={"echo": payload["text"]})},
+        )
+        server_task = asyncio.create_task(app.run_tcp("127.0.0.1", port))
+        await asyncio.sleep(0.1)
+        monkeypatch.setattr("shared.proc_rpc.rpc_endpoint", lambda service: ("127.0.0.1", port) if service == "dummy" else None)
+        try:
+            _, res = await client.request("echo", {"text": "hello"})
+            assert res["result"]["echo"] == "hello"
+        finally:
+            await client.close()
+            server_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await server_task
+
+    asyncio.run(_run())

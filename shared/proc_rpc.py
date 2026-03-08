@@ -25,8 +25,16 @@ class ProcClient:
         self.writer: asyncio.StreamWriter | None = None
         self._stderr_task: asyncio.Task | None = None
         self._stderr_tail: deque[str] = deque(maxlen=80)
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
+        self._lock_loop: asyncio.AbstractEventLoop | None = None
         self.request_timeout_sec = float(os.environ.get("SHERIFF_RPC_TIMEOUT_SEC", "600"))
+
+    def _get_lock(self) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        if self._lock is None or self._lock_loop is not loop:
+            self._lock = asyncio.Lock()
+            self._lock_loop = loop
+        return self._lock
 
     async def start(self):
         if self.writer is not None and not self.writer.is_closing():
@@ -147,7 +155,7 @@ class ProcClient:
 
     async def request(self, op: str, payload: dict, *, stream_events: bool = False):
         await self.start()
-        async with self._lock:
+        async with self._get_lock():
             req_id = str(uuid.uuid4())
             if self.writer is not None:
                 self.writer.write(encode_frame({"id": req_id, "op": op, "payload": payload}))

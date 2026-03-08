@@ -41,3 +41,10 @@ def test_managed_services_include_persistent_agent_path():
 
 def test_gateway_starts_before_requests():
     assert service_runner.GW_ORDER.index("sheriff-gateway") < service_runner.GW_ORDER.index("sheriff-requests")
+
+
+def test_service_env_sets_install_root(monkeypatch, tmp_path):
+    monkeypatch.delenv("SHERIFFCLAW_ROOT", raising=False)
+    monkeypatch.setattr(service_runner, "base_root", lambda: tmp_path)
+    env = service_runner._service_env("sheriff-updater")
+    assert env["SHERIFFCLAW_ROOT"] == str(tmp_path)

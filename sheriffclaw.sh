@@ -212,22 +212,50 @@ create_macos_service_user() {
 install_macos_ai_worker_launcher() {
     local invoking_user="$1"
     local worker_user="$2"
+    local worker_group="${3:-sheriffclaw}"
     local launcher="/usr/local/bin/sheriff-ai-worker-launch"
     local sudoers_dir="/private/etc/sudoers.d"
     local sudoers_file="$sudoers_dir/sheriffclaw-ai-worker"
+    local runtime_root="/Users/$worker_user/ai-runtime"
     local sudo_cmd=""
     local tmp_launcher
     local tmp_sudoers
+    local runtime_source
+    local py_ver
+    local site_packages
     [ "$(id -u)" -ne 0 ] && sudo_cmd="sudo"
+
+    runtime_source="$("$VENV_DIR/bin/python" - <<'PY'
+from pathlib import Path
+import sys
+print(Path(sys.executable).resolve().parent.parent)
+PY
+)"
+    py_ver="$("$VENV_DIR/bin/python" - <<'PY'
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PY
+)"
+    site_packages="$INSTALL_DIR/venv/lib/python$py_ver/site-packages"
+
+    $sudo_cmd mkdir -p "$runtime_root"
+    $sudo_cmd rm -rf "$runtime_root"
+    $sudo_cmd cp -R "$runtime_source" "$runtime_root"
+    $sudo_cmd chown -R "$worker_user":"$worker_group" "$runtime_root"
+    $sudo_cmd chmod -R u+rwX,go-rwx "$runtime_root"
 
     tmp_launcher="$(mktemp)"
     cat > "$tmp_launcher" <<EOF
 #!/bin/bash
 set -euo pipefail
+cd "/Users/$worker_user"
+export HOME="/Users/$worker_user"
+export PYTHONHOME="$runtime_root"
+export PYTHONPATH="$site_packages"
 export SHERIFFCLAW_ROOT="$INSTALL_DIR"
 export SHERIFF_RPC_HOST="127.0.0.1"
 export SHERIFF_RPC_PORT="47610"
-exec /usr/bin/sandbox-exec -f "/private/tmp/sheriffclaw/ai_worker.sb" "$VENV_DIR/bin/python" -m services.ai_worker.__main__
+exec /usr/bin/sandbox-exec -f "/private/tmp/sheriffclaw/ai_worker.sb" "$runtime_root/bin/python$py_ver" -m services.ai_worker.__main__
 EOF
     $sudo_cmd install -o root -g wheel -m 755 "$tmp_launcher" "$launcher"
     rm -f "$tmp_launcher"
@@ -279,7 +307,7 @@ setup_ai_worker_user() {
     fi
 
     if is_macos; then
-        install_macos_ai_worker_launcher "$(id -un)" "$user"
+        install_macos_ai_worker_launcher "$(id -un)" "$user" "$group"
     fi
 
     if [ "$allow_net" = "0" ] || [ "$allow_net" = "false" ] || [ "$allow_net" = "no" ]; then

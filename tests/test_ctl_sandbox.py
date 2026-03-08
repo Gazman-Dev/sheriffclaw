@@ -30,21 +30,24 @@ def test_ai_worker_sandbox_profile_on_darwin_uses_shared_tmp(monkeypatch, tmp_pa
     monkeypatch.setattr(sandbox, "llm_root", lambda: tmp_path / "llm")
     monkeypatch.setattr(sandbox.sys, "platform", "darwin")
     monkeypatch.setattr(sandbox, "_darwin_sandbox_profile_path", lambda: tmp_path / "shared" / "ai_worker.sb")
+    monkeypatch.setattr(sandbox, "_ai_worker_user", lambda: "sheriffai")
+    monkeypatch.setattr(sandbox, "_darwin_ai_worker_runtime_root", lambda: tmp_path / "runtime")
 
     path = sandbox._ai_worker_sandbox_profile()
+    text = path.read_text(encoding="utf-8")
 
     assert path == tmp_path / "shared" / "ai_worker.sb"
     assert path.exists()
+    assert "(allow default)" in text
+    assert str(tmp_path / "runtime") in text
 
 
 def test_ai_worker_sandbox_profile_allows_real_python_runtime(monkeypatch, tmp_path):
     monkeypatch.setattr(sandbox, "gw_root", lambda: tmp_path / "gw")
     monkeypatch.setattr(sandbox, "llm_root", lambda: tmp_path / "llm")
     monkeypatch.setattr(sandbox.sys, "platform", "darwin")
-    runtime_bin = tmp_path / "runtime" / "bin"
-    runtime_bin.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(sandbox.sys, "executable", str(runtime_bin / "python3.9"))
     monkeypatch.setattr(sandbox, "_darwin_sandbox_profile_path", lambda: tmp_path / "shared" / "ai_worker.sb")
+    monkeypatch.setattr(sandbox, "_darwin_ai_worker_runtime_root", lambda: tmp_path / "runtime")
 
     path = sandbox._ai_worker_sandbox_profile()
     text = path.read_text(encoding="utf-8")

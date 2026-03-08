@@ -92,3 +92,27 @@ def test_agent_root_migrates_legacy_dot_codex_roles(monkeypatch, tmp_path):
 
     got = paths.agent_root()
     assert (got / "roles" / "subagent-high.toml").exists()
+
+
+def test_agent_root_ignores_permission_errors_during_legacy_cleanup(monkeypatch, tmp_path):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    dst = tmp_path / "agents" / "codex"
+    legacy = dst / ".codex"
+    legacy.mkdir(parents=True, exist_ok=True)
+    (dst / "config.toml").write_text("model = \"gpt-5\"\n", encoding="utf-8")
+    legacy_config = legacy / "config.toml"
+    legacy_config.write_text("model = \"gpt-5\"\n", encoding="utf-8")
+
+    original_unlink = Path.unlink
+
+    def _unlink(self: Path, missing_ok: bool = False):
+        if self == legacy_config:
+            raise PermissionError("denied")
+        return original_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", _unlink)
+
+    got = paths.agent_root()
+
+    assert got == dst
+    assert (got / "config.toml").exists()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -9,9 +10,13 @@ from shared.component_versions import diff_versions, load_applied_versions, load
 
 class SheriffUpdaterService:
     def __init__(self) -> None:
+        install_root = Path(os.environ.get("SHERIFFCLAW_ROOT", "")).expanduser() if os.environ.get("SHERIFFCLAW_ROOT") else None
         file_root = Path(__file__).resolve().parents[2]
         cwd_root = Path.cwd().resolve()
-        if (file_root / "versions.json").exists():
+        source_root = (install_root / "source").resolve() if install_root else None
+        if source_root and (source_root / "versions.json").exists():
+            self.repo_root = source_root
+        elif (file_root / "versions.json").exists():
             self.repo_root = file_root
         elif (cwd_root / "versions.json").exists():
             self.repo_root = cwd_root

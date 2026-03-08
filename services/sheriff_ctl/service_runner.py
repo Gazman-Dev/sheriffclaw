@@ -28,6 +28,7 @@ from services.sheriff_ctl.utils import (
 from shared.proc_rpc import ProcClient
 from shared.service_registry import rpc_endpoint
 from shared.service_manager import ServiceManager
+from shared.paths import base_root
 
 GW_ORDER =[
     "sheriff-secrets",
@@ -107,6 +108,7 @@ def _service_command(service: str) -> list[str]:
 
 def _service_env(service: str) -> dict[str, str]:
     env = os.environ.copy()
+    env.setdefault("SHERIFFCLAW_ROOT", str(base_root()))
     endpoint = rpc_endpoint(service)
     if endpoint is not None:
         env["SHERIFF_RPC_HOST"] = endpoint[0]

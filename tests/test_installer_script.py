@@ -11,3 +11,5 @@ def test_installer_sets_up_macos_ai_worker_launcher():
     assert "install_macos_ai_worker_launcher" in text
     assert "/usr/local/bin/sheriff-ai-worker-launch" in text
     assert 'sudoers_file="$sudoers_dir/sheriffclaw-ai-worker"' in text
+    assert 'export PYTHONHOME="$runtime_root"' in text
+    assert 'runtime_root="/Users/$worker_user/ai-runtime"' in text

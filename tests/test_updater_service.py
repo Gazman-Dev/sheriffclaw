@@ -7,6 +7,18 @@ def _pip_install_calls(calls):
     return [c for c in calls if len(c) >= 4 and c[1:4] == ["-m", "pip", "install"]]
 
 
+def test_updater_prefers_install_root_source_from_env(monkeypatch, tmp_path):
+    install_root = tmp_path / "install"
+    source_root = install_root / "source"
+    source_root.mkdir(parents=True)
+    (source_root / "versions.json").write_text('{"agent":"1.0.0","sheriff":"1.0.0","secrets":"1.0.0"}\n', encoding="utf-8")
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(install_root))
+
+    svc = SheriffUpdaterService()
+
+    assert svc.repo_root == source_root.resolve()
+
+
 @pytest.mark.asyncio
 async def test_updater_skips_when_versions_not_increased(monkeypatch, tmp_path):
     repo = tmp_path / "repo"

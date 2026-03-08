@@ -42,12 +42,24 @@ class ServiceManager:
         pid = self.read_pid(service)
         if pid and self.alive(pid):
             return str(pid)
+        if service == "ai-worker":
+            probe = subprocess.run(
+                ["pgrep", "-f", "services.ai_worker.__main__"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if probe.returncode == 0 and (probe.stdout or "").strip():
+                return "running"
         return "stopped"
 
     def _kill_by_name_fallback(self, service: str) -> None:
         # Cleanup stale processes that may survive pidfile churn (best-effort).
         subprocess.run(["pkill", "-f", f"/bin/{service}"], check=False)  # noqa: S603
         subprocess.run(["pkill", "-f", f" {service}"], check=False)  # noqa: S603
+        if service == "ai-worker":
+            subprocess.run(["pkill", "-f", "services.ai_worker.__main__"], check=False)  # noqa: S603
+            subprocess.run(["pkill", "-f", "sheriff-ai-worker-launch"], check=False)  # noqa: S603
 
     def start(self, service: str) -> str:
         pid = self.read_pid(service)
@@ -80,6 +92,7 @@ class ServiceManager:
             time.sleep(0.1)
         if self.alive(pid):
             os.kill(pid, signal.SIGKILL)
+        self._kill_by_name_fallback(service)
         self._pid_path_for(service).unlink(missing_ok=True)
         return "stopped"
 

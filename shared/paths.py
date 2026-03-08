@@ -61,12 +61,15 @@ def agent_root() -> Path:
         existing = global_config.read_text(encoding="utf-8") if global_config.exists() else ""
         if trust_header in existing and trust_line in existing:
             return
-        with global_config.open("a", encoding="utf-8") as fh:
-            if existing and not existing.endswith("\n"):
-                fh.write("\n")
-            if existing:
-                fh.write("\n")
-            fh.write(f"{trust_header}\n{trust_line}\n")
+        try:
+            with global_config.open("a", encoding="utf-8") as fh:
+                if existing and not existing.endswith("\n"):
+                    fh.write("\n")
+                if existing:
+                    fh.write("\n")
+                fh.write(f"{trust_header}\n{trust_line}\n")
+        except PermissionError:
+            return
 
     def _rewrite_legacy_role_refs(config_path: Path) -> None:
         if not config_path.exists():
@@ -76,7 +79,10 @@ def agent_root() -> Path:
         for old, new in legacy_role_refs.items():
             updated = updated.replace(old, new)
         if updated != text:
-            config_path.write_text(updated, encoding="utf-8")
+            try:
+                config_path.write_text(updated, encoding="utf-8")
+            except PermissionError:
+                return
 
     def _migrate_legacy_codex_config(dst: Path) -> None:
         legacy_config = dst / ".codex" / "config.toml"
@@ -84,28 +90,49 @@ def agent_root() -> Path:
         roles_dir = dst / "roles"
         global_config = dst / "config.toml"
         if legacy_config.exists() and not global_config.exists():
-            legacy_config.replace(global_config)
+            try:
+                legacy_config.replace(global_config)
+            except PermissionError:
+                pass
         elif legacy_config.exists() and global_config.exists():
             legacy_text = legacy_config.read_text(encoding="utf-8")
             global_text = global_config.read_text(encoding="utf-8")
             if legacy_text == global_text:
-                legacy_config.unlink()
+                try:
+                    legacy_config.unlink()
+                except PermissionError:
+                    pass
             else:
                 backup = dst / ".codex" / "config.toml.legacy"
                 if not backup.exists():
-                    legacy_config.replace(backup)
+                    try:
+                        legacy_config.replace(backup)
+                    except PermissionError:
+                        pass
                 else:
-                    legacy_config.unlink()
+                    try:
+                        legacy_config.unlink()
+                    except PermissionError:
+                        pass
         if legacy_roles.exists():
-            roles_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                roles_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                return
             for item in legacy_roles.rglob("*"):
                 rel = item.relative_to(legacy_roles)
                 target = roles_dir / rel
                 if item.is_dir():
-                    target.mkdir(parents=True, exist_ok=True)
+                    try:
+                        target.mkdir(parents=True, exist_ok=True)
+                    except PermissionError:
+                        continue
                 elif not target.exists():
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(item, target)
+                    try:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(item, target)
+                    except PermissionError:
+                        continue
         _rewrite_legacy_role_refs(global_config)
         _ensure_trusted_project(global_config, dst)
 

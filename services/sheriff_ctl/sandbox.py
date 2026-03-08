@@ -56,6 +56,11 @@ def _darwin_ai_worker_launcher_path() -> Path:
     return Path("/usr/local/bin/sheriff-ai-worker-launch")
 
 
+def _darwin_ai_worker_runtime_root() -> Path:
+    user = _ai_worker_user().strip() or "sheriffai"
+    return Path("/Users") / user / "ai-runtime"
+
+
 def _ai_worker_sandbox_profile() -> Path:
     if sys.platform == "darwin":
         p = _darwin_sandbox_profile_path()
@@ -67,24 +72,16 @@ def _ai_worker_sandbox_profile() -> Path:
 
     net_rule = "(allow network-outbound) (allow network-inbound)" if _network_allowed_for_ai_worker() else ""
     home = Path.home().resolve()
-    sys_prefix = Path(sys.prefix).resolve()
-    sys_exec = Path(sys.executable).resolve()
-    sys_runtime = sys_exec.parent.parent
     gw = gw_root().resolve()
     llm = llm_root().resolve()
+    runtime_root = _darwin_ai_worker_runtime_root().resolve()
 
     profile = f'''(version 1)
-(deny default)
-(import "system.sb")
-(allow process*)
+(allow default)
 {net_rule}
 
 ; Blanket deny all access to the user's home directory to prevent secret scraping
 (deny file-read* file-write* (subpath "{home}"))
-
-; Allow reading the python environment
-(allow file-read* (subpath "{sys_prefix}"))
-(allow file-read* (subpath "{sys_runtime}"))
 
 ; Allow reading the application source code (read-only)
 (allow file-read* (subpath "{workspace}"))
@@ -97,6 +94,9 @@ def _ai_worker_sandbox_profile() -> Path:
 
 ; Allow full access to LLM logs and state
 (allow file-read* file-write* (subpath "{llm}"))
+
+; Allow the dedicated ai-worker runtime under the service user's home.
+(allow file-read* file-write* (subpath "{runtime_root}"))
 
 ; Allow temp directories needed by node/npm/python
 (allow file-read* file-write* (subpath "/private/tmp"))

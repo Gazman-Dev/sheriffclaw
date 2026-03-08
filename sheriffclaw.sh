@@ -212,6 +212,7 @@ create_macos_service_user() {
 setup_ai_worker_user() {
     local user="${SHERIFF_AI_WORKER_USER:-sheriffai}"
     local group="${SHERIFF_AI_WORKER_GROUP:-sheriffclaw}"
+    local allow_net="${SHERIFF_AI_WORKER_ALLOW_NET:-1}"
     local strict="${SHERIFF_SETUP_AI_WORKER_USER:-1}"
     if [ "$strict" = "0" ]; then
         return 0
@@ -243,7 +244,11 @@ setup_ai_worker_user() {
         exit 1
     fi
 
-    "$VENV_DIR/bin/sheriff-ctl" sandbox --user "$user" --deny-net
+    if [ "$allow_net" = "0" ] || [ "$allow_net" = "false" ] || [ "$allow_net" = "no" ]; then
+        "$VENV_DIR/bin/sheriff-ctl" sandbox --user "$user" --deny-net
+    else
+        "$VENV_DIR/bin/sheriff-ctl" sandbox --user "$user" --allow-net
+    fi
 }
 
 acquire_lock() {

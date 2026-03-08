@@ -53,9 +53,9 @@ def augment_path(path_value: str | None) -> str:
 
 def build_chat_command(repo_root: Path) -> list[str]:
     if debug_enabled():
-        return [sys.executable, str(debug_script(repo_root)), "chat", "--dangerously-bypass-approvals-and-sandbox"]
+        return [sys.executable, str(debug_script(repo_root)), "chat", "--no-alt-screen", "--dangerously-bypass-approvals-and-sandbox"]
     codex = resolve_codex_binary()
-    return [codex, "chat", "--dangerously-bypass-approvals-and-sandbox"]
+    return [codex, "chat", "--no-alt-screen", "--dangerously-bypass-approvals-and-sandbox"]
 
 
 def build_login_status_command(repo_root: Path) -> list[str]:

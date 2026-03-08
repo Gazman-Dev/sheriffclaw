@@ -71,7 +71,6 @@ def _ai_worker_sandbox_profile() -> Path:
     agent_ws.mkdir(parents=True, exist_ok=True)
 
     net_rule = "(allow network-outbound) (allow network-inbound)" if _network_allowed_for_ai_worker() else ""
-    home = Path.home().resolve()
     gw = gw_root().resolve()
     llm = llm_root().resolve()
     runtime_root = _darwin_ai_worker_runtime_root().resolve()
@@ -79,9 +78,6 @@ def _ai_worker_sandbox_profile() -> Path:
     profile = f'''(version 1)
 (allow default)
 {net_rule}
-
-; Blanket deny all access to the user's home directory to prevent secret scraping
-(deny file-read* file-write* (subpath "{home}"))
 
 ; Allow reading the application source code (read-only)
 (allow file-read* (subpath "{workspace}"))

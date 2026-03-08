@@ -171,12 +171,12 @@ async def test_worker_writes_message_file_and_forwards_turn_to_codex_stdin(monke
     assert user_files[0].read_text(encoding="utf-8") == "hello stdin path"
     assert len(fake_proc.stdin.writes) >= 1
     stdin_payload = b"".join(fake_proc.stdin.writes).decode("utf-8")
-    assert "check how we manage messages." in stdin_payload.lower()
-    assert "the user just sent a message over s4 session." in stdin_payload.lower()
-    assert "please do what the user says and write a reply to the user via the conversation files." in stdin_payload.lower()
-    assert 'user message json: "hello stdin path"' in stdin_payload.lower()
+    assert "read agents.md." in stdin_payload.lower()
+    assert "use only session files for replies. session: s4." in stdin_payload.lower()
+    assert 'user json: "hello stdin path"' in stdin_payload.lower()
+    assert stdin_payload.startswith("\x1b[200~")
+    assert "\x1b[201~\r" in stdin_payload
     assert stdin_payload.endswith("\r")
-    assert "\x1b" not in stdin_payload
     assert fake_proc.stdin.drains >= 1
     finals =[p for e, p in events if e == "assistant.final"]
     assert finals[-1]["text"] == "Agent background process response timed out."
@@ -207,11 +207,11 @@ async def test_worker_followup_turn_uses_followup_stdin_prompt(monkeypatch, tmp_
 
     assert len(fake_proc.stdin.writes) >= 1
     stdin_payload = b"".join(fake_proc.stdin.writes).decode("utf-8")
-    assert "the user sent another message over s4b session." in stdin_payload.lower()
-    assert "please do what the user says and write a reply to the user via the conversation files." in stdin_payload.lower()
-    assert 'user message json: "second"' in stdin_payload.lower()
+    assert "same rules. reply only via session files. session: s4b." in stdin_payload.lower()
+    assert 'user json: "second"' in stdin_payload.lower()
+    assert stdin_payload.startswith("\x1b[200~")
+    assert "\x1b[201~\r" in stdin_payload
     assert stdin_payload.endswith("\r")
-    assert "\x1b" not in stdin_payload
 
 
 def test_extract_menu_options_builds_option_payloads(tmp_path, monkeypatch):
@@ -274,6 +274,15 @@ async def test_codex_ready_is_marked_from_greeting(tmp_path, monkeypatch):
     monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
     rt = WorkerRuntime()
     await rt._handle_codex_stdout("• Hey. What do you want to chat about?\n")
+    assert rt.codex_ready_marked is True
+    assert rt.codex_ready_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_codex_ready_is_marked_from_fragmented_greeting(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    rt = WorkerRuntime()
+    await rt._handle_codex_stdout("H\ni\n.\nW\nh\na\nt\nd\no\ny\no\nu\nw\na\nn\nt\nt\no\nw\no\nr\nk\no\nn\n?\n")
     assert rt.codex_ready_marked is True
     assert rt.codex_ready_event.is_set()
 
@@ -428,3 +437,33 @@ async def test_worker_reports_ready_timeout_before_sending(monkeypatch, tmp_path
     assert events == [("assistant.final", {"text": "Codex background process did not reach a ready state."})]
     session_dir = rt.conversations_dir / "s9"
     assert not list(session_dir.glob("*_user_agent.tmd"))
+
+
+def test_worker_debug_log_ignores_permission_error(monkeypatch, tmp_path):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    rt = WorkerRuntime()
+    original_open = type(rt.debug_log_path).open
+
+    def _open(self, *args, **kwargs):
+        if self == rt.debug_log_path:
+            raise PermissionError("denied")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(rt.debug_log_path), "open", _open)
+
+    rt._debug_log("test_event", x=1)
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="pty sizing only applies on posix")
+def test_posix_pty_sets_window_size(monkeypatch):
+    import shared.worker.worker_runtime as wr
+
+    calls = []
+
+    def fake_ioctl(fd, op, packed):
+        calls.append((fd, op, packed))
+
+    monkeypatch.setattr(wr.fcntl, "ioctl", fake_ioctl)
+    wr._PosixPtyProcess._set_winsize(7, rows=33, cols=99)
+
+    assert calls

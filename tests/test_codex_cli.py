@@ -37,4 +37,4 @@ def test_build_chat_command_uses_direct_codex_binary(monkeypatch):
     monkeypatch.setenv("SHERIFF_DEBUG", "0")
     monkeypatch.setattr(codex_cli, "resolve_codex_binary", lambda: "/opt/homebrew/bin/codex")
     cmd = codex_cli.build_chat_command(codex_cli.Path.cwd())
-    assert cmd == ["/opt/homebrew/bin/codex", "chat", "--dangerously-bypass-approvals-and-sandbox"]
+    assert cmd == ["/opt/homebrew/bin/codex", "chat", "--no-alt-screen", "--dangerously-bypass-approvals-and-sandbox"]

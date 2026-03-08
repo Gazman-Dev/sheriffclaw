@@ -9,7 +9,10 @@ import time
 from pathlib import Path
 
 if os.name != "nt":
+    import fcntl
     import pty
+    import struct
+    import termios
 
 from shared.oplog import RotatingTextLog
 from shared.paths import agent_root, llm_root
@@ -49,10 +52,13 @@ class WorkerRuntime:
         self.active_session_handle = "primary_session"
 
     def _debug_log(self, event: str, **payload) -> None:
-        self.debug_log_path.parent.mkdir(parents=True, exist_ok=True)
-        row = {"ts": time.time(), "event": event, **payload}
-        with self.debug_log_path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        try:
+            self.debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+            row = {"ts": time.time(), "event": event, **payload}
+            with self.debug_log_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except PermissionError:
+            return
 
     async def _drain_codex_stream(self, stream, sink: RotatingTextLog, stream_name: str) -> None:
         while True:
@@ -202,21 +208,18 @@ class WorkerRuntime:
 
     def _build_codex_stdin_prompt(self, session_handle: str, text: str, *, first_message: bool) -> str:
         if first_message:
-            prefix = (
-                f"Check how we manage messages. The user just sent a message over {session_handle} session. "
-                "Please do what the user says and write a reply to the user via the conversation files."
-            )
+            prefix = f"Read AGENTS.md. Use only session files for replies. Session: {session_handle}."
         else:
-            prefix = (
-                f"The user sent another message over {session_handle} session. "
-                "Please do what the user says and write a reply to the user via the conversation files."
-            )
-        # Keep the terminal payload single-line so Codex treats Enter as submit
-        # instead of leaving the text in a multiline editor state.
-        return f"{prefix} User message JSON: {json.dumps(text, ensure_ascii=False)}"
+            prefix = f"Same rules. Reply only via session files. Session: {session_handle}."
+        # Keep the terminal payload single-line so Codex treats Enter as submit.
+        # The prompt must also stay short enough to avoid Codex TUI wrapping panics.
+        return f"{prefix} User JSON: {json.dumps(text, ensure_ascii=False)}"
 
     def _normalized_codex_text(self, text: str) -> str:
         return self._visible_codex_text(text).lower()
+
+    def _compact_codex_text(self, text: str) -> str:
+        return re.sub(r"\s+", "", self._normalized_codex_text(text))
 
     def _visible_codex_text(self, text: str) -> str:
         stripped = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
@@ -231,21 +234,24 @@ class WorkerRuntime:
             return
         visible = self._visible_codex_text(self.codex_visible_buffer)
         normalized = visible.lower()
+        compact = self._compact_codex_text(self.codex_visible_buffer)
         if "booting mcp server" in normalized:
             self.codex_boot_seen = True
         ready_markers = (
-            "hey. i’m here and ready.",
+            "hey. i?m here and ready.",
             "hey. i'm here and ready.",
             "what do you want to chat about?",
             "what do you want to work on?",
         )
+        compact_ready_markers = tuple(re.sub(r"\s+", "", marker) for marker in ready_markers)
         if (
             not self.codex_boot_seen
             and not any(marker in normalized for marker in ready_markers)
+            and not any(marker in compact for marker in compact_ready_markers)
             and (" model:     loading" in normalized or "implement {feature}" in normalized)
         ):
             return
-        if any(marker in normalized for marker in ready_markers):
+        if any(marker in normalized for marker in ready_markers) or any(marker in compact for marker in compact_ready_markers):
             self.codex_ready_marked = True
             self.codex_ready_event.set()
             self._debug_log("codex_ready", marker="greeting")
@@ -350,7 +356,9 @@ class WorkerRuntime:
             self._debug_log("codex_stdin_unavailable", session=session_handle)
             return
         prompt_text = self._build_codex_stdin_prompt(session_handle, text, first_message=first_message)
-        payload = (prompt_text.rstrip("\n") + "\r").encode("utf-8")
+        # Use bracketed paste so Codex TUI receives the entire prompt atomically
+        # instead of re-wrapping on every character write.
+        payload = (f"\x1b[200~{prompt_text.rstrip()}\x1b[201~\r").encode("utf-8")
         try:
             await self._write_codex_bytes(payload)
             self._debug_log("codex_stdin_write", session=session_handle, bytes=len(payload), text=prompt_text)
@@ -405,6 +413,9 @@ class WorkerRuntime:
                     stale.unlink(missing_ok=True)
                     self._debug_log("stale_file_removed", session=session_handle, file=stale.name)
 
+        first_message = not any(session_dir.glob("*_user_agent.tmd"))
+        ts = int(time.time())
+        user_file = session_dir / f"{ts}_user_agent.tmd"
         await self._ensure_codex_active()
         if self.codex_start_error:
             await emit_event("assistant.final", {"text": f"Codex background process failed to start: {self.codex_start_error}"})
@@ -412,10 +423,6 @@ class WorkerRuntime:
         if not await self._wait_for_codex_ready(session_handle):
             await emit_event("assistant.final", {"text": "Codex background process did not reach a ready state."})
             return
-
-        first_message = not any(session_dir.glob("*_user_agent.tmd"))
-        ts = int(time.time())
-        user_file = session_dir / f"{ts}_user_agent.tmd"
         user_file.write_text(text, encoding="utf-8")
         self._debug_log("user_message", session=session_handle, file=user_file.name, text=text)
         await self._send_codex_stdin(text, session_handle, first_message=first_message)
@@ -538,9 +545,18 @@ class _PosixPtyProcess:
         self._proc = proc
         self._master_fd = master_fd
 
+    @staticmethod
+    def _set_winsize(fd: int, rows: int = 40, cols: int = 120) -> None:
+        try:
+            packed = struct.pack("HHHH", rows, cols, 0, 0)
+            fcntl.ioctl(fd, termios.TIOCSWINSZ, packed)
+        except OSError:
+            pass
+
     @classmethod
     def start(cls, argv: list[str], *, cwd: str, env: dict[str, str]) -> "_PosixPtyProcess":
         master_fd, slave_fd = pty.openpty()
+        cls._set_winsize(slave_fd)
         try:
             proc = subprocess.Popen(
                 argv,

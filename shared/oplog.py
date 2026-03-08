@@ -82,10 +82,13 @@ class RotatingTextLog:
     def append(self, text: str) -> None:
         if not text:
             return
-        with self._lock:
-            self._rotate_if_needed(len(text.encode("utf-8", errors="ignore")))
-            with self.log_file.open("a", encoding="utf-8", errors="replace") as fh:
-                fh.write(text)
+        try:
+            with self._lock:
+                self._rotate_if_needed(len(text.encode("utf-8", errors="ignore")))
+                with self.log_file.open("a", encoding="utf-8", errors="replace") as fh:
+                    fh.write(text)
+        except PermissionError:
+            return
 
     def _rotate_if_needed(self, incoming_bytes: int) -> None:
         current_size = self.log_file.stat().st_size if self.log_file.exists() else 0

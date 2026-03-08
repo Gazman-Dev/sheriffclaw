@@ -271,6 +271,25 @@ EOF
     fi
 }
 
+repair_ai_worker_shared_paths() {
+    local worker_user="$1"
+    local worker_group="${2:-sheriffclaw}"
+    local sudo_cmd=""
+    [ "$(id -u)" -ne 0 ] && sudo_cmd="sudo"
+
+    local paths=(
+        "$INSTALL_DIR/llm"
+        "$INSTALL_DIR/agents/codex"
+    )
+
+    for p in "${paths[@]}"; do
+        [ -e "$p" ] || continue
+        $sudo_cmd chgrp -R "$worker_group" "$p"
+        $sudo_cmd find "$p" -type d -exec chmod 2775 {} \;
+        $sudo_cmd find "$p" -type f -exec chmod 664 {} \;
+    done
+}
+
 setup_ai_worker_user() {
     local user="${SHERIFF_AI_WORKER_USER:-sheriffai}"
     local group="${SHERIFF_AI_WORKER_GROUP:-sheriffclaw}"
@@ -315,6 +334,8 @@ setup_ai_worker_user() {
     else
         "$VENV_DIR/bin/sheriff-ctl" sandbox --user "$user" --allow-net
     fi
+
+    repair_ai_worker_shared_paths "$user" "$group"
 }
 
 acquire_lock() {

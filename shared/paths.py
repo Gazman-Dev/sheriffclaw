@@ -28,6 +28,10 @@ def llm_root() -> Path:
 def agent_root() -> Path:
     root = base_root() / "agents" / "codex"
     root.mkdir(parents=True, exist_ok=True)
+    legacy_role_refs = {
+        'config_file = ".codex/roles/subagent-medium.toml"': 'config_file = "roles/subagent-medium.toml"',
+        'config_file = ".codex/roles/subagent-high.toml"': 'config_file = "roles/subagent-high.toml"',
+    }
 
     def _copy_missing_tree(src: Path, dst: Path) -> None:
         for item in src.rglob("*"):
@@ -62,6 +66,16 @@ def agent_root() -> Path:
                 fh.write("\n")
             fh.write(f"{trust_header}\n{trust_line}\n")
 
+    def _rewrite_legacy_role_refs(config_path: Path) -> None:
+        if not config_path.exists():
+            return
+        text = config_path.read_text(encoding="utf-8")
+        updated = text
+        for old, new in legacy_role_refs.items():
+            updated = updated.replace(old, new)
+        if updated != text:
+            config_path.write_text(updated, encoding="utf-8")
+
     def _migrate_legacy_codex_config(dst: Path) -> None:
         legacy_config = dst / ".codex" / "config.toml"
         global_config = dst / "config.toml"
@@ -78,6 +92,7 @@ def agent_root() -> Path:
                     legacy_config.replace(backup)
                 else:
                     legacy_config.unlink()
+        _rewrite_legacy_role_refs(global_config)
         _ensure_trusted_project(global_config, dst)
 
     source_candidates = [

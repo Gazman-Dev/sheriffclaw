@@ -56,8 +56,8 @@ job_max_runtime_seconds = 3600
 
 [agents.subagent_medium]
 description = "Spawned agent with medium reasoning effort"
-config_file = ".codex/roles/subagent-medium.toml"
+config_file = "roles/subagent-medium.toml"
 
 [agents.subagent_high]
 description = "Spawned agent with high reasoning effort"
-config_file = ".codex/roles/subagent-high.toml"
+config_file = "roles/subagent-high.toml"

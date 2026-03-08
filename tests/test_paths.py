@@ -44,12 +44,15 @@ def test_agent_root_migrates_legacy_dot_codex_config(monkeypatch, tmp_path):
     monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
     dst = tmp_path / "agents" / "codex" / ".codex"
     dst.mkdir(parents=True, exist_ok=True)
-    (dst / "config.toml").write_text("model = \"gpt-5\"\n", encoding="utf-8")
+    (dst / "config.toml").write_text(
+        'model = "gpt-5"\nconfig_file = ".codex/roles/subagent-high.toml"\n',
+        encoding="utf-8",
+    )
 
     got = paths.agent_root()
     assert (got / "config.toml").exists()
     assert not (got / ".codex" / "config.toml").exists()
-    assert (got / ".codex" / "config.toml.legacy").exists()
+    assert 'config_file = "roles/subagent-high.toml"' in (got / "config.toml").read_text(encoding="utf-8")
 
 
 def test_agent_root_backs_up_conflicting_legacy_dot_codex_config(monkeypatch, tmp_path):
@@ -63,3 +66,16 @@ def test_agent_root_backs_up_conflicting_legacy_dot_codex_config(monkeypatch, tm
     assert (got / "config.toml").read_text(encoding="utf-8").startswith('model = "gpt-5"')
     assert not (got / ".codex" / "config.toml").exists()
     assert (got / ".codex" / "config.toml.legacy").exists()
+
+
+def test_agent_root_rewrites_legacy_role_refs_in_existing_global_config(monkeypatch, tmp_path):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    dst = tmp_path / "agents" / "codex"
+    (dst / ".codex").mkdir(parents=True, exist_ok=True)
+    (dst / "config.toml").write_text(
+        'model = "gpt-5"\nconfig_file = ".codex/roles/subagent-medium.toml"\n',
+        encoding="utf-8",
+    )
+
+    got = paths.agent_root()
+    assert 'config_file = "roles/subagent-medium.toml"' in (got / "config.toml").read_text(encoding="utf-8")

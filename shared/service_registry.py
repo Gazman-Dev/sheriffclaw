@@ -13,7 +13,6 @@ SERVICE_PORTS: dict[str, int] = {
     "sheriff-updater": 47609,
     "ai-worker": 47610,
     "ai-tg-llm": 47611,
-    "telegram-listener": 47612,
     "sheriff-chat-proxy": 47613,
 }
 

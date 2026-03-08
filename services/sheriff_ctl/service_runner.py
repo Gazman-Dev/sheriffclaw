@@ -13,6 +13,7 @@ except ImportError:  # pragma: no cover - Windows
     pwd = None
 
 from services.sheriff_ctl.sandbox import (
+    _darwin_ai_worker_launcher_path,
     _ai_worker_sandbox_profile,
     _ai_worker_user,
     _linux_sandbox_profile,
@@ -64,10 +65,20 @@ def _service_command(service: str) -> list[str]:
     if service == "ai-worker":
         sandboxed = None
         if platform.system() == "Darwin":
-            sb = shutil.which("sandbox-exec")
-            if sb:
-                profile = _ai_worker_sandbox_profile()
-                sandboxed =[sb, "-f", str(profile), *base]
+            user = _ai_worker_user()
+            if user:
+                if not _posix_user_exists(user):
+                    raise RuntimeError(f"configured ai-worker user does not exist: {user}")
+                launcher = _darwin_ai_worker_launcher_path()
+                if not launcher.exists():
+                    raise RuntimeError(
+                        f"missing macOS ai-worker launcher: {launcher} (rerun installer)")
+                sandboxed = [str(launcher)]
+            else:
+                sb = shutil.which("sandbox-exec")
+                if sb:
+                    profile = _ai_worker_sandbox_profile()
+                    sandboxed = [sb, "-f", str(profile), *base]
         elif platform.system() == "Linux":
             bwrap = shutil.which("bwrap")
             if bwrap:
@@ -84,7 +95,7 @@ def _service_command(service: str) -> list[str]:
         user = _ai_worker_user()
         if user and platform.system() in {"Darwin", "Linux"}:
             sudo = shutil.which("sudo")
-            if not _posix_user_exists(user):
+            if platform.system() != "Darwin" and not _posix_user_exists(user):
                 raise RuntimeError(f"configured ai-worker user does not exist: {user}")
             if not sudo:
                 raise RuntimeError("sudo is required to run ai-worker under a dedicated OS user")

@@ -10,11 +10,46 @@ def test_service_command_ai_worker_sandbox_on_darwin(monkeypatch, tmp_path):
     monkeypatch.setattr(service_runner.shutil, "which", lambda x: "/usr/bin/sandbox-exec")
     monkeypatch.setattr(sandbox, "gw_root", lambda: tmp_path / "gw")
     monkeypatch.setattr(sandbox, "llm_root", lambda: tmp_path / "llm")
+    monkeypatch.setattr(sandbox.sys, "platform", "darwin")
+    monkeypatch.setattr(sandbox, "_darwin_sandbox_profile_path", lambda: tmp_path / "shared" / "ai_worker.sb")
+    launcher = tmp_path / "usr" / "local" / "bin" / "sheriff-ai-worker-launch"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("#!/bin/bash\n", encoding="utf-8")
+    monkeypatch.setattr(service_runner, "_darwin_ai_worker_launcher_path", lambda: launcher)
+    monkeypatch.setattr(service_runner, "_ai_worker_user", lambda: "")
 
     cmd = service_runner._service_command("ai-worker")
     assert cmd[0].endswith("sandbox-exec")
     assert cmd[1] == "-f"
     assert Path(cmd[2]).exists()
+    assert Path(cmd[2]) == tmp_path / "shared" / "ai_worker.sb"
+
+
+def test_ai_worker_sandbox_profile_on_darwin_uses_shared_tmp(monkeypatch, tmp_path):
+    monkeypatch.setattr(sandbox, "gw_root", lambda: tmp_path / "gw")
+    monkeypatch.setattr(sandbox, "llm_root", lambda: tmp_path / "llm")
+    monkeypatch.setattr(sandbox.sys, "platform", "darwin")
+    monkeypatch.setattr(sandbox, "_darwin_sandbox_profile_path", lambda: tmp_path / "shared" / "ai_worker.sb")
+
+    path = sandbox._ai_worker_sandbox_profile()
+
+    assert path == tmp_path / "shared" / "ai_worker.sb"
+    assert path.exists()
+
+
+def test_ai_worker_sandbox_profile_allows_real_python_runtime(monkeypatch, tmp_path):
+    monkeypatch.setattr(sandbox, "gw_root", lambda: tmp_path / "gw")
+    monkeypatch.setattr(sandbox, "llm_root", lambda: tmp_path / "llm")
+    monkeypatch.setattr(sandbox.sys, "platform", "darwin")
+    runtime_bin = tmp_path / "runtime" / "bin"
+    runtime_bin.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(sandbox.sys, "executable", str(runtime_bin / "python3.9"))
+    monkeypatch.setattr(sandbox, "_darwin_sandbox_profile_path", lambda: tmp_path / "shared" / "ai_worker.sb")
+
+    path = sandbox._ai_worker_sandbox_profile()
+    text = path.read_text(encoding="utf-8")
+
+    assert str(tmp_path / "runtime") in text
 
 
 def test_service_command_linux_bwrap(monkeypatch, tmp_path):
@@ -52,12 +87,47 @@ def test_service_command_ai_worker_missing_user_raises(monkeypatch, tmp_path):
     monkeypatch.setattr(sandbox, "llm_root", lambda: tmp_path / "llm")
     monkeypatch.setattr(service_runner, "_ai_worker_user", lambda: "sheriffai")
     monkeypatch.setattr(service_runner, "_posix_user_exists", lambda user: False)
+    monkeypatch.setattr(service_runner, "_darwin_ai_worker_launcher_path", lambda: tmp_path / "launcher")
 
     try:
         service_runner._service_command("ai-worker")
         assert False, "expected RuntimeError"
     except RuntimeError as exc:
         assert "does not exist" in str(exc)
+
+
+def test_service_command_ai_worker_darwin_requires_launcher_for_dedicated_user(monkeypatch, tmp_path):
+    monkeypatch.setattr(service_runner.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(service_runner.shutil, "which", lambda x: "/usr/bin/sandbox-exec" if x == "sandbox-exec" else "/usr/bin/sudo")
+    monkeypatch.setattr(sandbox, "gw_root", lambda: tmp_path / "gw")
+    monkeypatch.setattr(sandbox, "llm_root", lambda: tmp_path / "llm")
+    monkeypatch.setattr(service_runner, "_ai_worker_user", lambda: "sheriffai")
+    monkeypatch.setattr(service_runner, "_posix_user_exists", lambda user: True)
+    monkeypatch.setattr(service_runner, "_darwin_ai_worker_launcher_path", lambda: tmp_path / "missing-launcher")
+
+    try:
+        service_runner._service_command("ai-worker")
+        assert False, "expected RuntimeError"
+    except RuntimeError as exc:
+        assert "missing macOS ai-worker launcher" in str(exc)
+
+
+def test_service_command_ai_worker_darwin_uses_launcher_for_dedicated_user(monkeypatch, tmp_path):
+    monkeypatch.setattr(service_runner.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(service_runner.shutil, "which", lambda x: "/usr/bin/sandbox-exec" if x == "sandbox-exec" else "/usr/bin/sudo")
+    monkeypatch.setattr(sandbox, "gw_root", lambda: tmp_path / "gw")
+    monkeypatch.setattr(sandbox, "llm_root", lambda: tmp_path / "llm")
+    monkeypatch.setattr(service_runner, "_ai_worker_user", lambda: "sheriffai")
+    monkeypatch.setattr(service_runner, "_posix_user_exists", lambda user: True)
+    launcher = tmp_path / "usr" / "local" / "bin" / "sheriff-ai-worker-launch"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("#!/bin/bash\n", encoding="utf-8")
+    monkeypatch.setattr(service_runner, "_darwin_ai_worker_launcher_path", lambda: launcher)
+
+    cmd = service_runner._service_command("ai-worker")
+
+    assert cmd[:4] == ["/usr/bin/sudo", "-n", "-u", "sheriffai"]
+    assert cmd[4] == str(launcher)
 
 
 def test_service_command_ai_worker_requires_sudo_for_dedicated_user(monkeypatch, tmp_path):
@@ -67,6 +137,10 @@ def test_service_command_ai_worker_requires_sudo_for_dedicated_user(monkeypatch,
     monkeypatch.setattr(sandbox, "llm_root", lambda: tmp_path / "llm")
     monkeypatch.setattr(service_runner, "_ai_worker_user", lambda: "sheriffai")
     monkeypatch.setattr(service_runner, "_posix_user_exists", lambda user: True)
+    launcher = tmp_path / "usr" / "local" / "bin" / "sheriff-ai-worker-launch"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("#!/bin/bash\n", encoding="utf-8")
+    monkeypatch.setattr(service_runner, "_darwin_ai_worker_launcher_path", lambda: launcher)
 
     try:
         service_runner._service_command("ai-worker")

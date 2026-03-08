@@ -75,3 +75,9 @@ def test_proc_client_can_be_constructed_outside_loop_and_used_inside(monkeypatch
                 await server_task
 
     asyncio.run(_run())
+
+
+def test_rpc_endpoint_is_none_for_non_rpc_listener():
+    from shared.service_registry import rpc_endpoint
+
+    assert rpc_endpoint("telegram-listener") is None

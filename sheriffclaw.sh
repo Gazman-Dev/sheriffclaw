@@ -209,6 +209,40 @@ create_macos_service_user() {
     $sudo_cmd chmod 700 "/Users/$user"
 }
 
+install_macos_ai_worker_launcher() {
+    local invoking_user="$1"
+    local worker_user="$2"
+    local launcher="/usr/local/bin/sheriff-ai-worker-launch"
+    local sudoers_dir="/private/etc/sudoers.d"
+    local sudoers_file="$sudoers_dir/sheriffclaw-ai-worker"
+    local sudo_cmd=""
+    local tmp_launcher
+    local tmp_sudoers
+    [ "$(id -u)" -ne 0 ] && sudo_cmd="sudo"
+
+    tmp_launcher="$(mktemp)"
+    cat > "$tmp_launcher" <<EOF
+#!/bin/bash
+set -euo pipefail
+export SHERIFFCLAW_ROOT="$INSTALL_DIR"
+export SHERIFF_RPC_HOST="127.0.0.1"
+export SHERIFF_RPC_PORT="47610"
+exec /usr/bin/sandbox-exec -f "/private/tmp/sheriffclaw/ai_worker.sb" "$VENV_DIR/bin/python" -m services.ai_worker.__main__
+EOF
+    $sudo_cmd install -o root -g wheel -m 755 "$tmp_launcher" "$launcher"
+    rm -f "$tmp_launcher"
+
+    tmp_sudoers="$(mktemp)"
+    printf '%s ALL=(%s) NOPASSWD: %s\n' "$invoking_user" "$worker_user" "$launcher" > "$tmp_sudoers"
+    $sudo_cmd mkdir -p "$sudoers_dir"
+    $sudo_cmd install -o root -g wheel -m 440 "$tmp_sudoers" "$sudoers_file"
+    rm -f "$tmp_sudoers"
+
+    if command -v visudo >/dev/null 2>&1; then
+        $sudo_cmd visudo -cf "$sudoers_file" >/dev/null
+    fi
+}
+
 setup_ai_worker_user() {
     local user="${SHERIFF_AI_WORKER_USER:-sheriffai}"
     local group="${SHERIFF_AI_WORKER_GROUP:-sheriffclaw}"
@@ -242,6 +276,10 @@ setup_ai_worker_user() {
     if ! id "$user" >/dev/null 2>&1; then
         err "Dedicated ai-worker user '$user' is required but was not created successfully."
         exit 1
+    fi
+
+    if is_macos; then
+        install_macos_ai_worker_launcher "$(id -un)" "$user"
     fi
 
     if [ "$allow_net" = "0" ] || [ "$allow_net" = "false" ] || [ "$allow_net" = "no" ]; then

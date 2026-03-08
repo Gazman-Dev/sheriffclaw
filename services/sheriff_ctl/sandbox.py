@@ -48,8 +48,19 @@ def _set_ai_worker_allow_net(allow: bool) -> None:
     p.write_text("1" if allow else "0", encoding="utf-8")
 
 
+def _darwin_sandbox_profile_path() -> Path:
+    return Path("/private/tmp/sheriffclaw") / "ai_worker.sb"
+
+
+def _darwin_ai_worker_launcher_path() -> Path:
+    return Path("/usr/local/bin/sheriff-ai-worker-launch")
+
+
 def _ai_worker_sandbox_profile() -> Path:
-    p = gw_root() / "state" / "ai_worker.sb"
+    if sys.platform == "darwin":
+        p = _darwin_sandbox_profile_path()
+    else:
+        p = gw_root() / "state" / "ai_worker.sb"
     workspace = gw_root().parent.resolve()
     agent_ws = agent_root().resolve()
     agent_ws.mkdir(parents=True, exist_ok=True)
@@ -57,6 +68,8 @@ def _ai_worker_sandbox_profile() -> Path:
     net_rule = "(allow network-outbound) (allow network-inbound)" if _network_allowed_for_ai_worker() else ""
     home = Path.home().resolve()
     sys_prefix = Path(sys.prefix).resolve()
+    sys_exec = Path(sys.executable).resolve()
+    sys_runtime = sys_exec.parent.parent
     gw = gw_root().resolve()
     llm = llm_root().resolve()
 
@@ -71,6 +84,7 @@ def _ai_worker_sandbox_profile() -> Path:
 
 ; Allow reading the python environment
 (allow file-read* (subpath "{sys_prefix}"))
+(allow file-read* (subpath "{sys_runtime}"))
 
 ; Allow reading the application source code (read-only)
 (allow file-read* (subpath "{workspace}"))
@@ -90,6 +104,10 @@ def _ai_worker_sandbox_profile() -> Path:
 '''
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(profile, encoding="utf-8")
+    try:
+        p.chmod(0o644)
+    except OSError:
+        pass
     return p
 
 

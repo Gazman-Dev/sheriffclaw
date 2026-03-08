@@ -10,7 +10,7 @@ from shared.tools_exec import ToolExecutor
 class SheriffToolsService:
     def __init__(self) -> None:
         self.execer = ToolExecutor(gw_root() / "state" / "tool_output")
-        self.policy = ProcClient("sheriff-policy")
+        self.policy = ProcClient("sheriff-policy", spawn_fallback=False)
 
     async def exec_tool(self, payload, emit_event, req_id):
         principal = payload["principal_id"]

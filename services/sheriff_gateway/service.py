@@ -42,12 +42,12 @@ class SheriffGatewayService:
     }
 
     def __init__(self) -> None:
-        self.ai = ProcClient("ai-worker")
-        self.web = ProcClient("sheriff-web")
-        self.tools = ProcClient("sheriff-tools")
-        self.secrets = ProcClient("sheriff-secrets")
-        self.requests = ProcClient("sheriff-requests")
-        self.tg_gate = ProcClient("sheriff-tg-gate")
+        self.ai = ProcClient("ai-worker", spawn_fallback=False)
+        self.web = ProcClient("sheriff-web", spawn_fallback=False)
+        self.tools = ProcClient("sheriff-tools", spawn_fallback=False)
+        self.secrets = ProcClient("sheriff-secrets", spawn_fallback=False)
+        self.requests = ProcClient("sheriff-requests", spawn_fallback=False)
+        self.tg_gate = ProcClient("sheriff-tg-gate", spawn_fallback=False)
         self.log = get_op_logger("gateway")
         self.sessions: dict[str, str] = {}
         self._queue = defaultdict(deque)
@@ -342,10 +342,18 @@ class SheriffGatewayService:
 
         return {"status": "notified", "session_handle": session_handle}
 
+    async def reset_session(self, payload, emit_event, req_id):
+        session = str(payload.get("session_id") or "primary_session")
+        handle = self.sessions.pop(session, None)
+        if handle:
+            await self.ai.request("agent.session.close", {"session_handle": handle})
+        return {"status": "reset", "session_handle": session}
+
     def ops(self):
         return {
             "gateway.handle_user_message": self.handle_user_message,
             "gateway.notify_request_resolved": self.notify_request_resolved,
+            "gateway.session.reset": self.reset_session,
             "gateway.queue.control": self.queue_control,
             "gateway.queue.status": self.queue_status,
             "gateway.verify_master_password": self.verify_master_password,

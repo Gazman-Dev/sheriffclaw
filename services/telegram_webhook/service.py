@@ -15,10 +15,10 @@ from shared.proc_rpc import ProcClient
 
 class TelegramWebhookService:
     def __init__(self):
-        self.gateway = ProcClient("sheriff-gateway")
-        self.ai_gate = ProcClient("ai-tg-llm")
-        self.sheriff_gate = ProcClient("sheriff-tg-gate")
-        self.cli_gate = ProcClient("sheriff-cli-gate")
+        self.gateway = ProcClient("sheriff-gateway", spawn_fallback=False)
+        self.ai_gate = ProcClient("ai-tg-llm", spawn_fallback=False)
+        self.sheriff_gate = ProcClient("sheriff-tg-gate", spawn_fallback=False)
+        self.cli_gate = ProcClient("sheriff-cli-gate", spawn_fallback=False)
         self.debug_mode = os.environ.get("SHERIFF_DEBUG", "").strip().lower() in {"1", "true", "yes"}
         self.loop = None
 

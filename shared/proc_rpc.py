@@ -11,22 +11,40 @@ from pathlib import Path
 
 from shared.errors import ProtocolError, ServiceCrashedError
 from shared.ndjson import encode_frame
+from shared.service_registry import rpc_endpoint
 
 
 class ProcClient:
-    def __init__(self, binary: str, *, cwd=None, env=None):
+    def __init__(self, binary: str, *, cwd=None, env=None, spawn_fallback: bool = True):
         self.binary = binary
         self.cwd = cwd
         self.env = env
+        self.spawn_fallback = spawn_fallback
         self.proc: asyncio.subprocess.Process | None = None
+        self.reader: asyncio.StreamReader | None = None
+        self.writer: asyncio.StreamWriter | None = None
         self._stderr_task: asyncio.Task | None = None
         self._stderr_tail: deque[str] = deque(maxlen=80)
         self._lock = asyncio.Lock()
         self.request_timeout_sec = float(os.environ.get("SHERIFF_RPC_TIMEOUT_SEC", "600"))
 
     async def start(self):
+        if self.writer is not None and not self.writer.is_closing():
+            return
         if self.proc and self.proc.returncode is None:
             return
+        endpoint = rpc_endpoint(self.binary)
+        if endpoint is not None:
+            try:
+                self.reader, self.writer = await asyncio.open_connection(*endpoint)
+                return
+            except OSError as exc:
+                self.reader = None
+                self.writer = None
+                if not self.spawn_fallback:
+                    raise ServiceCrashedError(
+                        f"managed service unavailable: {self.binary} at {endpoint[0]}:{endpoint[1]} ({exc})"
+                    ) from exc
         binary = self.binary
         candidate = Path(sys.executable).parent / self.binary
         if candidate.exists():
@@ -56,6 +74,11 @@ class ProcClient:
                 continue
 
     async def _read_frame(self) -> dict:
+        if self.reader is not None:
+            line = await self.reader.readline()
+            if not line:
+                raise ServiceCrashedError(f"service connection closed: {self.binary}")
+            return json.loads(line.decode("utf-8"))
         assert self.proc and self.proc.stdout
         line = await self.proc.stdout.readline()
         if not line:
@@ -63,10 +86,22 @@ class ProcClient:
         return json.loads(line.decode("utf-8"))
 
     async def close(self) -> None:
+        reader = self.reader
+        writer = self.writer
         proc = self.proc
         stderr_task = self._stderr_task
+        self.reader = None
+        self.writer = None
         self.proc = None
         self._stderr_task = None
+        if writer is not None:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+        if reader is not None and writer is None:
+            self.reader = None
         if proc is None:
             return
 
@@ -113,10 +148,14 @@ class ProcClient:
     async def request(self, op: str, payload: dict, *, stream_events: bool = False):
         await self.start()
         async with self._lock:
-            assert self.proc and self.proc.stdin
             req_id = str(uuid.uuid4())
-            self.proc.stdin.write(encode_frame({"id": req_id, "op": op, "payload": payload}))
-            await self.proc.stdin.drain()
+            if self.writer is not None:
+                self.writer.write(encode_frame({"id": req_id, "op": op, "payload": payload}))
+                await self.writer.drain()
+            else:
+                assert self.proc and self.proc.stdin
+                self.proc.stdin.write(encode_frame({"id": req_id, "op": op, "payload": payload}))
+                await self.proc.stdin.drain()
 
             if not stream_events:
                 events = []

@@ -58,6 +58,12 @@ def test_sandbox_parses():
     assert args.allow_net is False
 
 
+def test_proxy_chat_parses():
+    parser = build_parser()
+    args = parser.parse_args(["proxy-chat", "--principal", "debugger"])
+    assert args.principal == "debugger"
+
+
 def test_build_parser_tolerates_missing_doctor_module(monkeypatch):
     real_import = builtins.__import__
 

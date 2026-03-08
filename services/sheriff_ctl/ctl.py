@@ -16,7 +16,7 @@ if os.getenv("SHERIFF_DEBUG", "0") not in {"1", "true", "yes"}:
         pass
     warnings.filterwarnings("ignore", message=r"urllib3 v2 only supports OpenSSL 1\.1\.1\+.*")
 
-from services.sheriff_ctl.chat import cmd_call, cmd_chat, cmd_entry, cmd_skill
+from services.sheriff_ctl.chat import cmd_call, cmd_chat, cmd_entry, cmd_proxy_chat, cmd_skill
 from services.sheriff_ctl.onboard import cmd_configure_llm, cmd_logout_llm, cmd_onboard
 from services.sheriff_ctl.sandbox import cmd_sandbox
 from services.sheriff_ctl.service_runner import ALL, cmd_logs, cmd_start, cmd_status, cmd_stop
@@ -103,6 +103,10 @@ def build_parser() -> argparse.ArgumentParser:
     chat.add_argument("--principal", default="local-cli")
     chat.add_argument("--model-ref", default=None, help="Model route, e.g. test/default")
     chat.set_defaults(func=cmd_chat)
+    proxy = sub.add_parser("proxy-chat")
+    proxy.add_argument("--principal", default="local-cli")
+    proxy.add_argument("--model-ref", default=None, help="Model route, e.g. test/default")
+    proxy.set_defaults(func=cmd_proxy_chat)
     return p
 
 
@@ -136,6 +140,7 @@ def main_sheriff(argv: list[str] | None = None) -> None:
         "logout-llm",
         "doctor",
         "chat",
+        "proxy-chat",
     }
     if argv and argv[0] in ctl_commands:
         main(argv)

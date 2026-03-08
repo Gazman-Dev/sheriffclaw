@@ -5,8 +5,8 @@ from shared.proc_rpc import ProcClient
 
 class SheriffCliGateService:
     def __init__(self) -> None:
-        self.requests = ProcClient("sheriff-requests")
-        self.gateway = ProcClient("sheriff-gateway")
+        self.requests = ProcClient("sheriff-requests", spawn_fallback=False)
+        self.gateway = ProcClient("sheriff-gateway", spawn_fallback=False)
         # Back-compat shim for existing tests/mocks.
         self.secrets = None
         self.services =[
@@ -69,7 +69,7 @@ class SheriffCliGateService:
         if cmd == "status":
             lines =[]
             for svc in self.services:
-                cli = ProcClient(svc)
+                cli = ProcClient(svc, spawn_fallback=False)
                 try:
                     _, resp = await cli.request("health", {})
                     st = resp.get("result", {}).get("status", "ok") if resp.get("ok") else "error"

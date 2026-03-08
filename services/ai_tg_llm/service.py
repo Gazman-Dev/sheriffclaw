@@ -5,7 +5,7 @@ from shared.proc_rpc import ProcClient
 
 class AITgLlmService:
     def __init__(self):
-        self.gateway = ProcClient("sheriff-gateway")
+        self.gateway = ProcClient("sheriff-gateway", spawn_fallback=False)
 
     async def _secrets(self, op: str, payload: dict):
         _, res = await self.gateway.request("gateway.secrets.call", {"op": op, "payload": payload})

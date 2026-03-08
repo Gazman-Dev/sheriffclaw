@@ -15,9 +15,9 @@ class SheriffRequestsService:
         state_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = state_dir / "requests.db"
 
-        self.tg_gate = ProcClient("sheriff-tg-gate")
-        self.policy = ProcClient("sheriff-policy")
-        self.gateway = ProcClient("sheriff-gateway")
+        self.tg_gate = ProcClient("sheriff-tg-gate", spawn_fallback=False)
+        self.policy = ProcClient("sheriff-policy", spawn_fallback=False)
+        self.gateway = ProcClient("sheriff-gateway", spawn_fallback=False)
         # Back-compat shim for tests that still mock direct secrets RPC.
         self.secrets = None
 

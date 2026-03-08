@@ -15,9 +15,9 @@ class TelegramListenerService:
     def __init__(self):
         self.log = get_op_logger("telegram-listener")
         self.log.info("telegram-listener boot (build=delta-fallback-v2)")
-        self.gateway = ProcClient("sheriff-gateway")
-        self.sheriff_gate = ProcClient("sheriff-tg-gate")
-        self.cli_gate = ProcClient("sheriff-cli-gate")
+        self.gateway = ProcClient("sheriff-gateway", spawn_fallback=False)
+        self.sheriff_gate = ProcClient("sheriff-tg-gate", spawn_fallback=False)
+        self.cli_gate = ProcClient("sheriff-cli-gate", spawn_fallback=False)
         self.offset_path = gw_root() / "state" / "telegram_offsets.json"
         self.tokens_cache_path = gw_root() / "state" / "telegram_tokens_cache.json"
         self.unlock_channel_path = gw_root() / "state" / "telegram_unlock_channel.json"

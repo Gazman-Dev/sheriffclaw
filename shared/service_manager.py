@@ -14,10 +14,12 @@ class ServiceManager:
             command_for: Callable[[str], list[str]],
             pid_path_for: Callable[[str], Path],
             log_paths_for: Callable[[str], tuple[Path, Path]],
+            env_for: Callable[[str], dict[str, str]] | None = None,
     ) -> None:
         self._command_for = command_for
         self._pid_path_for = pid_path_for
         self._log_paths_for = log_paths_for
+        self._env_for = env_for or (lambda _service: os.environ.copy())
 
     def read_pid(self, service: str) -> int | None:
         p = self._pid_path_for(service)
@@ -58,7 +60,7 @@ class ServiceManager:
         err_path.parent.mkdir(parents=True, exist_ok=True)
         out = out_path.open("a", encoding="utf-8")
         err = err_path.open("a", encoding="utf-8")
-        proc = subprocess.Popen(self._command_for(service), stdout=out, stderr=err)  # noqa: S603
+        proc = subprocess.Popen(self._command_for(service), stdout=out, stderr=err, env=self._env_for(service))  # noqa: S603
         self._pid_path_for(service).write_text(str(proc.pid), encoding="utf-8")
         return "started"
 

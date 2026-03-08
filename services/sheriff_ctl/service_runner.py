@@ -21,6 +21,7 @@ from services.sheriff_ctl.utils import (
     _resolve_service_binary,
 )
 from shared.proc_rpc import ProcClient
+from shared.service_registry import rpc_endpoint
 from shared.service_manager import ServiceManager
 
 GW_ORDER =[
@@ -30,6 +31,7 @@ GW_ORDER =[
     "sheriff-web",
     "sheriff-tools",
     "sheriff-gateway",
+    "sheriff-chat-proxy",
     "sheriff-tg-gate",
     "sheriff-cli-gate",
     "sheriff-updater",
@@ -37,9 +39,7 @@ GW_ORDER =[
 LLM_ORDER =["ai-worker", "ai-tg-llm", "telegram-listener"]
 ALL =[*GW_ORDER, *LLM_ORDER]
 
-# Daemonized services managed directly by ServiceManager.
-# Keep secrets always-on so unlock state survives normal operation.
-MANAGED_SERVICES = ["sheriff-secrets", "telegram-listener"]
+MANAGED_SERVICES = ALL
 
 
 def _service_command(service: str) -> list[str]:
@@ -74,7 +74,16 @@ def _service_command(service: str) -> list[str]:
     return base
 
 
-SERVICE_MANAGER = ServiceManager(_service_command, _pid_path, _log_paths)
+def _service_env(service: str) -> dict[str, str]:
+    env = os.environ.copy()
+    endpoint = rpc_endpoint(service)
+    if endpoint is not None:
+        env["SHERIFF_RPC_HOST"] = endpoint[0]
+        env["SHERIFF_RPC_PORT"] = str(endpoint[1])
+    return env
+
+
+SERVICE_MANAGER = ServiceManager(_service_command, _pid_path, _log_paths, _service_env)
 
 
 def _start_service(service: str) -> None:

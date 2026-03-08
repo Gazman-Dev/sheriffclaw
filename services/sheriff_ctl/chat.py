@@ -141,6 +141,72 @@ def cmd_chat(args):
     asyncio.run(_run())
 
 
+def cmd_proxy_chat(args):
+    principal = args.principal
+    model_ref = args.model_ref
+    chat_master_password = None
+
+    async def _send(proxy: ProcClient, text: str) -> float:
+        payload = {"channel": "cli", "principal_external_id": principal, "text": text, "model_ref": model_ref}
+        if chat_master_password:
+            payload["master_password"] = chat_master_password
+        stream, final = await proxy.request("chatproxy.send", payload, stream_events=True)
+        last_activity = time.time()
+        async for frame in stream:
+            event = frame.get("event")
+            payload = frame.get("payload", {})
+            if event in {"assistant.delta", "assistant.final"}:
+                print(f"[AGENT] {payload.get('text', '')}")
+                last_activity = time.time()
+            elif event == "tool.result":
+                print(f"[TOOL] {json.dumps(payload, ensure_ascii=False)}")
+                last_activity = time.time()
+            else:
+                print(json.dumps(frame, ensure_ascii=False))
+                last_activity = time.time()
+        await final
+        return last_activity
+
+    async def _run():
+        nonlocal chat_master_password
+        proxy = ProcClient("sheriff-chat-proxy")
+        one_shot = getattr(args, "one_shot", None)
+        if one_shot is not None:
+            await _send(proxy, one_shot)
+            return
+
+        print("SheriffClaw proxy chat")
+        print("- Sends messages through sheriff-chat-proxy")
+        print("- Type /reset to reset primary_session")
+        print("- Type /status to inspect proxy status")
+        print("- Type /quit or /exit to leave")
+        while True:
+            try:
+                line = await asyncio.to_thread(input, "proxy> ")
+            except (EOFError, KeyboardInterrupt):
+                print("\nbye")
+                return
+            text = line.rstrip("\n")
+            if not text:
+                continue
+            if text in {"/quit", "/exit"}:
+                print("bye")
+                return
+            if text == "/status":
+                _, res = await proxy.request("chatproxy.status", {})
+                print(json.dumps(res.get("result", {}), ensure_ascii=False, indent=2))
+                continue
+            if text == "/reset":
+                _, res = await proxy.request("chatproxy.reset", {})
+                print(json.dumps(res.get("result", {}), ensure_ascii=False))
+                continue
+            if text.lower().startswith("/unlock "):
+                chat_master_password = text.split(" ", 1)[1].strip() or None
+            await _send(proxy, text)
+
+    asyncio.run(_run())
+
+
 def cmd_call(args):
     async def _run():
         cli = ProcClient(args.service)

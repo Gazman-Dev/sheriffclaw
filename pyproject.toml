@@ -21,6 +21,7 @@ sheriff = "services.sheriff_ctl.ctl:main_sheriff"
 sheriff-ctl = "services.sheriff_ctl.__main__:main"
 
 sheriff-gateway = "services.sheriff_gateway.__main__:main"
+sheriff-chat-proxy = "services.sheriff_chat_proxy.__main__:main"
 sheriff-secrets = "services.sheriff_secrets.__main__:main"
 sheriff-policy = "services.sheriff_policy.__main__:main"
 sheriff-requests = "services.sheriff_requests.__main__:main"

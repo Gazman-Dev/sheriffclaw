@@ -27,3 +27,9 @@ def test_cmd_start_closes_gateway_proc_client(monkeypatch):
     service_runner.cmd_start(argparse.Namespace(master_password=None))
 
     assert closed == ["sheriff-gateway"]
+
+
+def test_managed_services_include_persistent_agent_path():
+    assert "sheriff-gateway" in service_runner.MANAGED_SERVICES
+    assert "ai-worker" in service_runner.MANAGED_SERVICES
+    assert "sheriff-chat-proxy" in service_runner.MANAGED_SERVICES

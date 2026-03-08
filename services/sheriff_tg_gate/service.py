@@ -12,8 +12,8 @@ from shared.transcript import append_jsonl
 
 class SheriffTgGateService:
     def __init__(self):
-        self.gateway = ProcClient("sheriff-gateway")
-        self.policy = ProcClient("sheriff-policy")
+        self.gateway = ProcClient("sheriff-gateway", spawn_fallback=False)
+        self.policy = ProcClient("sheriff-policy", spawn_fallback=False)
         self.log_path = gw_root() / "state" / "gate_events.jsonl"
         self.debug_mode = os.environ.get("SHERIFF_DEBUG", "").strip().lower() in {"1", "true", "yes"}
 

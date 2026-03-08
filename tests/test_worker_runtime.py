@@ -266,6 +266,15 @@ def test_normalized_codex_text_strips_ansi(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_codex_ready_is_marked_from_greeting(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    rt = WorkerRuntime()
+    await rt._handle_codex_stdout("• Hey. What do you want to chat about?\n")
+    assert rt.codex_ready_marked is True
+    assert rt.codex_ready_event.is_set()
+
+
+@pytest.mark.asyncio
 async def test_unknown_prompt_publishes_manual_selection_prompt(monkeypatch, tmp_path):
     monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
     rt = WorkerRuntime()
@@ -375,3 +384,30 @@ async def test_prompt_pending_returns_prompt_without_timeout(monkeypatch, tmp_pa
             },
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_worker_reports_ready_timeout_before_sending(monkeypatch, tmp_path):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    monkeypatch.setenv("SHERIFF_CODEX_READY_TIMEOUT_SEC", "0.01")
+    rt = WorkerRuntime()
+    fake_proc = _FakeProc()
+
+    async def fake_ensure():
+        rt.codex_proc = fake_proc
+        rt.codex_start_error = ""
+        rt.codex_ready_marked = False
+        rt.codex_ready_event = asyncio.Event()
+        rt.codex_stdout_task = object()
+
+    monkeypatch.setattr(rt, "_ensure_codex_active", fake_ensure)
+
+    events = []
+
+    async def emit(event, payload):
+        events.append((event, payload))
+
+    await rt.user_message("s9", "hi", None, emit)
+    assert events == [("assistant.final", {"text": "Codex background process did not reach a ready state."})]
+    session_dir = rt.conversations_dir / "s9"
+    assert not list(session_dir.glob("*_user_agent.tmd"))

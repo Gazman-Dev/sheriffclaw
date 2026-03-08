@@ -42,6 +42,9 @@ class WorkerRuntime:
         self.codex_prompt_buffer = ""
         self.codex_prompt_last_action: dict[str, float] = {}
         self.codex_prompt_state: dict[str, dict] = {}
+        self.codex_ready_event = asyncio.Event()
+        self.codex_ready_marked = False
+        self.codex_visible_buffer = ""
         self.active_session_handle = "primary_session"
 
     def _debug_log(self, event: str, **payload) -> None:
@@ -210,15 +213,44 @@ class WorkerRuntime:
         return f"{prefix}\n\nUser message:\n{text}"
 
     def _normalized_codex_text(self, text: str) -> str:
+        return self._visible_codex_text(text).lower()
+
+    def _visible_codex_text(self, text: str) -> str:
         stripped = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
         stripped = re.sub(r"\x1b\].*?(?:\x07|\x1b\\)", "", stripped, flags=re.DOTALL)
         stripped = re.sub(r"\x1b[@-_]", "", stripped)
         stripped = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", stripped)
         stripped = stripped.replace("\r", "\n")
-        return stripped.lower()
+        return stripped
+
+    def _maybe_mark_codex_ready(self) -> None:
+        if self.codex_ready_marked:
+            return
+        visible = self._visible_codex_text(self.codex_visible_buffer)
+        normalized = visible.lower()
+        if "booting mcp server" in normalized:
+            if "what do you want to chat about?" not in normalized and "what do you want to work on?" not in normalized:
+                return
+        ready_markers = (
+            "what do you want to chat about?",
+            "what do you want to work on?",
+        )
+        if any(marker in normalized for marker in ready_markers):
+            self.codex_ready_marked = True
+            self.codex_ready_event.set()
+            self._debug_log("codex_ready", marker="greeting")
+            return
+        lines = [line.strip() for line in visible.splitlines() if line.strip()]
+        tail = lines[-8:]
+        if any("›" in line for line in tail) and not any("booting mcp server" in line.lower() for line in tail):
+            self.codex_ready_marked = True
+            self.codex_ready_event.set()
+            self._debug_log("codex_ready", marker="prompt")
 
     async def _handle_codex_stdout(self, text: str) -> None:
         self.codex_prompt_buffer = (self.codex_prompt_buffer + text)[-8000:]
+        self.codex_visible_buffer = (self.codex_visible_buffer + text)[-24000:]
+        self._maybe_mark_codex_ready()
         prompt = self._build_manual_prompt(self.codex_prompt_buffer)
         if prompt is not None:
             await self._publish_manual_prompt(prompt)
@@ -244,7 +276,10 @@ class WorkerRuntime:
                     )
                 self.codex_start_error = ""
                 self.codex_prompt_buffer = ""
+                self.codex_visible_buffer = ""
                 self.codex_prompt_last_action.clear()
+                self.codex_ready_marked = False
+                self.codex_ready_event = asyncio.Event()
                 if isinstance(self.codex_proc, _PosixPtyProcess):
                     self.codex_stdout_task = asyncio.create_task(
                         self._drain_codex_stream(self.codex_proc, self.codex_stdout_log, "stdout")
@@ -276,6 +311,24 @@ class WorkerRuntime:
                     error=self.codex_start_error,
                 )
                 await self._close_codex_logs()
+
+    async def _wait_for_codex_ready(self, session_handle: str) -> bool:
+        if self.codex_proc is None:
+            return False
+        if self.codex_ready_marked:
+            return True
+        if not isinstance(self.codex_proc, _PosixPtyProcess) and self.codex_stdout_task is None:
+            self.codex_ready_marked = True
+            self.codex_ready_event.set()
+            return True
+        timeout_sec = float(os.environ.get("SHERIFF_CODEX_READY_TIMEOUT_SEC", "45.0"))
+        self._debug_log("codex_wait_ready", session=session_handle, timeout_sec=timeout_sec)
+        try:
+            await asyncio.wait_for(self.codex_ready_event.wait(), timeout=timeout_sec)
+            return True
+        except asyncio.TimeoutError:
+            self._debug_log("codex_ready_timeout", session=session_handle, timeout_sec=timeout_sec)
+            return False
 
     async def _send_codex_stdin(self, text: str, session_handle: str, *, first_message: bool) -> None:
         if self.codex_proc is None:
@@ -341,6 +394,9 @@ class WorkerRuntime:
         await self._ensure_codex_active()
         if self.codex_start_error:
             await emit_event("assistant.final", {"text": f"Codex background process failed to start: {self.codex_start_error}"})
+            return
+        if not await self._wait_for_codex_ready(session_handle):
+            await emit_event("assistant.final", {"text": "Codex background process did not reach a ready state."})
             return
 
         first_message = not any(session_dir.glob("*_user_agent.tmd"))
@@ -444,6 +500,8 @@ class WorkerRuntime:
                 self.codex_proc.kill()
                 await self.codex_proc.wait()
         self.codex_proc = None
+        self.codex_ready_marked = False
+        self.codex_ready_event = asyncio.Event()
         await self._close_codex_logs()
 
     async def _close_codex_logs(self) -> None:

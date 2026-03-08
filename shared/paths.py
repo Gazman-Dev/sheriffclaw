@@ -41,6 +41,8 @@ def agent_root() -> Path:
                 continue
             if rel_parts == (".codex", "config.toml"):
                 target = dst / "config.toml"
+            elif len(rel_parts) >= 2 and rel_parts[0] == ".codex" and rel_parts[1] == "roles":
+                target = dst / Path(*rel_parts[1:])
             else:
                 target = dst / rel
             if item.is_dir():
@@ -78,6 +80,8 @@ def agent_root() -> Path:
 
     def _migrate_legacy_codex_config(dst: Path) -> None:
         legacy_config = dst / ".codex" / "config.toml"
+        legacy_roles = dst / ".codex" / "roles"
+        roles_dir = dst / "roles"
         global_config = dst / "config.toml"
         if legacy_config.exists() and not global_config.exists():
             legacy_config.replace(global_config)
@@ -92,6 +96,16 @@ def agent_root() -> Path:
                     legacy_config.replace(backup)
                 else:
                     legacy_config.unlink()
+        if legacy_roles.exists():
+            roles_dir.mkdir(parents=True, exist_ok=True)
+            for item in legacy_roles.rglob("*"):
+                rel = item.relative_to(legacy_roles)
+                target = roles_dir / rel
+                if item.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                elif not target.exists():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(item, target)
         _rewrite_legacy_role_refs(global_config)
         _ensure_trusted_project(global_config, dst)
 
@@ -107,7 +121,7 @@ def agent_root() -> Path:
             break
 
     # Ensure minimal runtime folders always exist.
-    for rel in (".codex", "conversations/sessions", "skill", "tmp"):
+    for rel in (".codex", "conversations/sessions", "skill", "tmp", "roles"):
         (root / rel).mkdir(parents=True, exist_ok=True)
 
     _migrate_legacy_codex_config(root)

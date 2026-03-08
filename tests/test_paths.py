@@ -18,11 +18,14 @@ def test_agent_root_seeds_from_installer_source(monkeypatch, tmp_path):
     src = tmp_path / "source" / "agents" / "codex"
     (src / ".codex").mkdir(parents=True, exist_ok=True)
     (src / "config.toml").write_text("model = \"gpt-5\"\n", encoding="utf-8")
+    (src / "roles").mkdir(parents=True, exist_ok=True)
+    (src / "roles" / "subagent-high.toml").write_text("model = \"gpt-5\"\n", encoding="utf-8")
     (src / "AGENTS.md").write_text("template", encoding="utf-8")
 
     got = paths.agent_root()
     assert (got / "config.toml").exists()
     assert (got / "AGENTS.md").exists()
+    assert (got / "roles" / "subagent-high.toml").exists()
     assert 'trust_level = "trusted"' in (got / "config.toml").read_text(encoding="utf-8")
 
 
@@ -79,3 +82,13 @@ def test_agent_root_rewrites_legacy_role_refs_in_existing_global_config(monkeypa
 
     got = paths.agent_root()
     assert 'config_file = "roles/subagent-medium.toml"' in (got / "config.toml").read_text(encoding="utf-8")
+
+
+def test_agent_root_migrates_legacy_dot_codex_roles(monkeypatch, tmp_path):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    dst = tmp_path / "agents" / "codex" / ".codex" / "roles"
+    dst.mkdir(parents=True, exist_ok=True)
+    (dst / "subagent-high.toml").write_text("model = \"gpt-5\"\n", encoding="utf-8")
+
+    got = paths.agent_root()
+    assert (got / "roles" / "subagent-high.toml").exists()

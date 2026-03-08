@@ -306,9 +306,9 @@ run_onboarding_if_needed() {
             case "$SETUP_CHOICE" in
                 2)
                     if [ -t 0 ]; then
-                        "$VENV_DIR/bin/sheriff-ctl" update || true
+                        "$VENV_DIR/bin/sheriff-ctl" update
                     else
-                        "$VENV_DIR/bin/sheriff-ctl" update < /dev/tty > /dev/tty 2>&1 || true
+                        "$VENV_DIR/bin/sheriff-ctl" update < /dev/tty > /dev/tty 2>&1
                     fi
                     skip_onboarding=1
                     ;;

@@ -210,7 +210,9 @@ class WorkerRuntime:
                 f"The user sent another message over {session_handle} session. "
                 "Please do what the user says and write a reply to the user via the conversation files."
             )
-        return f"{prefix}\n\nUser message:\n{text}"
+        # Keep the terminal payload single-line so Codex treats Enter as submit
+        # instead of leaving the text in a multiline editor state.
+        return f"{prefix} User message JSON: {json.dumps(text, ensure_ascii=False)}"
 
     def _normalized_codex_text(self, text: str) -> str:
         return self._visible_codex_text(text).lower()
@@ -335,8 +337,7 @@ class WorkerRuntime:
             self._debug_log("codex_stdin_unavailable", session=session_handle)
             return
         prompt_text = self._build_codex_stdin_prompt(session_handle, text, first_message=first_message)
-        # Multiline prompt_toolkit fields typically require Escape + Enter (Alt+Enter) to submit in a PTY.
-        payload = (prompt_text.rstrip("\n") + "\n\x1b\r").encode("utf-8")
+        payload = (prompt_text.rstrip("\n") + "\r").encode("utf-8")
         try:
             await self._write_codex_bytes(payload)
             self._debug_log("codex_stdin_write", session=session_handle, bytes=len(payload), text=prompt_text)

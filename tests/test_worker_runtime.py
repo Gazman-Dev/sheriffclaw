@@ -174,7 +174,9 @@ async def test_worker_writes_message_file_and_forwards_turn_to_codex_stdin(monke
     assert "check how we manage messages." in stdin_payload.lower()
     assert "the user just sent a message over s4 session." in stdin_payload.lower()
     assert "please do what the user says and write a reply to the user via the conversation files." in stdin_payload.lower()
-    assert stdin_payload.endswith("User message:\nhello stdin path\n\x1b\r")
+    assert 'user message json: "hello stdin path"' in stdin_payload.lower()
+    assert stdin_payload.endswith("\r")
+    assert "\x1b" not in stdin_payload
     assert fake_proc.stdin.drains >= 1
     finals =[p for e, p in events if e == "assistant.final"]
     assert finals[-1]["text"] == "Agent background process response timed out."
@@ -207,7 +209,9 @@ async def test_worker_followup_turn_uses_followup_stdin_prompt(monkeypatch, tmp_
     stdin_payload = b"".join(fake_proc.stdin.writes).decode("utf-8")
     assert "the user sent another message over s4b session." in stdin_payload.lower()
     assert "please do what the user says and write a reply to the user via the conversation files." in stdin_payload.lower()
-    assert stdin_payload.endswith("User message:\nsecond\n\x1b\r")
+    assert 'user message json: "second"' in stdin_payload.lower()
+    assert stdin_payload.endswith("\r")
+    assert "\x1b" not in stdin_payload
 
 
 def test_extract_menu_options_builds_option_payloads(tmp_path, monkeypatch):

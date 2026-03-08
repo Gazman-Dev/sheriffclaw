@@ -7,6 +7,7 @@ import asyncio
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from services.sheriff_ctl.service_runner import ALL, cmd_start, cmd_stop, _stop_service

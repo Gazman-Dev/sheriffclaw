@@ -4,18 +4,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import getpass
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 from services.sheriff_ctl.service_runner import ALL, cmd_start, cmd_stop, _stop_service
 from services.sheriff_ctl.utils import (
     _clear_telegram_unlock_channel,
     _notify_sheriff_channel,
-    _verify_master_password_async,
 )
 from shared.paths import gw_root
 from shared.proc_rpc import ProcClient
@@ -72,15 +69,6 @@ def cmd_update(args):
         updater = ProcClient("sheriff-updater")
         try:
             _, plan_res = await updater.request("updater.plan", {"force": bool(getattr(args, "force", False))})
-            plan = plan_res.get("result", {})
-            if plan.get("needs_master_password"):
-                nonlocal mp
-                if not mp:
-                    if not sys.stdin.isatty():
-                        return False, "Master password required for secrets update. Pass --master-password in non-interactive mode.", True
-                    mp = getpass.getpass("Master password for update (secrets version increased): ")
-                if not await _verify_master_password_async(mp):
-                    return False, "Invalid master password. Update cancelled.", True
 
             await gw.request("gateway.queue.control", {"pause": True, "reason": "update"})
             try:

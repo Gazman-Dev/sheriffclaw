@@ -27,7 +27,7 @@ class SheriffUpdaterService:
             "applied_versions": applied_versions,
             "changes": changes,
             "should_update": True,
-            "needs_master_password": bool(changes.get("secrets", {}).get("increased")),
+            "needs_master_password": False,
             "force": force,
         }
 
@@ -54,11 +54,6 @@ class SheriffUpdaterService:
                 }
 
         plan = self._build_plan(force=force)
-
-        if plan["needs_master_password"]:
-            master_password = payload.get("master_password") or ""
-            if not master_password:
-                return {"ok": False, "error": "master_password_required", "plan": plan}
 
         # Force reinstall so removed/renamed package files from previous versions are cleaned up.
         pip_cmd =[

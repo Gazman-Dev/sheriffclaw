@@ -195,6 +195,61 @@ async def test_codex_session_send_surfaces_auth_status_when_payload_is_empty(mon
 
 
 @pytest.mark.asyncio
+async def test_codex_session_send_retries_once_after_auth_becomes_available(monkeypatch):
+    manager = FakeSessionManager()
+    calls = {"n": 0, "stopped": 0}
+
+    async def fake_send_message(session_key: str, prompt: str, *, model: str | None = None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {
+                "session": {"session_key": session_key, "thread_id": "thread-1", "status": "active"},
+                "thread_id": "thread-1",
+                "result": {
+                    "content": [{"type": "text", "text": ""}],
+                    "structuredContent": {"threadId": "thread-1", "content": ""},
+                },
+            }
+        return {
+            "session": {"session_key": session_key, "thread_id": "thread-2", "status": "active"},
+            "thread_id": "thread-2",
+            "result": {
+                "content": [{"type": "text", "text": "hello after auth"}],
+                "structuredContent": {"threadId": "thread-2", "content": "hello after auth"},
+            },
+        }
+
+    class FakeRuntimeCtl:
+        async def stop(self):
+            calls["stopped"] += 1
+
+    manager.send_message = fake_send_message
+    manager.runtime = FakeRuntimeCtl()
+    monkeypatch.setattr("services.ai_worker.service.finalize_codex_device_auth", lambda: {
+        "available": True,
+        "logged_in": True,
+        "detail": "Logged in using ChatGPT",
+    })
+    svc = AIWorkerService(runtime=FakeRuntime(), session_manager=manager)
+    events = []
+
+    async def emit(event, payload):
+        events.append((event, payload))
+
+    result = await svc.codex_session_send(
+        {"session_key": "private_main", "prompt": "hello", "model_ref": "gpt-5-codex"},
+        emit,
+        "req-2e",
+    )
+
+    assert calls["n"] == 2
+    assert calls["stopped"] == 1
+    assert ("invalidate", "private_main", "auth_refresh") in manager.calls
+    assert ("assistant.final", {"text": "hello after auth"}) in events
+    assert result["thread_id"] == "thread-2"
+
+
+@pytest.mark.asyncio
 async def test_codex_session_invalidate_uses_reason():
     manager = FakeSessionManager()
     svc = AIWorkerService(runtime=FakeRuntime(), session_manager=manager)

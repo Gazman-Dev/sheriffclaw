@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from shared.codex_auth import codex_auth_help_text, codex_auth_status
+from shared.codex_auth import (
+    codex_auth_help_text,
+    codex_auth_status,
+    codex_device_auth_status,
+    finalize_codex_device_auth,
+    start_codex_device_auth,
+)
 from shared.proc_rpc import ProcClient
 
 
@@ -96,20 +102,24 @@ class SheriffCliGateService:
             return {"kind": "sheriff", "message": "Unlock failed."}
 
         if cmd == "auth-status":
-            status = codex_auth_status()
+            status = finalize_codex_device_auth()
             if not status["available"]:
                 return {"kind": "sheriff", "message": str(status["detail"])}
             if status["logged_in"]:
                 return {"kind": "sheriff", "message": f"Codex auth is active.\n{status['detail']}"}
+            device = codex_device_auth_status()
+            if device["active"] and device["detail"]:
+                return {"kind": "sheriff", "message": str(device["detail"])}
             return {
                 "kind": "sheriff",
                 "message": f"{status['detail']}\n\n{codex_auth_help_text(interactive_login_supported=False)}",
             }
 
         if cmd == "auth-login":
+            started = start_codex_device_auth()
             return {
                 "kind": "sheriff",
-                "message": codex_auth_help_text(interactive_login_supported=False),
+                "message": str(started["message"]),
             }
 
         if cmd == "secret":

@@ -66,7 +66,7 @@ class SheriffGatewayService:
 
         session = self._session_key(payload)
         if session not in self.sessions:
-            await self.ai.request("codex.session.ensure", {"session_key": session, "hydrate": True})
+            await self.ai.request("codex.session.ensure", {"session_key": session, "hydrate": False})
             self.sessions.add(session)
 
         await self.ai.request(

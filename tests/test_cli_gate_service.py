@@ -86,7 +86,7 @@ async def test_auth_status_command_when_logged_in(monkeypatch):
     svc = SheriffCliGateService()
     monkeypatch.setattr(
         cli_gate_service,
-        "codex_auth_status",
+        "finalize_codex_device_auth",
         lambda: {"available": True, "logged_in": True, "detail": "Logged in."},
     )
 
@@ -101,8 +101,13 @@ async def test_auth_status_command_when_logged_out(monkeypatch):
     svc = SheriffCliGateService()
     monkeypatch.setattr(
         cli_gate_service,
-        "codex_auth_status",
+        "finalize_codex_device_auth",
         lambda: {"available": True, "logged_in": False, "detail": "Not logged in."},
+    )
+    monkeypatch.setattr(
+        cli_gate_service,
+        "codex_device_auth_status",
+        lambda: {"active": False, "detail": ""},
     )
     monkeypatch.setattr(
         cli_gate_service,
@@ -122,11 +127,11 @@ async def test_auth_login_command_returns_instruction(monkeypatch):
     svc = SheriffCliGateService()
     monkeypatch.setattr(
         cli_gate_service,
-        "codex_auth_help_text",
-        lambda **_: "Run local login.",
+        "start_codex_device_auth",
+        lambda: {"ok": True, "started": True, "message": "Open https://example.test and enter code TEST-123"},
     )
 
     res = await svc.handle_message({"text": "/auth-login"}, None, "r1")
 
     assert res["kind"] == "sheriff"
-    assert res["message"] == "Run local login."
+    assert "https://example.test" in res["message"]

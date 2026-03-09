@@ -5,12 +5,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import subprocess
 import time
 
 from services.sheriff_ctl.onboard import cmd_onboard
 from services.sheriff_ctl.utils import _is_onboarded, _wait_extra_or_esc_until
-from shared.codex_auth import codex_auth_env, codex_auth_status
 from shared.proc_rpc import ProcClient
 
 
@@ -75,28 +73,6 @@ def cmd_chat(args):
         print(f"[{kind}] {msg}")
         return time.time()
 
-    async def _run_local_auth_login() -> float:
-        status = codex_auth_status()
-        if not status["available"]:
-            print(f"[SHERIFF] {status['detail']}")
-            return time.time()
-        if status["logged_in"]:
-            print("[SHERIFF] Codex auth is already active for this Sheriff repo.")
-            return time.time()
-
-        print("[SHERIFF] Starting local Codex login for this Sheriff repo...")
-        login = await asyncio.to_thread(subprocess.run, ["codex", "login"], env=codex_auth_env(), check=False)
-        if login.returncode != 0:
-            print("[SHERIFF] Codex login did not complete successfully.")
-            return time.time()
-
-        refreshed = codex_auth_status()
-        if refreshed["logged_in"]:
-            print("[SHERIFF] Codex auth is now active.")
-        else:
-            print(f"[SHERIFF] Login finished but auth is still not active.\n{refreshed['detail']}")
-        return time.time()
-
     async def _run():
         nonlocal chat_master_password
         gateway = ProcClient("sheriff-gateway")
@@ -104,9 +80,7 @@ def cmd_chat(args):
 
         one_shot = getattr(args, "one_shot", None)
         if one_shot is not None:
-            if one_shot.lower() == "/auth-login":
-                last_activity = await _run_local_auth_login()
-            elif one_shot.startswith("/"):
+            if one_shot.startswith("/"):
                 last_activity = await _send_sheriff(cli_gate, one_shot)
             else:
                 last_activity = await _send_bot(gateway, one_shot)
@@ -133,10 +107,7 @@ def cmd_chat(args):
             if text.startswith("/"):
                 if text.lower().startswith("/unlock "):
                     chat_master_password = text.split(" ", 1)[1].strip() or None
-                if text.lower() == "/auth-login":
-                    await _run_local_auth_login()
-                else:
-                    await _send_sheriff(cli_gate, text)
+                await _send_sheriff(cli_gate, text)
             else:
                 await _send_bot(gateway, text)
 

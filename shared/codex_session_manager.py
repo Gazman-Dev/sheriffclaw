@@ -49,7 +49,8 @@ class CodexSessionManager:
         return record
 
     async def send_message(self, session_key: str, prompt: str, *, model: str | None = None) -> dict[str, Any]:
-        record = await self.ensure_session(session_key)
+        record = self.registry.ensure_session(session_key)
+        await self.runtime.ensure_started()
         thread_id = str(record.get("thread_id") or "")
         if thread_id:
             result = await self.runtime.continue_conversation(prompt, thread_id)

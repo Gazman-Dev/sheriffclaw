@@ -42,6 +42,7 @@ class CodexMCPClient:
             return
         env = os.environ.copy()
         env.update(self.env)
+        env.setdefault("CODEX_HOME", str(self.cwd))
         env["PATH"] = augment_path(env.get("PATH"))
         cmd = build_mcp_server_command(self.repo_root)
         self.proc = await asyncio.create_subprocess_exec(

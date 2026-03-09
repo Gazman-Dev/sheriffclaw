@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from shared.codex_auth import codex_auth_status
+from shared.codex_auth import codex_auth_status, finalize_codex_device_auth
 from shared.codex_output import extract_text_content
 from shared.codex_session_manager import CodexSessionManager
 from shared.oplog import get_op_logger
@@ -64,7 +64,7 @@ class AIWorkerService:
             }
         content = extract_text_content(tool_result)
         if not content:
-            auth = codex_auth_status()
+            auth = finalize_codex_device_auth()
             self.log.warning(
                 "codex_session_send_empty session=%s model=%s auth=%s payload=%s",
                 session_key,
@@ -80,6 +80,20 @@ class AIWorkerService:
                     "thread_id": result.get("thread_id"),
                     "result": tool_result,
                 }
+            if auth.get("logged_in"):
+                await self.session_manager.runtime.stop()
+                await self.session_manager.invalidate_session(session_key, reason="auth_refresh")
+                result = await self.session_manager.send_message(session_key, prompt, model=model)
+                tool_result = result.get("result") or {}
+                if isinstance(tool_result, dict) and tool_result.get("isError"):
+                    return {
+                        "ok": False,
+                        "error": extract_text_content(tool_result) or "codex_tool_error",
+                        "session": result.get("session"),
+                        "thread_id": result.get("thread_id"),
+                        "result": tool_result,
+                    }
+                content = extract_text_content(tool_result)
         if content:
             await emit_event("assistant.final", {"text": str(content)})
         return result

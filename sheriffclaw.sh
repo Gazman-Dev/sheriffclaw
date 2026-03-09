@@ -82,6 +82,14 @@ lower() {
     printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
 
+run_as_invoking_user() {
+    if [ "$(id -u)" -eq 0 ] && [ "$INVOKING_USER" != "root" ]; then
+        sudo -u "$INVOKING_USER" env HOME="$INVOKING_HOME" SHERIFFCLAW_ROOT="$INSTALL_DIR" "$@"
+        return $?
+    fi
+    HOME="$INVOKING_HOME" SHERIFFCLAW_ROOT="$INSTALL_DIR" "$@"
+}
+
 is_linux() { [ "$(uname -s)" = "Linux" ]; }
 is_macos() { [ "$(uname -s)" = "Darwin" ]; }
 
@@ -455,9 +463,9 @@ setup_ai_worker_user() {
     fi
 
     if [ "$allow_net" = "0" ] || [ "$allow_net" = "false" ] || [ "$allow_net" = "no" ]; then
-        "$VENV_DIR/bin/sheriff-ctl" sandbox --user "$user" --deny-net
+        run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" sandbox --user "$user" --deny-net
     else
-        "$VENV_DIR/bin/sheriff-ctl" sandbox --user "$user" --allow-net
+        run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" sandbox --user "$user" --allow-net
     fi
 
     repair_ai_worker_shared_paths "$INVOKING_USER" "$group"
@@ -542,6 +550,13 @@ setup_venv_and_install() {
     mkdir -p "$PIP_CACHE_DIR"
     python -m pip install --upgrade pip --quiet
     python -m pip install "$SOURCE_DIR" --quiet
+}
+
+repair_install_dir_ownership() {
+    local sudo_cmd=""
+    [ "$(id -u)" -ne 0 ] && sudo_cmd="sudo"
+    $sudo_cmd mkdir -p "$INSTALL_DIR"
+    $sudo_cmd chown -R "$INVOKING_USER" "$INSTALL_DIR"
 }
 
 sync_agent_workspace_template() {
@@ -644,25 +659,25 @@ run_onboarding_if_needed() {
             case "$SETUP_CHOICE" in
                 2)
                     if [ -t 0 ]; then
-                        "$VENV_DIR/bin/sheriff-ctl" update
+                        run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" update
                     else
-                        "$VENV_DIR/bin/sheriff-ctl" update < /dev/tty > /dev/tty 2>&1
+                        run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" update < /dev/tty > /dev/tty 2>&1
                     fi
                     skip_onboarding=1
                     ;;
                 3)
                     if [ -t 0 ]; then
-                        "$VENV_DIR/bin/sheriff-ctl" factory-reset || true
+                        run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" factory-reset || true
                     else
-                        "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || true
+                        run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || true
                     fi
                     ;;
                 4)
                     ENABLE_DEBUG_MODE=1
                     if [ -t 0 ]; then
-                        "$VENV_DIR/bin/sheriff-ctl" factory-reset || true
+                        run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" factory-reset || true
                     else
-                        "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || true
+                        run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || true
                     fi
                     ;;
                 1|*)
@@ -686,22 +701,22 @@ run_onboarding_if_needed() {
         fi
 
         if [ -t 0 ]; then
-            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding ${KEEP_FLAG:+$KEEP_FLAG} ${DEBUG_MODE_FLAG:+$DEBUG_MODE_FLAG}; then
+            if ! run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" onboarding ${KEEP_FLAG:+$KEEP_FLAG} ${DEBUG_MODE_FLAG:+$DEBUG_MODE_FLAG}; then
                 echo -e "${YELLOW}Onboarding exited.${NC}"
                 read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI
                 RI_LC="$(lower "$RI")"
                 if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
-                    "$VENV_DIR/bin/sheriff-ctl" factory-reset
+                    run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" factory-reset
                 fi
                 return 1
             fi
         else
-            if ! "$VENV_DIR/bin/sheriff-ctl" onboarding ${KEEP_FLAG:+$KEEP_FLAG} ${DEBUG_MODE_FLAG:+$DEBUG_MODE_FLAG} < /dev/tty > /dev/tty 2>&1; then
+            if ! run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" onboarding ${KEEP_FLAG:+$KEEP_FLAG} ${DEBUG_MODE_FLAG:+$DEBUG_MODE_FLAG} < /dev/tty > /dev/tty 2>&1; then
                 echo -e "${YELLOW}Onboarding exited.${NC}"
                 read -r -p "Do factory reset now? (wipe all data) [y/N]: " RI < /dev/tty
                 RI_LC="$(lower "$RI")"
                 if [[ "$RI_LC" == "y" || "$RI_LC" == "yes" ]]; then
-                    "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || "$VENV_DIR/bin/sheriff-ctl" factory-reset
+                    run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" factory-reset < /dev/tty > /dev/tty 2>&1 || run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" factory-reset
                 fi
                 return 1
             fi
@@ -711,7 +726,7 @@ run_onboarding_if_needed() {
 
     if [ "$existing_install" = "1" ] && [ "${SHERIFF_FORCE_ONBOARDING:-0}" != "1" ]; then
         log "Existing install detected in non-interactive mode; running update (no reset)."
-        "$VENV_DIR/bin/sheriff" update --no-pull || true
+        run_as_invoking_user "$VENV_DIR/bin/sheriff" update --no-pull || true
         return 0
     fi
 
@@ -731,7 +746,7 @@ run_onboarding_if_needed() {
         DEBUG_FLAG="--debug-mode"
     fi
 
-    "$VENV_DIR/bin/sheriff-ctl" onboarding \
+    run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" onboarding \
         --master-password "$MP" \
         --llm-provider "$LLM_PROVIDER" \
         --llm-api-key "$LLM_API_KEY" \
@@ -756,6 +771,7 @@ sync_source
 print_install_version
 sync_agent_workspace_template
 setup_venv_and_install
+repair_install_dir_ownership
 setup_alias
 setup_ai_worker_user
 

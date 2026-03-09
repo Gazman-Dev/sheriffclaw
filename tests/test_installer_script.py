@@ -12,6 +12,8 @@ def test_installer_sets_up_macos_codex_mcp_host_launcher():
     assert 'Example: curl -fsSL <installer-url> | sudo bash' in text
     assert 'INSTALL_DIR="${SHERIFF_INSTALL_DIR:-$INVOKING_HOME/.sheriffclaw}"' in text
     assert 'export HOME="$INVOKING_HOME"' in text
+    assert "run_as_invoking_user()" in text
+    assert 'sudo -u "$INVOKING_USER" env HOME="$INVOKING_HOME" SHERIFFCLAW_ROOT="$INSTALL_DIR" "$@"' in text
     assert "trap 'reset_terminal_state' EXIT" in text
     assert 'stty sane < /dev/tty 2>/dev/null || true' in text
     assert "printf '\\033[0m' > /dev/tty 2>/dev/null || true" in text
@@ -22,6 +24,8 @@ def test_installer_sets_up_macos_codex_mcp_host_launcher():
     assert 'export PIP_CACHE_DIR="$INSTALL_DIR/.cache/pip"' in text
     assert "print_install_version()" in text
     assert 'installer version: sheriff=${sheriff_version} commit=${source_commit}' in text
+    assert "repair_install_dir_ownership()" in text
+    assert 'chown -R "$INVOKING_USER" "$INSTALL_DIR"' in text
     assert "install_macos_ai_worker_launcher" in text
     assert "/usr/local/bin/sheriff-codex-mcp-host-launch" in text
     assert 'sudoers_file="$sudoers_dir/sheriffclaw-codex-mcp-host"' in text
@@ -32,6 +36,10 @@ def test_installer_sets_up_macos_codex_mcp_host_launcher():
     assert 'case "\\${1:-run}" in' in text
     assert 'stop_worker' in text
     assert "repair_ai_worker_shared_paths" in text
+    assert 'run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" sandbox --user "$user" --allow-net' in text
+    assert 'run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" onboarding' in text
+    assert 'run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" update' in text
+    assert 'run_as_invoking_user "$VENV_DIR/bin/sheriff-ctl" factory-reset' in text
     assert '"$INSTALL_DIR/llm"' in text
     assert '"$INSTALL_DIR/agents/codex"' in text
     assert '"$INSTALL_DIR/agent_repo"' in text

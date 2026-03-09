@@ -15,8 +15,10 @@ def test_installer_sets_up_macos_codex_mcp_host_launcher():
     assert "trap 'reset_terminal_state' EXIT" in text
     assert 'stty sane < /dev/tty 2>/dev/null || true' in text
     assert "printf '\\033[0m' > /dev/tty 2>/dev/null || true" in text
-    assert 'log "Starting services..."' in text
-    assert '"$VENV_DIR/bin/sheriff" start' in text
+    assert 'Select [1/2/3/4]: ' in text
+    assert 'Please enter 1, 2, 3, or 4.' in text
+    assert 'log "Starting services..."' not in text
+    assert '"$VENV_DIR/bin/sheriff" start' not in text
     assert 'export PIP_CACHE_DIR="$INSTALL_DIR/.cache/pip"' in text
     assert "print_install_version()" in text
     assert 'installer version: sheriff=${sheriff_version} commit=${source_commit}' in text

@@ -622,15 +622,24 @@ run_onboarding_if_needed() {
             echo -e "${YELLOW}Existing installation detected.${NC}"
             echo "Choose action:"
             echo "  1) Start onboarding"
-            echo "  2) Update existing install (default)"
+            echo "  2) Update existing install"
             echo "  3) Factory reset (wipe ALL Sheriff/Agent data), then onboarding"
             echo "  4) Factory reset + onboarding in DEBUG mode"
-            if [ -t 0 ]; then
-                read -r -p "Select [1/2/3/4] (default 2): " SETUP_CHOICE
-            else
-                read -r -p "Select [1/2/3/4] (default 2): " SETUP_CHOICE < /dev/tty
-            fi
-            SETUP_CHOICE="${SETUP_CHOICE:-2}"
+            while true; do
+                if [ -t 0 ]; then
+                    read -r -p "Select [1/2/3/4]: " SETUP_CHOICE
+                else
+                    read -r -p "Select [1/2/3/4]: " SETUP_CHOICE < /dev/tty
+                fi
+                case "$SETUP_CHOICE" in
+                    1|2|3|4)
+                        break
+                        ;;
+                    *)
+                        echo "Please enter 1, 2, 3, or 4."
+                        ;;
+                esac
+            done
 
             case "$SETUP_CHOICE" in
                 2)
@@ -751,15 +760,6 @@ setup_alias
 setup_ai_worker_user
 
 run_onboarding_if_needed
-
-if [ "${SHERIFF_START_DAEMONS:-1}" = "1" ]; then
-    log "Starting services..."
-    reset_terminal_state
-    "$VENV_DIR/bin/sheriff" start </dev/null >/dev/null 2>&1 || warn "Service start returned non-zero."
-    sleep 2
-else
-    log "Skipping daemon start (SHERIFF_START_DAEMONS=0)."
-fi
 
 echo ""
 echo -e "${GREEN}=========================================${NC}"

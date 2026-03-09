@@ -750,15 +750,16 @@ setup_venv_and_install
 setup_alias
 setup_ai_worker_user
 
+run_onboarding_if_needed
+
 if [ "${SHERIFF_START_DAEMONS:-1}" = "1" ]; then
     log "Starting services..."
-    "$VENV_DIR/bin/sheriff" start
+    reset_terminal_state
+    "$VENV_DIR/bin/sheriff" start </dev/null >/dev/null 2>&1 || warn "Service start returned non-zero."
     sleep 2
 else
     log "Skipping daemon start (SHERIFF_START_DAEMONS=0)."
 fi
-
-run_onboarding_if_needed
 
 echo ""
 echo -e "${GREEN}=========================================${NC}"

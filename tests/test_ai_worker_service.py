@@ -35,8 +35,8 @@ class FakeSessionManager:
         self.calls.append(("ensure", session_key, hydrate))
         return {"session_key": session_key, "thread_id": "thread-1", "status": "active"}
 
-    async def send_message(self, session_key: str, prompt: str):
-        self.calls.append(("send", session_key, prompt))
+    async def send_message(self, session_key: str, prompt: str, *, model: str | None = None):
+        self.calls.append(("send", session_key, prompt, model))
         return {
             "session": {"session_key": session_key, "thread_id": "thread-1", "status": "active"},
             "thread_id": "thread-1",
@@ -100,7 +100,7 @@ async def test_codex_session_send_emits_assistant_final():
 
     assert result["thread_id"] == "thread-1"
     assert ("assistant.final", {"text": "reply:hello"}) in events
-    assert manager.calls == [("send", "private_main", "hello")]
+    assert manager.calls == [("send", "private_main", "hello", None)]
 
 
 @pytest.mark.asyncio
@@ -108,8 +108,8 @@ async def test_codex_session_send_emits_assistant_final_from_content_list():
     manager = FakeSessionManager()
     manager.send_message = lambda session_key, prompt: None
 
-    async def fake_send_message(session_key: str, prompt: str):
-        manager.calls.append(("send", session_key, prompt))
+    async def fake_send_message(session_key: str, prompt: str, *, model: str | None = None):
+        manager.calls.append(("send", session_key, prompt, model))
         return {
             "session": {"session_key": session_key, "thread_id": "thread-1", "status": "active"},
             "thread_id": "thread-1",
@@ -129,6 +129,36 @@ async def test_codex_session_send_emits_assistant_final_from_content_list():
     await svc.codex_session_send({"session_key": "private_main", "prompt": "hello"}, emit, "req-2b")
 
     assert ("assistant.final", {"text": "reply-from-content"}) in events
+    assert manager.calls == [("send", "private_main", "hello", None)]
+
+
+@pytest.mark.asyncio
+async def test_codex_session_send_surfaces_tool_error():
+    manager = FakeSessionManager()
+
+    async def fake_send_message(session_key: str, prompt: str, *, model: str | None = None):
+        manager.calls.append(("send", session_key, prompt, model))
+        return {
+            "session": {"session_key": session_key, "thread_id": "thread-1", "status": "active"},
+            "thread_id": "thread-1",
+            "result": {
+                "content": [{"type": "text", "text": "unexpected status 401 Unauthorized"}],
+                "structuredContent": {"threadId": "thread-1", "content": "unexpected status 401 Unauthorized"},
+                "isError": True,
+            },
+        }
+
+    manager.send_message = fake_send_message
+    svc = AIWorkerService(runtime=FakeRuntime(), session_manager=manager)
+
+    result = await svc.codex_session_send(
+        {"session_key": "private_main", "prompt": "hello", "model_ref": "gpt-5-codex"},
+        lambda e, p: None,
+        "req-2c",
+    )
+
+    assert result["ok"] is False
+    assert "401 Unauthorized" in result["error"]
 
 
 @pytest.mark.asyncio

@@ -328,3 +328,88 @@ async def test_gateway_maps_codex_auth_error_to_auth_message(monkeypatch):
 
     assert out["status"] == "auth_required"
     assert ("assistant.final", {"text": "Run /auth-login."}) in events
+
+
+@pytest.mark.asyncio
+async def test_gateway_sets_default_model_for_chatgpt_provider():
+    svc = SheriffGatewayService()
+    svc.ai = MockProcClient("codex-mcp-host")
+
+    async def ai_stream():
+        if False:
+            yield {}
+
+    async def mock_ai_request(op, payload, stream_events=False):
+        if op == "codex.session.ensure":
+            return [], {"result": {"session": {"session_key": payload["session_key"], "thread_id": "thread-1"}}}
+        if op == "codex.memory.inbox.append":
+            return [], {"result": {"entry": payload}}
+        if op == "codex.session.send":
+            assert payload["model_ref"] == "gpt-5-codex"
+            return ai_stream(), {"result": {"ok": True, "result": {"content": [{"type": "text", "text": "ok"}]}}}
+        return [], {"result": {}}
+
+    async def mock_secrets_request(op, payload, stream_events=False):
+        if op == "secrets.is_unlocked":
+            return [], {"ok": True, "result": {"unlocked": True}}
+        if op == "secrets.get_llm_provider":
+            return [], {"ok": True, "result": {"provider": "openai-codex-chatgpt"}}
+        return [], {"ok": True, "result": {}}
+
+    svc.ai.request = AsyncMock(side_effect=mock_ai_request)
+    svc.secrets.request = AsyncMock(side_effect=mock_secrets_request)
+
+    events = []
+
+    async def emit(e, p):
+        events.append((e, p))
+
+    out = await svc.handle_user_message({"channel": "cli", "principal_external_id": "u1", "text": "hello"}, emit, "req-model")
+
+    assert out["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_gateway_uses_final_rpc_payload_text_when_no_events():
+    svc = SheriffGatewayService()
+    svc.ai = MockProcClient("codex-mcp-host")
+
+    async def ai_stream():
+        if False:
+            yield {}
+
+    async def mock_ai_request(op, payload, stream_events=False):
+        if op == "codex.session.ensure":
+            return [], {"result": {"session": {"session_key": payload["session_key"], "thread_id": "thread-1"}}}
+        if op == "codex.memory.inbox.append":
+            return [], {"result": {"entry": payload}}
+        if op == "codex.session.send":
+            return ai_stream(), {
+                "result": {
+                    "ok": True,
+                    "result": {
+                        "structuredContent": {"threadId": "thread-1", "content": ""},
+                        "content": [{"type": "text", "text": "hello from final payload"}],
+                    },
+                }
+            }
+        return [], {"result": {}}
+
+    svc.ai.request = AsyncMock(side_effect=mock_ai_request)
+    svc.secrets.request = AsyncMock(
+        return_value=([], {"ok": True, "result": {"unlocked": True, "provider": "stub", "api_key": ""}})
+    )
+
+    events = []
+
+    async def emit(e, p):
+        events.append((e, p))
+
+    out = await svc.handle_user_message(
+        {"channel": "cli", "principal_external_id": "u1", "text": "hello"},
+        emit,
+        "req-final-text",
+    )
+
+    assert out["status"] == "done"
+    assert ("assistant.final", {"text": "hello from final payload"}) in events

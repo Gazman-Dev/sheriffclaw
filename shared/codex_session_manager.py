@@ -48,13 +48,16 @@ class CodexSessionManager:
             record = self.registry.bind_thread(session_key, thread_id)
         return record
 
-    async def send_message(self, session_key: str, prompt: str) -> dict[str, Any]:
+    async def send_message(self, session_key: str, prompt: str, *, model: str | None = None) -> dict[str, Any]:
         record = await self.ensure_session(session_key)
         thread_id = str(record.get("thread_id") or "")
         if thread_id:
             result = await self.runtime.continue_conversation(prompt, thread_id)
         else:
-            result = await self.runtime.start_conversation(prompt, cwd=str(agent_repo_root()), sandbox="workspace-write")
+            kwargs: dict[str, Any] = {"cwd": str(agent_repo_root()), "sandbox": "workspace-write"}
+            if model:
+                kwargs["model"] = model
+            result = await self.runtime.start_conversation(prompt, **kwargs)
             new_thread_id = _extract_thread_id(result)
             if new_thread_id:
                 record = self.registry.bind_thread(session_key, new_thread_id)

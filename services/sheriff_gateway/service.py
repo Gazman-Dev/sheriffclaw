@@ -5,6 +5,7 @@ import os
 import uuid
 from collections import defaultdict, deque
 from shared.codex_auth import codex_auth_help_text, is_codex_auth_error
+from shared.codex_output import extract_text_content
 from shared.identity import principal_id_for_channel
 from shared.oplog import get_op_logger
 from shared.paths import gw_root
@@ -120,6 +121,8 @@ class SheriffGatewayService:
                 if provider_name == "openai-codex-chatgpt":
                     # Codex subscription login is managed by the local Codex repo state.
                     api_key = ""
+                    if not payload.get("model_ref"):
+                        payload["model_ref"] = "gpt-5-codex"
                 elif provider_name == "openai-codex":
                     _, key = await self.secrets.request("secrets.get_llm_api_key", {})
                     api_key = key.get("result", {}).get("api_key") or ""
@@ -162,17 +165,24 @@ class SheriffGatewayService:
             await emit_event(ev, frame.get("payload", {}))
 
         final_res = await final if inspect.isawaitable(final) else final
+        if isinstance(final_res, dict) and isinstance(final_res.get("result"), dict):
+            final_payload = final_res.get("result", {})
+        elif isinstance(final_res, dict):
+            final_payload = final_res
+        else:
+            final_payload = {}
+        final_tool_result = final_payload.get("result", {}) if isinstance(final_payload, dict) else {}
         self.log.info(
             "ai_stream session=%s events=%s saw_final=%s deltas=%s final_ok=%s final_err=%s",
             session,
             event_counts,
             saw_final,
             len(delta_parts),
-            (final_res or {}).get("ok") if isinstance(final_res, dict) else None,
-            (final_res or {}).get("error") if isinstance(final_res, dict) else None,
+            final_payload.get("ok") if isinstance(final_payload, dict) else None,
+            final_payload.get("error") if isinstance(final_payload, dict) else None,
         )
-        if isinstance(final_res, dict) and final_res.get("ok") is False:
-            err = final_res.get("error") or "unknown_error"
+        if isinstance(final_payload, dict) and final_payload.get("ok") is False:
+            err = final_payload.get("error") or "unknown_error"
             if provider_name == "openai-codex-chatgpt" and is_codex_auth_error(str(err)):
                 msg = codex_auth_help_text(interactive_login_supported=payload.get("channel", "cli") == "cli")
                 status = "auth_required"
@@ -185,7 +195,10 @@ class SheriffGatewayService:
             return {"status": status, "session_handle": session}
 
         if not saw_final:
-            if delta_parts:
+            final_text = extract_text_content(final_tool_result) if isinstance(final_tool_result, dict) else ""
+            if final_text:
+                msg = final_text
+            elif delta_parts:
                 msg = "".join(delta_parts).strip() or "AI produced partial output only."
             else:
                 msg = "AI produced no final response."

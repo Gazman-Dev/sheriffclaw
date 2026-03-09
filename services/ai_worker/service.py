@@ -40,8 +40,18 @@ class AIWorkerService:
             raise ValueError("session_key required")
         if not prompt:
             raise ValueError("prompt required")
-        result = await self.session_manager.send_message(session_key, prompt)
-        content = extract_text_content(result.get("result") or {})
+        model = str(payload.get("model_ref") or "").strip() or None
+        result = await self.session_manager.send_message(session_key, prompt, model=model)
+        tool_result = result.get("result") or {}
+        if isinstance(tool_result, dict) and tool_result.get("isError"):
+            return {
+                "ok": False,
+                "error": extract_text_content(tool_result) or "codex_tool_error",
+                "session": result.get("session"),
+                "thread_id": result.get("thread_id"),
+                "result": tool_result,
+            }
+        content = extract_text_content(tool_result)
         if content:
             await emit_event("assistant.final", {"text": str(content)})
         return result

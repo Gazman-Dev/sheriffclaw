@@ -401,6 +401,7 @@ repair_ai_worker_shared_paths() {
     [ "$(id -u)" -ne 0 ] && sudo_cmd="sudo"
 
     local paths=(
+        "$INSTALL_DIR/gw"
         "$INSTALL_DIR/llm"
         "$INSTALL_DIR/agents/codex"
         "$INSTALL_DIR/agent_repo"

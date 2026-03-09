@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from shared.codex_auth import codex_auth_status
 from shared.codex_output import extract_text_content
 from shared.codex_session_manager import CodexSessionManager
 from shared.oplog import get_op_logger
@@ -12,7 +13,7 @@ class AIWorkerService:
     def __init__(self, *, runtime: WorkerRuntime | None = None, session_manager: CodexSessionManager | None = None) -> None:
         self.runtime = runtime or WorkerRuntime()
         self.session_manager = session_manager or CodexSessionManager()
-        self.log = get_op_logger("ai_worker")
+        self.log = get_op_logger("ai_worker", island="llm")
 
     async def skills_list(self, payload, emit_event, req_id):
         return {"skills": await self.runtime.list_skills()}
@@ -63,12 +64,22 @@ class AIWorkerService:
             }
         content = extract_text_content(tool_result)
         if not content:
+            auth = codex_auth_status()
             self.log.warning(
-                "codex_session_send_empty session=%s model=%s payload=%s",
+                "codex_session_send_empty session=%s model=%s auth=%s payload=%s",
                 session_key,
                 model,
+                json.dumps(auth, ensure_ascii=False, default=str)[:1000],
                 json.dumps(tool_result, ensure_ascii=False, default=str)[:4000],
             )
+            if auth.get("available") and not auth.get("logged_in"):
+                return {
+                    "ok": False,
+                    "error": str(auth.get("detail") or "Not logged in"),
+                    "session": result.get("session"),
+                    "thread_id": result.get("thread_id"),
+                    "result": tool_result,
+                }
         if content:
             await emit_event("assistant.final", {"text": str(content)})
         return result

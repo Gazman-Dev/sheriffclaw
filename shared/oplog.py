@@ -6,7 +6,7 @@ import threading
 from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 from pathlib import Path
 
-from shared.paths import gw_root
+from shared.paths import gw_root, llm_root
 
 
 def _enabled() -> bool:
@@ -14,8 +14,8 @@ def _enabled() -> bool:
     return v not in {"0", "false", "no", "off"}
 
 
-def get_op_logger(name: str) -> logging.Logger:
-    logger = logging.getLogger(f"sheriff.op.{name}")
+def get_op_logger(name: str, *, island: str = "gw") -> logging.Logger:
+    logger = logging.getLogger(f"sheriff.op.{island}.{name}")
     if logger.handlers:
         return logger
 
@@ -24,7 +24,8 @@ def get_op_logger(name: str) -> logging.Logger:
         logger.propagate = False
         return logger
 
-    log_dir: Path = gw_root() / "logs" / "ops"
+    root_factory = llm_root if island == "llm" else gw_root
+    log_dir: Path = root_factory() / "logs" / "ops"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"{name}.log"
 

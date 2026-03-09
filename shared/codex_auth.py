@@ -4,11 +4,13 @@ import os
 import subprocess
 
 from shared.paths import agent_repo_root
+from shared.worker.codex_cli import augment_path, resolve_codex_binary
 
 
 def codex_auth_env() -> dict[str, str]:
     env = os.environ.copy()
     env["CODEX_HOME"] = str(agent_repo_root())
+    env["PATH"] = augment_path(env.get("PATH"))
     return env
 
 
@@ -16,11 +18,12 @@ def codex_auth_status() -> dict[str, str | bool]:
     env = codex_auth_env()
     try:
         status = subprocess.run(
-            ["codex", "login", "status"],
+            [resolve_codex_binary(), "login", "status"],
             env=env,
             capture_output=True,
             text=True,
             check=False,
+            cwd=str(agent_repo_root()),
         )
     except FileNotFoundError:
         return {

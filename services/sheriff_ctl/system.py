@@ -105,12 +105,6 @@ def cmd_update(args):
         print(note)
     if ok:
         print("Restarting services after update...")
-        try:
-            subprocess.run(["pkill", "-f", "sheriff-gateway"], check=False)
-            subprocess.run(["pkill", "-f", "codex-mcp-host"], check=False)
-        except Exception:
-            pass
-
         cmd_stop(argparse.Namespace())
         start_mp = mp if (mp and isinstance(mp, str) and mp.strip()) else None
         cmd_start(argparse.Namespace(master_password=start_mp))

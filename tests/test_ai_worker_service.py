@@ -162,6 +162,39 @@ async def test_codex_session_send_surfaces_tool_error():
 
 
 @pytest.mark.asyncio
+async def test_codex_session_send_surfaces_auth_status_when_payload_is_empty(monkeypatch):
+    manager = FakeSessionManager()
+
+    async def fake_send_message(session_key: str, prompt: str, *, model: str | None = None):
+        manager.calls.append(("send", session_key, prompt, model))
+        return {
+            "session": {"session_key": session_key, "thread_id": "thread-1", "status": "active"},
+            "thread_id": "thread-1",
+            "result": {
+                "content": [{"type": "text", "text": ""}],
+                "structuredContent": {"threadId": "thread-1", "content": ""},
+            },
+        }
+
+    manager.send_message = fake_send_message
+    monkeypatch.setattr("services.ai_worker.service.codex_auth_status", lambda: {
+        "available": True,
+        "logged_in": False,
+        "detail": "Not logged in",
+    })
+    svc = AIWorkerService(runtime=FakeRuntime(), session_manager=manager)
+
+    result = await svc.codex_session_send(
+        {"session_key": "private_main", "prompt": "hello", "model_ref": "gpt-5-codex"},
+        lambda e, p: None,
+        "req-2d",
+    )
+
+    assert result["ok"] is False
+    assert result["error"] == "Not logged in"
+
+
+@pytest.mark.asyncio
 async def test_codex_session_invalidate_uses_reason():
     manager = FakeSessionManager()
     svc = AIWorkerService(runtime=FakeRuntime(), session_manager=manager)

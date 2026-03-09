@@ -7,6 +7,7 @@ from services.sheriff_ctl import system
 
 def test_cmd_update_closes_proc_clients(monkeypatch):
     closed = []
+    lifecycle = []
 
     class FakeClient:
         def __init__(self, name: str, *args, **kwargs):
@@ -26,17 +27,19 @@ def test_cmd_update_closes_proc_clients(monkeypatch):
 
     monkeypatch.setattr(system, "ProcClient", FakeClient)
     monkeypatch.setattr(system, "_notify_sheriff_channel", lambda text: False)
-    monkeypatch.setattr(system, "cmd_stop", lambda args: None)
-    monkeypatch.setattr(system, "cmd_start", lambda args: None)
-    monkeypatch.setattr(system.subprocess, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(system, "cmd_stop", lambda args: lifecycle.append("stop"))
+    monkeypatch.setattr(system, "cmd_start", lambda args: lifecycle.append(("start", args.master_password)))
 
     system.cmd_update(argparse.Namespace(master_password=None, no_pull=False, force=False))
 
     assert closed.count("sheriff-gateway") == 1
     assert closed.count("sheriff-updater") == 1
+    assert lifecycle == ["stop", ("start", None)]
 
 
 def test_cmd_update_never_prompts_for_master_password(monkeypatch):
+    lifecycle = []
+
     class FakeClient:
         def __init__(self, name: str, *args, **kwargs):
             self.name = name
@@ -55,12 +58,13 @@ def test_cmd_update_never_prompts_for_master_password(monkeypatch):
 
     monkeypatch.setattr(system, "ProcClient", FakeClient)
     monkeypatch.setattr(system, "_notify_sheriff_channel", lambda text: False)
-    monkeypatch.setattr(system, "cmd_stop", lambda args: None)
-    monkeypatch.setattr(system, "cmd_start", lambda args: None)
-    monkeypatch.setattr(system.subprocess, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(system, "cmd_stop", lambda args: lifecycle.append("stop"))
+    monkeypatch.setattr(system, "cmd_start", lambda args: lifecycle.append(("start", args.master_password)))
 
     import getpass as _getpass
 
     monkeypatch.setattr(_getpass, "getpass", lambda prompt: (_ for _ in ()).throw(AssertionError(prompt)))
 
     system.cmd_update(argparse.Namespace(master_password=None, no_pull=False, force=False))
+
+    assert lifecycle == ["stop", ("start", None)]

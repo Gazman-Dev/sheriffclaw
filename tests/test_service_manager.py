@@ -142,3 +142,22 @@ def test_start_detaches_service_stdin(tmp_path, monkeypatch):
     assert mgr.start("svc") == "started"
     assert captured["stdin"] is subprocess.DEVNULL
     assert (tmp_path / "svc.pid").read_text(encoding="utf-8") == "123"
+
+
+def test_generic_service_fallback_kills_module_processes(tmp_path, monkeypatch):
+    runs = []
+
+    def _run(cmd, check=False, capture_output=False, text=False):
+        runs.append(list(cmd))
+        return type("R", (), {"returncode": 1, "stdout": ""})()
+
+    monkeypatch.setattr("shared.service_manager.subprocess.run", _run)
+    mgr = ServiceManager(
+        lambda service: ["python", "-m", "services.sheriff_gateway.__main__"] if service == "sheriff-gateway" else ["python", service],
+        lambda service: tmp_path / f"{service}.pid",
+        lambda service: (tmp_path / f"{service}.out", tmp_path / f"{service}.err"),
+    )
+
+    mgr._kill_by_name_fallback("sheriff-gateway")
+
+    assert ["pkill", "-f", "services.sheriff_gateway.__main__"] in runs

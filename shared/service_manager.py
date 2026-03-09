@@ -94,6 +94,15 @@ class ServiceManager:
             time.sleep(0.2)
         return not self._launcher_reports_running()
 
+    def _service_match_patterns(self, service: str) -> list[str]:
+        cmd = self._command_for(service)
+        patterns = {f"/bin/{service}", f" {service}"}
+        if len(cmd) >= 3 and cmd[1] == "-m":
+            patterns.add(str(cmd[2]))
+        elif cmd:
+            patterns.add(str(Path(cmd[0]).name))
+        return [pattern for pattern in patterns if pattern]
+
     def _kill_by_name_fallback(self, service: str) -> None:
         # Cleanup stale processes that may survive pidfile churn (best-effort).
         if service == "codex-mcp-host":
@@ -106,8 +115,8 @@ class ServiceManager:
             subprocess.run(["pkill", "-f", "sheriff-codex-mcp-host-launch"], check=False)  # noqa: S603
             subprocess.run(["pkill", "-f", "codex mcp-server"], check=False)  # noqa: S603
             return
-        subprocess.run(["pkill", "-f", f"/bin/{service}"], check=False)  # noqa: S603
-        subprocess.run(["pkill", "-f", f" {service}"], check=False)  # noqa: S603
+        for pattern in self._service_match_patterns(service):
+            subprocess.run(["pkill", "-f", pattern], check=False)  # noqa: S603
 
     def start(self, service: str) -> str:
         pid = self.read_pid(service)

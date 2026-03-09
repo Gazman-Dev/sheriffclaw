@@ -163,6 +163,7 @@ def cmd_onboard(args):
 
     async def _ensure_onboarding_services() -> None:
         for service in ONBOARDING_BOOTSTRAP_SERVICES:
+            SERVICE_MANAGER.stop(service)
             SERVICE_MANAGER.start(service)
             await _wait_service_health(service)
 

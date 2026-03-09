@@ -5,7 +5,7 @@ from services.sheriff_ctl import onboard
 
 
 def test_cmd_onboard_chatgpt_provider_does_not_abort_for_codex_login(monkeypatch):
-    ran = {"async": 0, "start": 0}
+    ran = {"async": 0, "start": 0, "stop": 0}
 
     def fake_asyncio_run(coro):
         ran["async"] += 1
@@ -19,6 +19,7 @@ def test_cmd_onboard_chatgpt_provider_does_not_abort_for_codex_login(monkeypatch
         lambda _: ran.__setitem__("start", ran["start"] + 1),
     )
     monkeypatch.setattr(onboard.SERVICE_MANAGER, "start", lambda _: None)
+    monkeypatch.setattr(onboard.SERVICE_MANAGER, "stop", lambda _: ran.__setitem__("stop", ran["stop"] + 1))
     monkeypatch.setattr(onboard, "_wait_service_health", lambda service: _fake_coro())
 
     args = argparse.Namespace(

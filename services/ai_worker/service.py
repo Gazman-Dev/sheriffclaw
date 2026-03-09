@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+
 from shared.codex_output import extract_text_content
 from shared.codex_session_manager import CodexSessionManager
+from shared.oplog import get_op_logger
 from shared.worker.worker_runtime import WorkerRuntime
 
 
@@ -9,6 +12,7 @@ class AIWorkerService:
     def __init__(self, *, runtime: WorkerRuntime | None = None, session_manager: CodexSessionManager | None = None) -> None:
         self.runtime = runtime or WorkerRuntime()
         self.session_manager = session_manager or CodexSessionManager()
+        self.log = get_op_logger("ai_worker")
 
     async def skills_list(self, payload, emit_event, req_id):
         return {"skills": await self.runtime.list_skills()}
@@ -44,6 +48,12 @@ class AIWorkerService:
         result = await self.session_manager.send_message(session_key, prompt, model=model)
         tool_result = result.get("result") or {}
         if isinstance(tool_result, dict) and tool_result.get("isError"):
+            self.log.warning(
+                "codex_session_send_error session=%s model=%s payload=%s",
+                session_key,
+                model,
+                json.dumps(tool_result, ensure_ascii=False, default=str)[:4000],
+            )
             return {
                 "ok": False,
                 "error": extract_text_content(tool_result) or "codex_tool_error",
@@ -52,6 +62,13 @@ class AIWorkerService:
                 "result": tool_result,
             }
         content = extract_text_content(tool_result)
+        if not content:
+            self.log.warning(
+                "codex_session_send_empty session=%s model=%s payload=%s",
+                session_key,
+                model,
+                json.dumps(tool_result, ensure_ascii=False, default=str)[:4000],
+            )
         if content:
             await emit_event("assistant.final", {"text": str(content)})
         return result

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import os
 import uuid
 from collections import defaultdict, deque
@@ -183,6 +184,13 @@ class SheriffGatewayService:
         )
         if isinstance(final_payload, dict) and final_payload.get("ok") is False:
             err = final_payload.get("error") or "unknown_error"
+            self.log.warning(
+                "ai_stream_error session=%s provider=%s model=%s payload=%s",
+                session,
+                provider_name,
+                payload.get("model_ref"),
+                json.dumps(final_payload, ensure_ascii=False, default=str)[:4000],
+            )
             if provider_name == "openai-codex-chatgpt" and is_codex_auth_error(str(err)):
                 msg = codex_auth_help_text(interactive_login_supported=payload.get("channel", "cli") == "cli")
                 status = "auth_required"
@@ -196,6 +204,15 @@ class SheriffGatewayService:
 
         if not saw_final:
             final_text = extract_text_content(final_tool_result) if isinstance(final_tool_result, dict) else ""
+            self.log.warning(
+                "ai_stream_missing_final session=%s provider=%s model=%s deltas=%s final_payload=%s final_tool_result=%s",
+                session,
+                provider_name,
+                payload.get("model_ref"),
+                len(delta_parts),
+                json.dumps(final_payload, ensure_ascii=False, default=str)[:4000],
+                json.dumps(final_tool_result, ensure_ascii=False, default=str)[:4000],
+            )
             if final_text:
                 msg = final_text
             elif delta_parts:

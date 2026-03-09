@@ -10,4 +10,5 @@ dist/
 .memory/
 .tmp_*.sh
 tmp_*_probe.py
-.codex_remote_*.py
+.codex_remote_*
+.remote_*

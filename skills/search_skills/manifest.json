@@ -1,0 +1,11 @@
+{
+  "skill_id": "search_skills",
+  "description": "Searches the available skills using lexical matching.",
+  "command": "python skills/search_skills/run.py",
+  "tags": [
+    "search",
+    "skills",
+    "tools",
+    "help"
+  ]
+}

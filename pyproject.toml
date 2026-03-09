@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sheriffclaw"
+version = "0.1.0"
+description = "Python OpenClaw clone prototype"
+requires-python = ">=3.9"
+dependencies = ["cryptography", "requests"]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+
+[project.scripts]
+sheriff = "services.sheriff_ctl.ctl:main_sheriff"
+sheriff-ctl = "services.sheriff_ctl.__main__:main"
+
+sheriff-gateway = "services.sheriff_gateway.__main__:main"
+sheriff-chat-proxy = "services.sheriff_chat_proxy.__main__:main"
+sheriff-secrets = "services.sheriff_secrets.__main__:main"
+sheriff-policy = "services.sheriff_policy.__main__:main"
+sheriff-requests = "services.sheriff_requests.__main__:main"
+sheriff-web = "services.sheriff_web.__main__:main"
+sheriff-tools = "services.sheriff_tools.__main__:main"
+sheriff-tg-gate = "services.sheriff_tg_gate.__main__:main"
+sheriff-cli-gate = "services.sheriff_cli_gate.__main__:main"
+sheriff-updater = "services.sheriff_updater.__main__:main"
+
+codex-mcp-host = "services.ai_worker.__main__:main"
+ai-tg-llm = "services.ai_tg_llm.__main__:main"
+telegram-listener = "services.telegram_listener.__main__:main"
+telegram-webhook = "services.telegram_webhook.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["shared*", "services*", "skills*"]

@@ -1,0 +1,11 @@
+{
+  "skill_id": "search_topics",
+  "description": "Searches topic- and summary-like files in agent workspace.",
+  "command": "python skills/search_topics/run.py",
+  "tags": [
+    "facts",
+    "topics",
+    "rules",
+    "knowledge"
+  ]
+}

@@ -1,0 +1,6 @@
+[tools]
+web = true
+search = true
+
+[windows]
+sandbox = "unelevated"

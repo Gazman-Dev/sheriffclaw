@@ -1,0 +1,15 @@
+{
+  "skill_id": "debug_trace",
+  "description": "Analyze traceback stack traces and debug runtime exceptions quickly",
+  "command": "echo 'debug_trace skill not implemented as code yet'",
+  "tags": [
+    "traceback",
+    "stack trace",
+    "trace",
+    "error",
+    "exception",
+    "valueerror",
+    "debug",
+    "bug"
+  ]
+}

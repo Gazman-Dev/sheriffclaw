@@ -1,0 +1,1 @@
+ilyagazman ALL=(sheriffai) NOPASSWD: /usr/local/bin/sheriff-codex-mcp-host-launch

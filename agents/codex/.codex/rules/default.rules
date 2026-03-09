@@ -1,0 +1,27 @@
+# agents/codex/.codex/rules/default.rules
+
+prefix_rule(
+  pattern = ["rm", "-rf"],
+  decision = "prompt",
+  justification = "Destructive file operations must be approved.",
+  match =[
+    "rm -rf conversations/sessions/main",
+  ],
+  not_match =[
+    "rm temp.txt",
+  ],
+)
+
+prefix_rule(
+  pattern = ["git", "push"],
+  decision = "prompt",
+  justification = "Publishing code requires explicit approval.",
+  match =[
+    "git push origin main",
+    "git push --force",
+  ],
+  not_match =[
+    "git status",
+    "git log",
+  ],
+)

@@ -1,0 +1,9 @@
+services:
+  test-linux:
+    build:
+      context: .
+      dockerfile: docker/linux-test.Dockerfile
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: [ "bash", "-lc", "chmod +x scripts/test.sh && scripts/test.sh" ]

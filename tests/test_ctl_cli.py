@@ -1,0 +1,84 @@
+from services.sheriff_ctl.ctl import build_parser
+import builtins
+
+
+def test_configure_llm_command_parses():
+    parser = build_parser()
+    args = parser.parse_args(
+        ["configure-llm", "--provider", "openai-codex", "--api-key", "sk-123", "--master-password", "mp"])
+    assert args.provider == "openai-codex"
+    assert args.api_key == "sk-123"
+    assert args.master_password == "mp"
+
+
+def test_onboarding_alias_parses():
+    parser = build_parser()
+    args = parser.parse_args(["onboarding", "--master-password", "x"])
+    assert args.master_password == "x"
+
+
+def test_reinstall_command_removed():
+    parser = build_parser()
+    try:
+        parser.parse_args(["reinstall"])
+        assert False, "expected SystemExit"
+    except SystemExit:
+        pass
+
+
+def test_logout_llm_parses():
+    parser = build_parser()
+    args = parser.parse_args(["logout-llm", "--master-password", "x"])
+    assert args.master_password == "x"
+
+
+def test_factory_reset_parses():
+    parser = build_parser()
+    args = parser.parse_args(["factory-reset", "--yes"])
+    assert args.yes is True
+
+
+def test_debug_parses():
+    parser = build_parser()
+    args = parser.parse_args(["debug", "on"])
+    assert args.debug_args == ["on"]
+
+
+def test_update_parses():
+    parser = build_parser()
+    args = parser.parse_args(["update", "--master-password", "x", "--no-pull"])
+    assert args.master_password == "x"
+    assert args.no_pull is True
+
+
+def test_sandbox_parses():
+    parser = build_parser()
+    args = parser.parse_args(["sandbox", "--user", "agentuser", "--deny-net"])
+    assert args.user == "agentuser"
+    assert args.allow_net is False
+
+
+def test_proxy_chat_parses():
+    parser = build_parser()
+    args = parser.parse_args(["proxy-chat", "--principal", "debugger"])
+    assert args.principal == "debugger"
+
+
+def test_agent_chat_parses():
+    parser = build_parser()
+    args = parser.parse_args(["agent-chat", "--principal", "debugger"])
+    assert args.principal == "debugger"
+
+
+def test_build_parser_tolerates_missing_doctor_module(monkeypatch):
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "services.sheriff_ctl.doctor":
+            raise ModuleNotFoundError(name)
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    parser = build_parser()
+    args = parser.parse_args(["status"])
+    assert args.cmd == "status"

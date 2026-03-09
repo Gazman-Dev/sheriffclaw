@@ -1,0 +1,12 @@
+{
+  "skill_id": "search_memory",
+  "description": "Searches prior workspace files from earlier turns for context and mentions.",
+  "command": "python skills/search_memory/run.py",
+  "tags": [
+    "history",
+    "memory",
+    "transcripts",
+    "recall",
+    "past"
+  ]
+}

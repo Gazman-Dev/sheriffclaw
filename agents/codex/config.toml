@@ -1,0 +1,63 @@
+#:schema https://developers.openai.com/codex/config-schema.json
+
+# Default model and behavior
+model = "gpt-5.3-codex"
+
+# Fast main agent
+model_reasoning_effort = "low"
+model_reasoning_summary = "none"
+model_verbosity = "low"
+personality = "pragmatic"
+
+# Live web search
+web_search = "live"
+tools_web_search = true
+[tools]
+web_search = true
+view_image = true
+
+# No approvals, maximum access
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+# Network fully enabled (inside whatever sandbox/host constraints exist)
+[permissions.network]
+enabled = true
+mode = "full"
+
+# If you use apps/connectors, remove all default restrictions
+[features]
+apps = true
+connectors = true
+request_permissions = true
+web_search = true
+enable_request_compression = true
+multi_agent = true
+memories = true
+
+[apps._default]
+enabled = true
+open_world_enabled = true
+destructive_enabled = true
+
+# Auto-compress / compact so you don't run out of context
+model_auto_compact_token_limit = 200000
+
+# History persistence: 100MB
+[history]
+persistence = "save-all"
+max_bytes = 104857600
+
+# Multi-agent defaults + role definitions for spawned agents
+[agents]
+max_depth = 6
+max_threads = 16
+job_max_runtime_seconds = 3600
+
+[agents.subagent_medium]
+description = "Spawned agent with medium reasoning effort"
+config_file = "roles/subagent-medium.toml"
+
+[agents.subagent_high]
+description = "Spawned agent with high reasoning effort"
+config_file = "roles/subagent-high.toml"

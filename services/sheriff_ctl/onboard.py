@@ -7,7 +7,7 @@ import os
 import sys
 import time
 
-from services.sheriff_ctl.service_runner import MANAGED_SERVICES, SERVICE_MANAGER
+from services.sheriff_ctl.service_runner import MANAGED_SERVICES, SERVICE_MANAGER, _wait_service_health
 from services.sheriff_ctl.utils import (
     OPLOG,
     _clear_telegram_unlock_channel,
@@ -17,6 +17,9 @@ from services.sheriff_ctl.utils import (
 )
 from shared.paths import gw_root
 from shared.proc_rpc import ProcClient
+
+
+ONBOARDING_BOOTSTRAP_SERVICES = ["sheriff-secrets", "sheriff-gateway"]
 
 
 def cmd_onboard(args):
@@ -85,13 +88,19 @@ def cmd_onboard(args):
         except Exception as e:
             raise RuntimeError(f"keep-unchanged requested but could not load existing config: {e}")
 
+    if llm_prov is None and not (keep_unchanged and existing.get("llm_provider")):
+        llm_prov = "openai-codex-chatgpt"
+        llm_key = ""
+        print("\nUsing default LLM: OpenAI Codex (ChatGPT subscription login via Codex MCP repo).")
+        print("If you want API-key mode instead, rerun onboarding with --llm-provider openai-codex.")
+
     if llm_prov is None:
         while True:
             print("\nChoose your LLM:")
             print("1) OpenAI Codex (API key)")
             print("2) OpenAI Codex (ChatGPT subscription login via Codex MCP repo)")
             print("3) Local stub (testing only)")
-            default_choice = "1"
+            default_choice = "2"
             if keep_unchanged and existing.get("llm_provider"):
                 cur = existing.get("llm_provider")
                 if cur == "openai-codex-chatgpt":
@@ -151,6 +160,11 @@ def cmd_onboard(args):
     gate_bot = args.gate_bot_token
 
     allow_tg = False
+
+    async def _ensure_onboarding_services() -> None:
+        for service in ONBOARDING_BOOTSTRAP_SERVICES:
+            SERVICE_MANAGER.start(service)
+            await _wait_service_health(service)
 
     async def _telegram_activate_bot(gw: ProcClient, role: str, token: str, timeout_sec: int = 300) -> bool:
         import requests
@@ -253,15 +267,11 @@ def cmd_onboard(args):
         return False
 
     async def _run():
+        await _ensure_onboarding_services()
         gw = ProcClient("sheriff-gateway")
-        for _ in range(5):
-            try:
-                await gw.request("health", {})
-                break
-            except Exception:
-                await asyncio.sleep(1)
+        await gw.request("health", {})
 
-        await _gw_secrets_call(
+        init_res = await _gw_secrets_call(
             "secrets.initialize",
             {
                 "master_password": mp,
@@ -273,7 +283,11 @@ def cmd_onboard(args):
             },
             gw=gw,
         )
+        if init_res.get("_error"):
+            raise RuntimeError(f"failed to initialize vault: {init_res['_error']}")
         unlock_res = await _gw_secrets_call("secrets.unlock", {"master_password": mp}, gw=gw)
+        if unlock_res.get("_error"):
+            raise RuntimeError(f"failed to unlock vault after onboarding initialize: {unlock_res['_error']}")
         if not unlock_res.get("ok"):
             raise RuntimeError("failed to unlock vault after onboarding initialize")
         st_unlock = await _gw_secrets_call("secrets.is_unlocked", {}, gw=gw)

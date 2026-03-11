@@ -6,15 +6,16 @@ import sys
 from pathlib import Path
 
 from shared.component_versions import diff_versions, load_applied_versions, load_target_versions, save_applied_versions
+from shared.paths import base_root
 
 
 class SheriffUpdaterService:
     def __init__(self) -> None:
-        install_root = Path(os.environ.get("SHERIFFCLAW_ROOT", "")).expanduser() if os.environ.get("SHERIFFCLAW_ROOT") else None
+        install_root = base_root().resolve()
         file_root = Path(__file__).resolve().parents[2]
         cwd_root = Path.cwd().resolve()
-        source_root = (install_root / "source").resolve() if install_root else None
-        if source_root and (source_root / "versions.json").exists():
+        source_root = (install_root / "source").resolve()
+        if (source_root / "versions.json").exists():
             self.repo_root = source_root
         elif (file_root / "versions.json").exists():
             self.repo_root = file_root

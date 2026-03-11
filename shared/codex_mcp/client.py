@@ -12,6 +12,7 @@ from shared.worker.codex_cli import augment_path, build_mcp_server_command
 
 JSONRPC_VERSION = "2.0"
 MCP_PROTOCOL_VERSION = "2024-11-05"
+MCP_STREAM_LIMIT = 10 * 1024 * 1024
 
 
 class CodexMCPError(RuntimeError):
@@ -52,6 +53,7 @@ class CodexMCPClient:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            limit=MCP_STREAM_LIMIT,
         )
         await self.initialize()
 

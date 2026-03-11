@@ -98,3 +98,26 @@ def test_client_handles_server_request_before_matching_response(tmp_path):
     assert writes[0]["method"] == "tools/list"
     assert writes[1]["id"] == 0
     assert writes[1]["result"]["roots"][0]["uri"].startswith("file:")
+
+
+def test_client_start_uses_large_stream_limit(tmp_path, monkeypatch):
+    client = CodexMCPClient(Path(tmp_path), cwd=tmp_path)
+    captured = {}
+
+    class _FakeProc:
+        def __init__(self):
+            self.stdin = _FakeStdin()
+            self.stdout = _FakeStdout([b'{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05"}}\n'])
+            self.stderr = _FakeStdout([])
+            self.returncode = None
+            self.pid = 123
+
+    async def fake_exec(*cmd, **kwargs):
+        captured["kwargs"] = kwargs
+        return _FakeProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    asyncio.run(client.start())
+
+    assert captured["kwargs"]["limit"] == 10 * 1024 * 1024

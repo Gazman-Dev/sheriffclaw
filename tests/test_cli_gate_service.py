@@ -29,6 +29,7 @@ async def test_help_command():
     res = await svc.handle_message({"text": "/help"}, None, "r1")
     assert res["kind"] == "sheriff"
     assert "/status" in res["message"]
+    assert "/update" in res["message"]
     assert "/auth-status" in res["message"]
 
 
@@ -135,3 +136,42 @@ async def test_auth_login_command_returns_instruction(monkeypatch):
 
     assert res["kind"] == "sheriff"
     assert "https://example.test" in res["message"]
+
+
+@pytest.mark.asyncio
+async def test_update_command_starts_detached_update(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli_gate_service, "gw_root", lambda: tmp_path / "gw")
+    svc = SheriffCliGateService()
+    captured = {}
+
+    class FakeProc:
+        pid = 4321
+
+    def fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return FakeProc()
+
+    monkeypatch.setattr(cli_gate_service.subprocess, "Popen", fake_popen)
+
+    res = await svc.handle_message({"text": "/update no-pull force"}, None, "r1")
+
+    assert res["kind"] == "sheriff"
+    assert "4321" in res["message"]
+    assert "--no-pull" in captured["cmd"]
+    assert "--force" in captured["cmd"]
+    assert captured["kwargs"]["stdin"] == cli_gate_service.subprocess.DEVNULL
+
+
+@pytest.mark.asyncio
+async def test_update_command_rejects_running_update(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli_gate_service, "gw_root", lambda: tmp_path / "gw")
+    svc = SheriffCliGateService()
+    svc.update_pid_path.parent.mkdir(parents=True, exist_ok=True)
+    svc.update_pid_path.write_text("999", encoding="utf-8")
+    monkeypatch.setattr(svc, "_is_pid_running", lambda pid: pid == 999)
+
+    res = await svc.handle_message({"text": "/update"}, None, "r1")
+
+    assert res["kind"] == "sheriff"
+    assert "already running" in res["message"].lower()

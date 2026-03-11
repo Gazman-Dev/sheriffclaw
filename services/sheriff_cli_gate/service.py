@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import os
+import signal
+import subprocess
+import sys
+from pathlib import Path
+
 from shared.codex_auth import (
     codex_auth_help_text,
     codex_auth_status,
@@ -7,6 +13,7 @@ from shared.codex_auth import (
     finalize_codex_device_auth,
     start_codex_device_auth,
 )
+from shared.paths import gw_root
 from shared.proc_rpc import ProcClient
 
 
@@ -28,6 +35,56 @@ class SheriffCliGateService:
             "codex-mcp-host",
             "ai-tg-llm",
         ]
+        self.update_pid_path = gw_root() / "state" / "remote_update.pid"
+
+    def _is_pid_running(self, pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return False
+        return True
+
+    def _start_remote_update(self, *, no_pull: bool = False, force: bool = False) -> dict[str, str]:
+        self.update_pid_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.update_pid_path.exists():
+            try:
+                existing_pid = int(self.update_pid_path.read_text(encoding="utf-8").strip())
+            except Exception:
+                existing_pid = 0
+            if existing_pid and self._is_pid_running(existing_pid):
+                return {
+                    "ok": False,
+                    "message": f"Update already running (pid {existing_pid}).",
+                }
+            self.update_pid_path.unlink(missing_ok=True)
+
+        logs_dir = gw_root() / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        out_path = logs_dir / "remote-update.out"
+        err_path = logs_dir / "remote-update.err"
+        cmd = [sys.executable, "-m", "services.sheriff_ctl.ctl", "update"]
+        if no_pull:
+            cmd.append("--no-pull")
+        if force:
+            cmd.append("--force")
+
+        with out_path.open("ab") as out_file, err_path.open("ab") as err_file:
+            proc = subprocess.Popen(  # noqa: S603
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=out_file,
+                stderr=err_file,
+                cwd=str(Path(__file__).resolve().parents[2]),
+                start_new_session=True,
+            )
+        self.update_pid_path.write_text(str(proc.pid), encoding="utf-8")
+        return {
+            "ok": True,
+            "message": (
+                f"Remote update started (pid {proc.pid}). "
+                f"Logs: {out_path.name}, {err_path.name}"
+            ),
+        }
 
     async def _secrets(self, op: str, payload: dict):
         if self.secrets is not None:
@@ -63,6 +120,7 @@ class SheriffCliGateService:
                 "message": (
                     "Sheriff commands:\n"
                     "/status\n"
+                    "/update [no-pull] [force]\n"
                     "/auth-status\n"
                     "/auth-login\n"
                     "/unlock <master_password>\n"
@@ -117,6 +175,15 @@ class SheriffCliGateService:
 
         if cmd == "auth-login":
             started = start_codex_device_auth()
+            return {
+                "kind": "sheriff",
+                "message": str(started["message"]),
+            }
+
+        if cmd == "update":
+            no_pull = any(arg.lower() in {"no-pull", "--no-pull"} for arg in args)
+            force = any(arg.lower() in {"force", "--force"} for arg in args)
+            started = self._start_remote_update(no_pull=no_pull, force=force)
             return {
                 "kind": "sheriff",
                 "message": str(started["message"]),

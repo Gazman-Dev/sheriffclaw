@@ -26,6 +26,16 @@ def test_tool_exec_runs_subprocess(tmp_path):
     assert "hello world" in res["stdout"]
 
 
+def test_tool_exec_passes_ephemeral_env(tmp_path):
+    executor = ToolExecutor(tmp_path)
+    res = executor.exec(
+        [sys.executable, "-c", "import os; print(os.environ.get('TEST_EPHEMERAL', 'missing'))"],
+        env={"TEST_EPHEMERAL": "secret-for-child"},
+    )
+    assert res["code"] == 0
+    assert "secret-for-child" in res["stdout"]
+
+
 def test_tool_save_load_output(tmp_path):
     executor = ToolExecutor(tmp_path)
     run_id = "run-123"

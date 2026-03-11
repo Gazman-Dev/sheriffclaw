@@ -16,7 +16,16 @@ if os.getenv("SHERIFF_DEBUG", "0") not in {"1", "true", "yes"}:
         pass
     warnings.filterwarnings("ignore", message=r"urllib3 v2 only supports OpenSSL 1\.1\.1\+.*")
 
-from services.sheriff_ctl.chat import DEFAULT_CHAT_PRINCIPAL, cmd_call, cmd_chat, cmd_entry, cmd_proxy_chat, cmd_skill
+from services.sheriff_ctl.chat import (
+    DEFAULT_CHAT_PRINCIPAL,
+    cmd_call,
+    cmd_chat,
+    cmd_entry,
+    cmd_proxy_chat,
+    cmd_skill,
+    cmd_wrapped_command,
+    maybe_parse_wrapped_command,
+)
 from services.sheriff_ctl.onboard import cmd_configure_llm, cmd_logout_llm, cmd_onboard
 from services.sheriff_ctl.sandbox import cmd_sandbox
 from services.sheriff_ctl.service_runner import ALL, cmd_logs, cmd_start, cmd_status, cmd_stop
@@ -149,6 +158,11 @@ def main_sheriff(argv: list[str] | None = None) -> None:
     }
     if argv and argv[0] in ctl_commands:
         main(argv)
+        return
+
+    wrapped = maybe_parse_wrapped_command(argv)
+    if wrapped is not None:
+        cmd_wrapped_command(argparse.Namespace(**wrapped))
         return
 
     p = argparse.ArgumentParser(prog="sheriff")

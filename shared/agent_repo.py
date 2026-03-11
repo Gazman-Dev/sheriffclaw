@@ -46,7 +46,7 @@ DEFAULT_TEXT_FILES = {
         "- `skills/task-manager/SKILL.md`: task decomposition and task-state reconciliation.\n"
         "- `skills/memory-manager/SKILL.md`: memory promotion and summary maintenance.\n"
         "- `skills/cron-job/SKILL.md`: heartbeat and daily-update maintenance behavior.\n"
-        "- `skills/sheriff/SKILL.md`: placeholder for future Sheriff integration.\n"
+        "- `skills/sheriff/SKILL.md`: Sheriff-mediated command execution and secret request workflow.\n"
     ),
     "config.toml": "",
     ".codex/config.toml": "",
@@ -95,11 +95,77 @@ DEFAULT_TEXT_FILES = {
     "skills/sheriff/SKILL.md": (
         "---\n"
         "name: sheriff\n"
-        "description: Placeholder skill for future Sheriff integration behavior and constraints inside the repo-backed agent workflow.\n"
+        "description: Use Sheriff-mediated PATH shims when a command needs secret environment variables or user-approved access. This covers installing command wrappers such as git, prepending the shim directory to PATH, and retrying after Sheriff resolution events.\n"
         "---\n\n"
         "# Sheriff\n\n"
-        "Placeholder for future Sheriff integration.\n"
-        "Do not invent a Sheriff protocol yet. Record integration needs and constraints, but treat execution behavior as TODO until designed.\n"
+        "Do not rely on remembering `sheriff <command> <SECRET_HANDLES> ...` manually.\n"
+        "Instead, install a PATH shim for the command, prepend the shim directory to PATH for the current run, and then call the plain command name.\n\n"
+        "Use `skills/sheriff/scripts/install_wrapper.py` to create wrappers.\n"
+        "`git` is only an example. Use the same wrapper-install flow for any command that needs Sheriff-managed secrets.\n"
+        "Example install: `python skills/sheriff/scripts/install_wrapper.py --command git --secrets GIT_TOKEN`\n"
+        "The script writes wrappers under `skills/sheriff/bin/`.\n\n"
+        "After installing, prepend `skills/sheriff/bin` to PATH before running the command.\n"
+        "Examples:\n"
+        "- bash/zsh: `PATH=\"$PWD/skills/sheriff/bin:$PATH\" git clone ...`\n"
+        "- PowerShell: `$env:PATH = \"$PWD/skills/sheriff/bin;\" + $env:PATH; git clone ...`\n\n"
+        "Rules:\n"
+        "- Each wrapper delegates to Sheriff, which injects the listed secret handles as environment variables only for that subprocess.\n"
+        "- Any command can be wrapped this way. Choose the command name and secret handles based on the tool you are about to run.\n"
+        "- Prefer wrappers for commands that predictably need secrets or repeated authenticated access.\n"
+        "- If a wrapper is missing, install it instead of bypassing Sheriff.\n"
+        "- If Sheriff reports a missing secret handle, do not fabricate the value. Wait for Sheriff to notify the user and continue after a Sheriff resolution event arrives.\n"
+        "- If Sheriff says the user provided a secret or approved a tool, retry the blocked command if it is still the right next step.\n"
+        "- Never echo secret values back to the user or write them into repo files.\n"
+    ),
+    "skills/sheriff/scripts/install_wrapper.py": (
+        "from __future__ import annotations\n\n"
+        "import argparse\n"
+        "import os\n"
+        "import shlex\n"
+        "from pathlib import Path\n\n"
+        "VALID_NAME = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-')\n\n"
+        "def _validate_command(value: str) -> str:\n"
+        "    value = value.strip()\n"
+        "    if not value or any(ch not in VALID_NAME for ch in value):\n"
+        "        raise SystemExit('command must use only letters, digits, underscore, or hyphen')\n"
+        "    return value\n\n"
+        "def _validate_handles(value: str) -> list[str]:\n"
+        "    handles = [item.strip() for item in value.split(',') if item.strip()]\n"
+        "    if not handles:\n"
+        "        raise SystemExit('at least one secret handle is required')\n"
+        "    for handle in handles:\n"
+        "        if any(ch not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_' for ch in handle):\n"
+        "            raise SystemExit('secret handles must be uppercase env-style names')\n"
+        "    return handles\n\n"
+        "def main() -> int:\n"
+        "    parser = argparse.ArgumentParser()\n"
+        "    parser.add_argument('--command', required=True)\n"
+        "    parser.add_argument('--secrets', required=True)\n"
+        "    args = parser.parse_args()\n\n"
+        "    command = _validate_command(args.command)\n"
+        "    handles = _validate_handles(args.secrets)\n"
+        "    handles_csv = ','.join(handles)\n\n"
+        "    skill_root = Path(__file__).resolve().parents[1]\n"
+        "    bin_dir = skill_root / 'bin'\n"
+        "    bin_dir.mkdir(parents=True, exist_ok=True)\n\n"
+        "    unix_path = bin_dir / command\n"
+        "    unix_body = (\n"
+        "        '#!/usr/bin/env bash\\n'\n"
+        "        f'exec sheriff {shlex.quote(command)} {shlex.quote(handles_csv)} \"$@\"\\n'\n"
+        "    )\n"
+        "    unix_path.write_text(unix_body, encoding='utf-8')\n"
+        "    try:\n"
+        "        unix_path.chmod(unix_path.stat().st_mode | 0o111)\n"
+        "    except OSError:\n"
+        "        pass\n\n"
+        "    cmd_path = bin_dir / f'{command}.cmd'\n"
+        "    cmd_body = '@echo off\\r\\n' f'sheriff {command} {handles_csv} %*\\r\\n'\n"
+        "    cmd_path.write_text(cmd_body, encoding='utf-8')\n\n"
+        "    print(str(unix_path))\n"
+        "    print(str(cmd_path))\n"
+        "    return 0\n\n"
+        "if __name__ == '__main__':\n"
+        "    raise SystemExit(main())\n"
     ),
     "skills/task-manager/manifest.json": (
         '{\n'
@@ -128,9 +194,9 @@ DEFAULT_TEXT_FILES = {
     "skills/sheriff/manifest.json": (
         '{\n'
         '  "skill_id": "sheriff",\n'
-        '  "description": "Placeholder Sheriff integration guidance",\n'
+        '  "description": "Sheriff PATH-shim and secret-request workflow guidance",\n'
         '  "command": "python -c \\"print(\'sheriff guidance only\')\\"",\n'
-        '  "tags": ["sheriff", "future"]\n'
+        '  "tags": ["sheriff", "secrets", "commands"]\n'
         '}\n'
     ),
 }

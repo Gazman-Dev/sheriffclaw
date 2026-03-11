@@ -11,12 +11,17 @@ def tools_svc(tmp_path, monkeypatch):
     monkeypatch.setattr("services.sheriff_tools.service.gw_root", lambda: tmp_path)
     svc = SheriffToolsService()
     svc.policy = AsyncMock()
+    svc.requests = AsyncMock()
+    svc.secrets = AsyncMock()
     return svc
 
 
 @pytest.mark.asyncio
 async def test_exec_tool_allowed(tools_svc):
     tools_svc.policy.request.return_value = (None, {"result": {"decision": "ALLOW"}})
+    tools_svc.secrets.request.side_effect = [
+        (None, {"result": {"unlocked": True}}),
+    ]
     result = await tools_svc.exec_tool({"principal_id": "u1", "argv": [sys.executable, "-c", "print('ok')"]}, None,
                                        "r1")
     assert result["status"] == "executed"
@@ -27,6 +32,51 @@ async def test_exec_tool_denied_returns_needs_tool_approval(tools_svc):
     tools_svc.policy.request.return_value = (None, {"result": {"decision": "DENY"}})
     result = await tools_svc.exec_tool({"principal_id": "u1", "argv": ["rm", "-rf", "/"]}, None, "r1")
     assert result == {"status": "needs_tool_approval", "tool": "rm"}
+    tools_svc.requests.request.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_exec_tool_with_missing_secret_creates_request(tools_svc):
+    tools_svc.policy.request.return_value = (None, {"result": {"decision": "ALLOW"}})
+    tools_svc.secrets.request.side_effect = [
+        (None, {"result": {"unlocked": True}}),
+        (None, {"result": {"value": None}}),
+    ]
+    result = await tools_svc.exec_tool(
+        {"principal_id": "u1", "argv": ["git", "clone", "x"], "env_handles": ["GIT_TOKEN"]},
+        None,
+        "r1",
+    )
+    assert result == {"status": "needs_secret", "missing_handles": ["GIT_TOKEN"]}
+    tools_svc.requests.request.assert_any_await(
+        "requests.create_or_update",
+        {
+            "type": "secret",
+            "key": "GIT_TOKEN",
+            "one_liner": "Need GIT_TOKEN to run git clone x",
+            "context": {"title": "GIT_TOKEN", "tool": "git", "argv": ["git", "clone", "x"]},
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_exec_tool_with_secret_env_uses_value(tools_svc):
+    tools_svc.policy.request.return_value = (None, {"result": {"decision": "ALLOW"}})
+    tools_svc.secrets.request.side_effect = [
+        (None, {"result": {"unlocked": True}}),
+        (None, {"result": {"value": "top-secret"}}),
+    ]
+    result = await tools_svc.exec_tool(
+        {
+            "principal_id": "u1",
+            "argv": [sys.executable, "-c", "import os; print(os.environ['GIT_TOKEN'])"],
+            "env_handles": ["GIT_TOKEN"],
+        },
+        None,
+        "r1",
+    )
+    assert result["status"] == "executed"
+    assert "top-secret" in result["stdout"]
 
 
 @pytest.mark.asyncio

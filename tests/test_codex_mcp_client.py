@@ -76,3 +76,25 @@ def test_client_uses_json_line_framing_for_send_and_recv(tmp_path):
     assert result["protocolVersion"] == "2024-11-05"
     sent = json.loads(written.decode("utf-8").strip())
     assert sent["method"] == "initialize"
+
+
+def test_client_handles_server_request_before_matching_response(tmp_path):
+    client = CodexMCPClient(Path(tmp_path), cwd=tmp_path)
+    client.proc = _FakeProc(
+        [
+            b'{"jsonrpc":"2.0","id":0,"method":"roots/list","params":{}}\n',
+            b'{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}\n',
+        ]
+    )
+
+    async def _run():
+        result = await client._request("tools/list", {})
+        writes = [json.loads(item.decode("utf-8").strip()) for item in client.proc.stdin.writes]
+        return result, writes
+
+    result, writes = asyncio.run(_run())
+
+    assert result == {"tools": []}
+    assert writes[0]["method"] == "tools/list"
+    assert writes[1]["id"] == 0
+    assert writes[1]["result"]["roots"][0]["uri"].startswith("file:")

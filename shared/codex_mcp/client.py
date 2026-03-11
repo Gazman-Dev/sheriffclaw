@@ -129,10 +129,13 @@ class CodexMCPClient:
             await self._send({"jsonrpc": JSONRPC_VERSION, "id": req_id, "method": method, "params": params})
             while True:
                 message = await self._recv()
+                if "method" in message:
+                    await self._handle_server_request(message)
+                    continue
                 if "id" not in message:
                     continue
                 if message.get("id") != req_id:
-                    raise CodexMCPError(f"unexpected response id: {message.get('id')}")
+                    continue
                 if "error" in message:
                     error = message["error"]
                     if isinstance(error, dict):
@@ -144,6 +147,38 @@ class CodexMCPClient:
                 if not isinstance(result, dict):
                     raise CodexMCPError("invalid JSON-RPC result payload")
                 return result
+
+    async def _handle_server_request(self, message: dict[str, Any]) -> None:
+        method = str(message.get("method") or "")
+        req_id = message.get("id")
+        if req_id is None:
+            return
+        if method == "ping":
+            await self._send({"jsonrpc": JSONRPC_VERSION, "id": req_id, "result": {}})
+            return
+        if method == "roots/list":
+            await self._send(
+                {
+                    "jsonrpc": JSONRPC_VERSION,
+                    "id": req_id,
+                    "result": {
+                        "roots": [
+                            {
+                                "uri": self.cwd.resolve().as_uri(),
+                                "name": self.cwd.resolve().name,
+                            }
+                        ]
+                    },
+                }
+            )
+            return
+        await self._send(
+            {
+                "jsonrpc": JSONRPC_VERSION,
+                "id": req_id,
+                "error": {"code": -32601, "message": f"unsupported client method: {method}"},
+            }
+        )
 
     async def _send(self, payload: dict[str, Any]) -> None:
         proc = self.proc

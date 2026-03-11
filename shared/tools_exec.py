@@ -10,12 +10,19 @@ class ToolExecutor:
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def exec(self, argv: list[str], stdin: str = "") -> dict:
+    def exec(self, argv: list[str], stdin: str = "", env: dict[str, str] | None = None) -> dict:
         if not argv:
             raise ValueError("argv required")
         if any(tok in {"|", ";", "&&", "||"} for tok in argv):
             raise ValueError("shell tokens are not allowed")
-        proc = subprocess.run(argv, input=stdin, text=True, capture_output=True, check=False)  # noqa: S603
+        proc = subprocess.run(  # noqa: S603
+            argv,
+            input=stdin,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=env,
+        )
         return {"code": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
 
     def save_output(self, run_id: str, result: dict) -> None:

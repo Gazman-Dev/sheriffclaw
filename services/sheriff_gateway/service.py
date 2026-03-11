@@ -357,13 +357,27 @@ class SheriffGatewayService:
         _, st = await self.secrets.request("secrets.activation.status", {"bot_role": "llm"})
         user_id = st.get("result", {}).get("user_id") or "system"
 
+        req_type = payload.get("type")
+        key = payload.get("key")
+        status = payload.get("status")
+        if req_type == "secret" and status == "approved":
+            intro = f'Sheriff: user provided secret "{key}". Retry the blocked work if it is still needed.'
+        elif req_type == "secret" and status == "denied":
+            intro = f'Sheriff: user denied secret "{key}". Do not assume you can use it.'
+        elif req_type == "tool" and status == "approved":
+            intro = f'Sheriff: user approved tool "{key}". Retry the blocked command if it is still needed.'
+        elif req_type == "tool" and status == "denied":
+            intro = f'Sheriff: user denied tool "{key}". Choose another approach.'
+        else:
+            intro = "Sheriff: a request resolution event occurred."
+
         trigger_msg = (
-            "A Sheriff request resolution event occurred.\n"
-            "Review the repository tasks and memory, update them if warranted, and then respond appropriately.\n\n"
+            f"{intro}\n\n"
+            "Review repo state and continue the task appropriately.\n\n"
             "## Request Resolution Event\n"
-            f"- type: {payload.get('type')}\n"
-            f"- key: {payload.get('key')}\n"
-            f"- status: {payload.get('status')}\n"
+            f"- type: {req_type}\n"
+            f"- key: {key}\n"
+            f"- status: {status}\n"
         )
 
         import asyncio

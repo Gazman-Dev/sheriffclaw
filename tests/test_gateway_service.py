@@ -1,5 +1,6 @@
 from unittest.mock import AsyncMock
 
+import asyncio
 import pytest
 
 from services.sheriff_gateway import service as gateway_service
@@ -275,6 +276,26 @@ async def test_gateway_secrets_call_rejects_non_allowlisted_op():
     out = await svc.secrets_call({"op": "secrets.delete_everything", "payload": {}}, None, "r1")
     assert out["ok"] is False
     assert out["error"] == "op_not_allowed"
+
+
+@pytest.mark.asyncio
+async def test_notify_request_resolved_uses_sheriff_wording_for_secret(monkeypatch):
+    svc = SheriffGatewayService()
+    svc.sessions = {"cli_main"}
+    svc.secrets.request = AsyncMock(return_value=(None, {"result": {"user_id": "user-1", "token": ""}}))
+
+    captured = {}
+
+    async def fake_handle(payload, emit_event, req_id):
+        captured["text"] = payload["text"]
+        return {"status": "done"}
+
+    monkeypatch.setattr("services.sheriff_gateway.service.append_jsonl", lambda *args, **kwargs: None)
+    svc.handle_user_message = fake_handle
+
+    await svc.notify_request_resolved({"type": "secret", "key": "GIT_TOKEN", "status": "approved"}, None, "r1")
+    await asyncio.sleep(0)
+    assert 'Sheriff: user provided secret "GIT_TOKEN"' in captured["text"]
 
 
 @pytest.mark.asyncio

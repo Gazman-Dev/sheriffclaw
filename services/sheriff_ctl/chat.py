@@ -5,6 +5,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
+import shutil
+import sys
 import time
 
 from services.sheriff_ctl.onboard import cmd_onboard
@@ -13,6 +16,7 @@ from shared.proc_rpc import ProcClient
 
 
 DEFAULT_CHAT_PRINCIPAL = "main"
+SECRET_HANDLES_RE = re.compile(r"^[A-Z_][A-Z0-9_]*(\s*,\s*[A-Z_][A-Z0-9_]*)*$")
 
 
 def cmd_entry(args):
@@ -31,6 +35,65 @@ def cmd_entry(args):
         return
 
     cmd_chat(argparse.Namespace(principal=DEFAULT_CHAT_PRINCIPAL, model_ref=None, one_shot=None))
+
+
+def maybe_parse_wrapped_command(argv: list[str]) -> dict | None:
+    if len(argv) < 3:
+        return None
+    command = str(argv[0]).strip()
+    handles_raw = str(argv[1]).strip()
+    if not command or shutil.which(command) is None:
+        return None
+    if not SECRET_HANDLES_RE.fullmatch(handles_raw):
+        return None
+    handles = [item.strip() for item in handles_raw.split(",") if item.strip()]
+    if not handles or len(argv) < 3:
+        return None
+    return {"argv": [command, *argv[2:]], "env_handles": handles}
+
+
+def cmd_wrapped_command(args):
+    async def _run() -> int:
+        cli = ProcClient("sheriff-tools")
+        _, res = await cli.request(
+            "tools.exec",
+            {
+                "principal_id": "default",
+                "argv": args.argv,
+                "env_handles": args.env_handles,
+            },
+        )
+        result = res.get("result", {})
+        status = result.get("status")
+        if status == "executed":
+            stdout = result.get("stdout") or ""
+            stderr = result.get("stderr") or ""
+            if stdout:
+                print(stdout, end="")
+            if stderr:
+                print(stderr, end="", file=sys.stderr)
+            return int(result.get("code", 1))
+        if status == "needs_secret":
+            handles = ", ".join(result.get("missing_handles") or args.env_handles)
+            print(
+                f"Sheriff is missing secret handle(s): {handles}. A request was sent to the user.",
+                file=sys.stderr,
+            )
+            return 3
+        if status == "master_password_required":
+            print("Sheriff vault is locked. Unlock it first.", file=sys.stderr)
+            return 4
+        if status == "needs_tool_approval":
+            print(
+                f'Sheriff needs approval to run tool "{result.get("tool")}". '
+                f'Wait for approval or use /allow-tool {result.get("tool")}.',
+                file=sys.stderr,
+            )
+            return 5
+        print(f"Sheriff command failed: {json.dumps(result, ensure_ascii=False)}", file=sys.stderr)
+        return 1
+
+    raise SystemExit(asyncio.run(_run()))
 
 
 def cmd_chat(args):

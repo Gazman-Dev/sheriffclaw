@@ -54,7 +54,7 @@ class SheriffCliGateService:
             if existing_pid and self._is_pid_running(existing_pid):
                 return {
                     "ok": False,
-                    "message": f"Update already running (pid {existing_pid}).",
+                    "message": f"Sheriff update is already running (pid {existing_pid}).",
                 }
             self.update_pid_path.unlink(missing_ok=True)
 
@@ -81,7 +81,8 @@ class SheriffCliGateService:
         return {
             "ok": True,
             "message": (
-                f"Remote update started (pid {proc.pid}). "
+                f"Sheriff update started in the background (pid {proc.pid}). "
+                f"You will get a completion message when it finishes. "
                 f"Logs: {out_path.name}, {err_path.name}"
             ),
         }

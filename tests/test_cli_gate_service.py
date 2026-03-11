@@ -157,6 +157,8 @@ async def test_update_command_starts_detached_update(monkeypatch, tmp_path):
     res = await svc.handle_message({"text": "/update no-pull force"}, None, "r1")
 
     assert res["kind"] == "sheriff"
+    assert "started in the background" in res["message"].lower()
+    assert "completion message" in res["message"].lower()
     assert "4321" in res["message"]
     assert "--no-pull" in captured["cmd"]
     assert "--force" in captured["cmd"]
@@ -175,3 +177,4 @@ async def test_update_command_rejects_running_update(monkeypatch, tmp_path):
 
     assert res["kind"] == "sheriff"
     assert "already running" in res["message"].lower()
+    assert "sheriff update" in res["message"].lower()

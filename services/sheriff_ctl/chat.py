@@ -12,11 +12,13 @@ import time
 
 from services.sheriff_ctl.onboard import cmd_onboard
 from services.sheriff_ctl.utils import _is_onboarded, _wait_extra_or_esc_until
+from shared.errors import ServiceCrashedError
 from shared.proc_rpc import ProcClient
 
 
 DEFAULT_CHAT_PRINCIPAL = "main"
 SECRET_HANDLES_RE = re.compile(r"^[A-Z_][A-Z0-9_]*(\s*,\s*[A-Z_][A-Z0-9_]*)*$")
+CHAT_REQUEST_TIMEOUT_SEC = 90.0
 
 
 def cmd_entry(args):
@@ -55,6 +57,7 @@ def maybe_parse_wrapped_command(argv: list[str]) -> dict | None:
 def cmd_wrapped_command(args):
     async def _run() -> int:
         cli = ProcClient("sheriff-tools")
+        cli.request_timeout_sec = CHAT_REQUEST_TIMEOUT_SEC
         _, res = await cli.request(
             "tools.exec",
             {
@@ -139,14 +142,23 @@ def cmd_chat(args):
     async def _run():
         nonlocal chat_master_password
         gateway = ProcClient("sheriff-gateway")
+        gateway.request_timeout_sec = CHAT_REQUEST_TIMEOUT_SEC
         cli_gate = ProcClient("sheriff-cli-gate")
 
         one_shot = getattr(args, "one_shot", None)
         if one_shot is not None:
-            if one_shot.startswith("/"):
-                last_activity = await _send_sheriff(cli_gate, one_shot)
-            else:
-                last_activity = await _send_bot(gateway, one_shot)
+            try:
+                if one_shot.startswith("/"):
+                    last_activity = await _send_sheriff(cli_gate, one_shot)
+                else:
+                    last_activity = await _send_bot(gateway, one_shot)
+            except ServiceCrashedError as e:
+                msg = str(e)
+                if "timeout" in msg.lower():
+                    print("[AGENT] Request timed out before the agent completed.")
+                else:
+                    print(f"[AGENT] Internal system error: {msg}")
+                return
             print("(waiting 10s after last response; press Esc to cancel)")
             await asyncio.to_thread(_wait_extra_or_esc_until, last_activity + 10)
             return
@@ -172,7 +184,14 @@ def cmd_chat(args):
                     chat_master_password = text.split(" ", 1)[1].strip() or None
                 await _send_sheriff(cli_gate, text)
             else:
-                await _send_bot(gateway, text)
+                try:
+                    await _send_bot(gateway, text)
+                except ServiceCrashedError as e:
+                    msg = str(e)
+                    if "timeout" in msg.lower():
+                        print("[AGENT] Request timed out before the agent completed.")
+                    else:
+                        print(f"[AGENT] Internal system error: {msg}")
 
     asyncio.run(_run())
 

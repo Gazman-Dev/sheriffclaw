@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from services.telegram_listener.service import TelegramListenerService
+from shared.errors import ServiceCrashedError
 
 
 @pytest.mark.asyncio
@@ -89,3 +90,26 @@ async def test_poll_bot_extracts_topic_metadata(monkeypatch, tmp_path):
 
     assert captured == [("llm-token", "sheriff-token", "42", -100, "hello topic", "supergroup", 9)]
     assert offsets["llm"] == 2
+
+
+@pytest.mark.asyncio
+async def test_handle_ai_message_timeout_surfaces_user_message(monkeypatch, tmp_path):
+    monkeypatch.setenv("SHERIFFCLAW_ROOT", str(tmp_path))
+    svc = TelegramListenerService()
+    sent = []
+    svc._send_message = lambda token, chat_id, text: sent.append((token, chat_id, text))
+
+    async def fake_secrets(op: str, payload: dict):
+        if op == "secrets.is_unlocked":
+            return {"unlocked": True}
+        if op == "secrets.activation.status":
+            return {"user_id": "u1"}
+        return {}
+
+    svc._secrets = fake_secrets
+    svc.gateway.request = AsyncMock(side_effect=ServiceCrashedError("rpc timeout waiting for sheriff-gateway"))
+
+    await svc._handle_ai_message("llm-token", "sheriff-token", "u1", 123, "hello")
+
+    assert sent
+    assert "timed out" in sent[-1][2].lower()

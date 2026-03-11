@@ -1,6 +1,7 @@
 import argparse
 
 from services.sheriff_ctl import chat
+from shared.errors import ServiceCrashedError
 
 
 class _DummyProcClient:
@@ -24,3 +25,16 @@ def test_cmd_chat_one_shot_auth_login_runs_local_login(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert calls["wait"] == 1
     assert "https://example.test" in out.lower()
+
+
+def test_cmd_chat_one_shot_timeout_prints_message(monkeypatch, capsys):
+    class _Proc:
+        request_timeout_sec = None
+
+        async def request(self, op, payload, stream_events=False):
+            raise ServiceCrashedError("rpc timeout waiting for sheriff-gateway")
+
+    monkeypatch.setattr(chat, "ProcClient", lambda name: _Proc())
+    chat.cmd_chat(argparse.Namespace(principal="main", model_ref=None, one_shot="hello"))
+    out = capsys.readouterr().out
+    assert "timed out" in out.lower()

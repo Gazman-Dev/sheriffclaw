@@ -6,9 +6,12 @@ import os
 
 import requests
 
+from shared.errors import ServiceCrashedError
 from shared.oplog import get_op_logger
 from shared.paths import gw_root
 from shared.proc_rpc import ProcClient
+
+CHAT_REQUEST_TIMEOUT_SEC = float(os.environ.get("SHERIFF_CHAT_REQUEST_TIMEOUT_SEC", "90"))
 
 
 class TelegramListenerService:
@@ -16,6 +19,7 @@ class TelegramListenerService:
         self.log = get_op_logger("telegram-listener", island="llm")
         self.log.info("telegram-listener boot (build=delta-fallback-v2)")
         self.gateway = ProcClient("sheriff-gateway", spawn_fallback=False)
+        self.gateway.request_timeout_sec = CHAT_REQUEST_TIMEOUT_SEC
         self.sheriff_gate = ProcClient("sheriff-tg-gate", spawn_fallback=False)
         self.cli_gate = ProcClient("sheriff-cli-gate", spawn_fallback=False)
         self.offset_path = gw_root() / "state" / "telegram_offsets.json"
@@ -216,6 +220,13 @@ class TelegramListenerService:
                     self._send_message(token, chat_id, msg)
             elif not reply:
                 self._send_message(token, chat_id, "⚠️ No response generated. Please try again in a moment.")
+        except ServiceCrashedError as e:
+            self.log.exception("ai_message transport failed user_id=%s err=%s", user_id, e)
+            message = str(e)
+            if "timeout" in message.lower():
+                self._send_message(token, chat_id, "Agent request timed out before completing. Please try again.")
+            else:
+                self._send_message(token, chat_id, f"Internal system error processing your request: {message}")
         except Exception as e:
             self.log.exception("ai_message handler failed user_id=%s err=%s", user_id, e)
             self._send_message(token, chat_id, f"⚠️ Internal system error processing your request: {e}")

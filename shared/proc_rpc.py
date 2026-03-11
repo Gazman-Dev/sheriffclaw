@@ -13,6 +13,8 @@ from shared.errors import ProtocolError, ServiceCrashedError
 from shared.ndjson import encode_frame
 from shared.service_registry import rpc_endpoint
 
+RPC_STREAM_LIMIT = 10 * 1024 * 1024
+
 
 class ProcClient:
     def __init__(self, binary: str, *, cwd=None, env=None, spawn_fallback: bool = True):
@@ -44,7 +46,7 @@ class ProcClient:
         endpoint = rpc_endpoint(self.binary)
         if endpoint is not None:
             try:
-                self.reader, self.writer = await asyncio.open_connection(*endpoint)
+                self.reader, self.writer = await asyncio.open_connection(*endpoint, limit=RPC_STREAM_LIMIT)
                 return
             except OSError as exc:
                 self.reader = None
@@ -63,7 +65,7 @@ class ProcClient:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            limit=10 * 1024 * 1024,  # Increase limit to 10MB to handle large payloads
+            limit=RPC_STREAM_LIMIT,
             cwd=self.cwd,
             env=self.env,
         )

@@ -81,3 +81,28 @@ def test_rpc_endpoint_is_none_for_non_rpc_listener():
     from shared.service_registry import rpc_endpoint
 
     assert rpc_endpoint("telegram-listener") is None
+
+
+@pytest.mark.asyncio
+async def test_proc_client_tcp_handles_large_ndjson_frame(monkeypatch):
+    port = _free_port()
+    large_text = "x" * (128 * 1024)
+    app = NDJSONService(
+        name="test",
+        island="gw",
+        kind="service",
+        version="1",
+        ops={"echo": lambda payload, emit, req_id: asyncio.sleep(0, result={"echo": large_text})},
+    )
+    server_task = asyncio.create_task(app.run_tcp("127.0.0.1", port))
+    await asyncio.sleep(0.1)
+    monkeypatch.setattr("shared.proc_rpc.rpc_endpoint", lambda service: ("127.0.0.1", port) if service == "dummy" else None)
+    client = ProcClient("dummy", spawn_fallback=False)
+    try:
+        _, res = await client.request("echo", {"text": "hello"})
+        assert res["result"]["echo"] == large_text
+    finally:
+        await client.close()
+        server_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await server_task

@@ -12,6 +12,7 @@ from shared.ndjson import encode_frame
 from shared.protocol import error_response, ok_response
 
 Handler = Callable[[dict[str, Any], Callable[[str, dict[str, Any]], Awaitable[None]], str], Awaitable[dict[str, Any]]]
+RPC_STREAM_LIMIT = 10 * 1024 * 1024
 
 
 class NDJSONService:
@@ -58,8 +59,7 @@ class NDJSONService:
             await write_frame(error_response(req_id, str(exc), exc.__class__.__name__))
 
     async def run_stdio(self) -> None:
-        # Increase line reading limit to 10MB to handle large state payloads (like codex-cli auth bundle)
-        reader = asyncio.StreamReader(limit=10 * 1024 * 1024)
+        reader = asyncio.StreamReader(limit=RPC_STREAM_LIMIT)
         protocol = asyncio.StreamReaderProtocol(reader)
         await asyncio.get_running_loop().connect_read_pipe(lambda: protocol, sys.stdin)
         stdout = sys.stdout.buffer
@@ -99,6 +99,6 @@ class NDJSONService:
                 except Exception:
                     pass
 
-        server = await asyncio.start_server(handle_client, host, port)
+        server = await asyncio.start_server(handle_client, host, port, limit=RPC_STREAM_LIMIT)
         async with server:
             await server.serve_forever()
